@@ -1,0 +1,15 @@
+{
+  "name": "maatgen",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "corepack pnpm -r build && go -C apps/agent-manager build ./...",
+    "test": "corepack pnpm -r test && go -C apps/agent-manager test ./...",
+    "test:go": "go -C apps/agent-manager test ./...",
+    "typecheck": "corepack pnpm -r typecheck"
+  }
+}

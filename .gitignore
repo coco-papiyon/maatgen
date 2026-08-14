@@ -1,0 +1,18 @@
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+*.log
+
+# Go
+bin/
+*.test
+.gocache/
+
+# Runtime data
+.maatgen/
+
+# Editors and OS files
+.vscode-test/
+.DS_Store
+Thumbs.db
