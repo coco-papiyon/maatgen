@@ -65,9 +65,15 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
           void this.syncSession();
         } else if (message.type === 'run.prompt') {
           void this.startRun(message.message);
-        } else if (message.type === 'provider.select' && !this.session) {
+        } else if (message.type === 'provider.select') {
+          // When the provider is switched, always start a new session with the selected provider.
           this.selectedProvider = message.provider;
           this.selectedModel = '';
+          // Clear any selected/active session so syncSession will create a new one for the chosen provider.
+          this.selectedSessionId = undefined;
+          this.session = undefined;
+          this.events = [];
+          this.activeRunId = undefined;
           void this.syncSession();
         } else if (message.type === 'model.select') {
           this.selectedModel = message.model;
