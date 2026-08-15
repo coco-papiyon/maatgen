@@ -92,6 +92,26 @@ func (s *Store) initialize(ctx context.Context) error {
 	return nil
 }
 
+// DeleteEmptySessions removes sessions that have no runs and no events.
+// Returns the number of deleted sessions.
+func (s *Store) DeleteEmptySessions(ctx context.Context) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM sessions WHERE id IN (
+			SELECT s.id FROM sessions s
+			LEFT JOIN runs r ON r.session_id = s.id
+			LEFT JOIN events e ON e.session_id = s.id
+			WHERE r.id IS NULL AND e.id IS NULL
+		)`)
+	if err != nil {
+		return 0, fmt.Errorf("delete empty sessions: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete empty sessions rows affected: %w", err)
+	}
+	return affected, nil
+}
+
 func (s *Store) migrate(ctx context.Context) error {
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {

@@ -97,6 +97,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("open storage: %w", err)
 	}
+	// Remove empty sessions (no runs and no events) created previously by the manager.
+	deleted, err := store.DeleteEmptySessions(context.Background())
+	if err != nil {
+		return fmt.Errorf("delete empty sessions: %w", err)
+	}
+	if deleted > 0 {
+		slog.Info("removed empty sessions", "count", deleted)
+	}
 	defer store.Close()
 	checkpointManager, err := checkpoint.New()
 	if err != nil {
