@@ -359,7 +359,12 @@ function startSessionPolling() {
 
 onMounted(async () => {
   await act(async () => {
-    const [catalog] = await Promise.all([api.listProviders(), refreshSessions(true)]);
+    const [catalog, defaultWorkspace] = await Promise.all([
+      api.listProviders(),
+      api.getDefaultWorkspace(),
+      refreshSessions(true),
+    ]);
+    workspace.value = defaultWorkspace;
     providers.value = catalog.providers;
     if (!providers.value.some((provider) => provider.id === newSessionProvider.value) && providers.value[0]) {
       newSessionProvider.value = providers.value[0].id;

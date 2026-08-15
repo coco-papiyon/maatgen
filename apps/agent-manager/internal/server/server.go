@@ -20,6 +20,7 @@ import (
 type Config struct {
 	Version          string
 	SchemaVersion    int
+	DefaultWorkspace string
 	AuthToken        string
 	AllowedOrigins   []string
 	TicketTTL        time.Duration
@@ -37,6 +38,10 @@ type HealthResponse struct {
 	Version       string    `json:"version"`
 	SchemaVersion int       `json:"schemaVersion"`
 	Time          time.Time `json:"time"`
+}
+
+type RuntimeConfigResponse struct {
+	DefaultWorkspace string `json:"defaultWorkspace"`
 }
 
 type SessionReader interface {
@@ -104,6 +109,9 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			Time:          time.Now().UTC(),
 		})
 	})
+	mux.Handle("GET /api/v1/runtime-config", authenticate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, RuntimeConfigResponse{DefaultWorkspace: config.DefaultWorkspace})
+	})))
 	mux.Handle("GET /api/v1/providers", authenticate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		providers := config.Providers
 		if providers == nil {

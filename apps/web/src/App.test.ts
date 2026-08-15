@@ -28,6 +28,12 @@ const passiveEventStream: EventStreamFactory = (options) => ({
 });
 
 describe('App with MockAgentApi', () => {
+  it('uses the manager launch directory as the initial repository path', async () => {
+    const mounted = await mountApp();
+    expect((mounted.wrapper.find('#workspace').element as HTMLInputElement).value)
+      .toBe('C:/demo/current-repository');
+  });
+
   it('renders session history, timeline events, changes, and live state', async () => {
     const mounted = await mountApp();
     expect(mounted.wrapper.find('.error-banner').exists() ? mounted.wrapper.find('.error-banner').text() : '').toBe('');

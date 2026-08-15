@@ -11,6 +11,7 @@ import type {
 } from '@maatgen/protocol';
 
 export interface AgentApi {
+  getDefaultWorkspace(): Promise<string>;
   listProviders(): Promise<ProviderListResponse>;
   listSessions(cursor?: string, limit?: number): Promise<SessionListResponse>;
   createSession(request: CreateSessionRequest): Promise<AgentSession>;
@@ -65,6 +66,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const httpAgentApi: AgentApi = {
+  async getDefaultWorkspace() {
+    const config = await request<{ defaultWorkspace: string }>('/api/v1/runtime-config');
+    return config.defaultWorkspace;
+  },
   listProviders() {
     return request('/api/v1/providers');
   },

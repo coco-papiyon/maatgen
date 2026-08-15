@@ -39,6 +39,31 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfig(t *testing.T) {
+	config := testConfig()
+	config.DefaultWorkspace = "C:/projects/example"
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/runtime-config"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var response RuntimeConfigResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.DefaultWorkspace != "C:/projects/example" {
+		t.Fatalf("default workspace = %q, want C:/projects/example", response.DefaultWorkspace)
+	}
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/runtime-config", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want %d", unauthorized.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestProviderCatalog(t *testing.T) {
 	config := testConfig()
 	config.Providers = []protocol.Provider{{ID: protocol.AgentCodex, Label: "Codex", Models: []string{"model-a"}}}

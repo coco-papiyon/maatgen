@@ -4,6 +4,16 @@ import { AgentApiError, httpAgentApi } from './api';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('httpAgentApi', () => {
+  it('reads the default workspace from manager runtime configuration', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      defaultWorkspace: 'C:/projects/current',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+
+    await expect(httpAgentApi.getDefaultWorkspace()).resolves.toBe('C:/projects/current');
+    expect(fetch).toHaveBeenCalledWith('/api/v1/runtime-config', expect.any(Object));
+  });
+
   it('requests an opaque session cursor and returns the next page cursor', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       sessions: [],

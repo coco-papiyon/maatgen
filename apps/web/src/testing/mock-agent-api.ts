@@ -31,6 +31,10 @@ export class MockAgentApi implements AgentApi {
     }
   }
 
+  async getDefaultWorkspace() {
+    return 'C:/demo/current-repository';
+  }
+
   async listProviders() {
     return { providers: [{ id: 'codex' as const, label: 'Codex', models: ['gpt-5.6-sol'] }] };
   }

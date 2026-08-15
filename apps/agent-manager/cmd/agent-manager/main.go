@@ -39,6 +39,10 @@ func main() {
 }
 
 func run() error {
+	defaultWorkspace, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve current directory: %w", err)
+	}
 	host := flag.String("host", "127.0.0.1", "listen host")
 	port := flag.Int("port", 3100, "listen port; use 0 for an ephemeral port")
 	defaultDir, err := defaultDataDir()
@@ -129,6 +133,7 @@ func run() error {
 		Handler: server.New(server.Config{
 			Version:          version,
 			SchemaVersion:    protocol.SchemaVersion,
+			DefaultWorkspace: defaultWorkspace,
 			AuthToken:        *authToken,
 			AllowedOrigins:   splitNonEmpty(*allowedOrigins),
 			EventSubscriber:  broker,
