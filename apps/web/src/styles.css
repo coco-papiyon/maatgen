@@ -14,7 +14,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; overflow: hidden; }
-button, input, textarea { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 
 .app-shell {
@@ -51,11 +51,14 @@ button { color: inherit; }
 
 .new-session { padding: 15px; border-bottom: 1px solid var(--line); }
 .new-session label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 11px; }
+.provider-fields { margin-bottom: 10px; }
+.provider-fields label { margin: 0; }
 .field-row { display: flex; gap: 7px; }
-input, textarea { width: 100%; border: 1px solid #2b372d; border-radius: 6px; outline: none; color: #e4eee5; background: #0e140f; transition: border-color .15s, box-shadow .15s; }
+input, textarea, select { width: 100%; border: 1px solid #2b372d; border-radius: 6px; outline: none; color: #e4eee5; background: #0e140f; transition: border-color .15s, box-shadow .15s; }
 input { min-width: 0; padding: 9px 10px; font: 11px ui-monospace, monospace; }
+select { padding: 8px 28px 8px 9px; font: 10px ui-monospace, monospace; }
 textarea { padding: 13px 14px; resize: none; line-height: 1.55; }
-input:focus, textarea:focus { border-color: #4d8b5d; box-shadow: 0 0 0 3px rgba(87, 212, 123, .08); }
+input:focus, textarea:focus, select:focus { border-color: #4d8b5d; box-shadow: 0 0 0 3px rgba(87, 212, 123, .08); }
 .icon-button { flex: 0 0 35px; border: 0; border-radius: 6px; background: var(--green); color: #101611; font-size: 20px; cursor: pointer; }
 button:disabled { opacity: .42; cursor: not-allowed; }
 
@@ -105,6 +108,9 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .composer { margin: 0 max(20px, 6vw) 22px; padding: 8px; border: 1px solid #344137; border-radius: 10px; background: #111813; box-shadow: 0 18px 50px rgba(0, 0, 0, .25); }
 .composer textarea { border: 0; background: transparent; box-shadow: none; }
 .composer-actions { display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 2px 10px; color: #5f6c61; font: 9px ui-monospace, monospace; }
+.run-options { display: flex; align-items: center; gap: 8px; }
+.run-options > span { color: #89958b; }
+.run-options select { width: auto; min-width: 150px; padding-block: 6px; }
 .send-button, .stop-button { padding: 8px 12px; border: 0; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 700; }
 .send-button { background: var(--green); color: #0d150f; }.send-button span { margin-left: 6px; }
 .stop-button { background: #522b26; color: #ffc0b8; }

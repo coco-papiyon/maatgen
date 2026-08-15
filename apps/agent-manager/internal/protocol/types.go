@@ -11,6 +11,16 @@ type AgentName string
 
 const AgentCodex AgentName = "codex"
 
+type Provider struct {
+	ID     AgentName `json:"id"`
+	Label  string    `json:"label"`
+	Models []string  `json:"models"`
+}
+
+type ProviderListResponse struct {
+	Providers []Provider `json:"providers"`
+}
+
 type SessionStatus string
 
 const (

@@ -31,6 +31,10 @@ export class MockAgentApi implements AgentApi {
     }
   }
 
+  async listProviders() {
+    return { providers: [{ id: 'codex' as const, label: 'Codex', models: ['gpt-5.6-sol'] }] };
+  }
+
   async listSessions(cursor?: string, limit = 25) {
     const offset = cursor ? Number.parseInt(cursor, 10) : 0;
     const sessions = [...this.sessions.values()];

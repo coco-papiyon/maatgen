@@ -29,6 +29,7 @@ type Config struct {
 	RunController    RunController
 	ChangeReader     ChangeReader
 	ReviewController ReviewController
+	Providers        []protocol.Provider
 }
 
 type HealthResponse struct {
@@ -103,6 +104,13 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			Time:          time.Now().UTC(),
 		})
 	})
+	mux.Handle("GET /api/v1/providers", authenticate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providers := config.Providers
+		if providers == nil {
+			providers = []protocol.Provider{}
+		}
+		writeJSON(w, http.StatusOK, protocol.ProviderListResponse{Providers: providers})
+	})))
 	if config.SessionCreator != nil {
 		mux.Handle("POST /api/v1/sessions", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var request protocol.CreateSessionRequest

@@ -26,6 +26,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/server"
 	sessionservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/session"
 	storesqlite "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage/sqlite"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/toolconfig"
 )
 
 var version = "dev"
@@ -48,7 +49,24 @@ func run() error {
 	runtimeFile := flag.String("runtime-file", "", "path for runtime metadata; defaults to <data-dir>/runtime.json")
 	authToken := flag.String("auth-token", "", "bearer token; generated when omitted")
 	allowedOrigins := flag.String("allowed-origins", "http://localhost:5173,http://127.0.0.1:5173", "comma-separated browser origins")
+	configFile := flag.String("config", toolconfig.DefaultRelativePath, "tool configuration path relative to the executable")
 	flag.Parse()
+	executablePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable path: %w", err)
+	}
+	toolConfig, resolvedConfigPath, err := toolconfig.Load(executablePath, *configFile)
+	if err != nil {
+		return err
+	}
+	discoveryCtx, cancelDiscovery := context.WithTimeout(context.Background(), 5*time.Second)
+	discoveredModels, discoveryErr := toolconfig.DiscoverCodexModels(discoveryCtx, "codex")
+	cancelDiscovery()
+	if discoveryErr == nil {
+		toolConfig = toolconfig.ApplyCodexModels(toolConfig, discoveredModels)
+	} else {
+		slog.Debug("using configured Codex models", "error", discoveryErr)
+	}
 	if *runtimeFile == "" {
 		*runtimeFile = filepath.Join(*dataDir, "runtime.json")
 	}
@@ -119,11 +137,12 @@ func run() error {
 			RunController:    runs,
 			ChangeReader:     store,
 			ReviewController: reviews,
+			Providers:        toolConfig.Providers,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	slog.Info("agent manager listening", "address", listener.Addr().String(), "version", version, "runtime_file", *runtimeFile)
+	slog.Info("agent manager listening", "address", listener.Addr().String(), "version", version, "runtime_file", *runtimeFile, "config_file", resolvedConfigPath)
 
 	serveErr := make(chan error, 1)
 	go func() {

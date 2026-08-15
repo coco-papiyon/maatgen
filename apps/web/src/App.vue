@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AgentRun, AgentSession, ChangeSet, SessionEvent } from '@maatgen/protocol';
+import type { AgentRun, AgentSession, ChangeSet, Provider, SessionEvent } from '@maatgen/protocol';
 import { AgentApiError, httpAgentApi, type AgentApi } from './api';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 
@@ -12,6 +12,9 @@ const api = props.agentApi ?? httpAgentApi;
 const createEventStream = props.eventStreamFactory ?? ((options) => new SessionEventStream(options));
 
 const sessions = ref<AgentSession[]>([]);
+const providers = ref<Provider[]>([]);
+const newSessionProvider = ref<AgentSession['agent']>('codex');
+const selectedModel = ref('');
 const nextSessionCursor = ref('');
 const loadingMoreSessions = ref(false);
 const selected = ref<AgentSession>();
@@ -32,13 +35,16 @@ let eventStream: EventStreamLike | undefined;
 const lastSequence = computed(() => events.value.at(-1)?.sequence ?? 0);
 const isActive = computed(() => selected.value?.status === 'active');
 const selectedChange = computed(() => changes.value.files.find((file) => file.id === selectedChangeId.value));
+const activeProvider = computed(() => selected.value?.agent ?? newSessionProvider.value);
+const availableModels = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.models ?? []);
+const providerLabel = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.label ?? activeProvider.value);
 const pendingReviews = computed(() => changes.value.files.reduce((total, file) => {
   if (file.reviewMode === 'file') return total + (file.status === 'pending' ? 1 : 0);
   return total + file.hunks.filter((hunk) => hunk.status === 'pending').length;
 }, 0));
 const statusLabel = computed(() => {
   if (!selected.value) return '待機中';
-  if (activeRun.value) return 'Codex 実行中';
+  if (activeRun.value) return `${providerLabel.value} 実行中`;
   if (selected.value.cleanupStatus === 'failed') return 'Cleanup 要再試行';
   return selected.value.status === 'active' ? '準備完了' : '終了済み';
 });
@@ -54,7 +60,7 @@ function eventText(event: SessionEvent): string {
   if (typeof data?.text === 'string') return data.text;
   if (typeof data?.message === 'string') return data.message;
   if (typeof data?.command === 'string') return data.command;
-  if (event.type === 'run_started') return 'Codexが作業を開始しました';
+  if (event.type === 'run_started') return `${providerLabel.value}が作業を開始しました`;
   if (event.type === 'run_completed') return 'Runが完了しました';
   if (event.type === 'run_cancelled') return 'Runをキャンセルしました';
   if (event.type === 'usage_reported') {
@@ -117,6 +123,7 @@ async function selectSession(session: AgentSession) {
   eventStream?.stop();
   eventStream = undefined;
   selected.value = session;
+  if (selectedModel.value && !availableModels.value.includes(selectedModel.value)) selectedModel.value = '';
   events.value = [];
   changes.value = { sessionId: session.id, files: [] };
   activeRun.value = undefined;
@@ -193,7 +200,7 @@ function startEventStream(sessionId: string) {
 async function createSession() {
   if (!workspace.value.trim()) return;
   await act(async () => {
-    const created = await api.createSession({ agent: 'codex', workspace: workspace.value.trim() });
+    const created = await api.createSession({ agent: newSessionProvider.value, workspace: workspace.value.trim() });
     workspace.value = '';
     await refreshSessions(true);
     await selectSession(created);
@@ -205,7 +212,10 @@ async function sendPrompt() {
   const message = prompt.value.trim();
   prompt.value = '';
   await act(async () => {
-    activeRun.value = await api.sendMessage(selected.value!.id, { message });
+    activeRun.value = await api.sendMessage(selected.value!.id, {
+      message,
+      ...(selectedModel.value ? { model: selectedModel.value } : {}),
+    });
     await refreshSelected();
   });
 }
@@ -323,7 +333,11 @@ function startSessionPolling() {
 
 onMounted(async () => {
   await act(async () => {
-    await refreshSessions(true);
+    const [catalog] = await Promise.all([api.listProviders(), refreshSessions(true)]);
+    providers.value = catalog.providers;
+    if (!providers.value.some((provider) => provider.id === newSessionProvider.value) && providers.value[0]) {
+      newSessionProvider.value = providers.value[0].id;
+    }
     const firstActive = sessions.value.find((session) => session.status === 'active') ?? sessions.value[0];
     if (firstActive) await selectSession(firstActive);
   });
@@ -351,6 +365,13 @@ onBeforeUnmount(() => {
         <span>Sessions</span><span class="count">{{ sessions.length }}</span>
       </div>
       <form class="new-session" @submit.prevent="createSession">
+        <div class="provider-fields">
+          <label>Provider
+            <select v-model="newSessionProvider" :disabled="busy || providers.length < 2">
+              <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+            </select>
+          </label>
+        </div>
         <label for="workspace">Repository path</label>
         <div class="field-row">
           <input id="workspace" v-model="workspace" placeholder="C:/path/to/repository" :disabled="busy" />
@@ -394,15 +415,15 @@ onBeforeUnmount(() => {
       <section v-if="selected" class="timeline" aria-live="polite">
         <div v-if="events.length === 0" class="empty-state compact">
           <span class="empty-symbol">⌁</span>
-          <h2>Codexに最初の指示を送る</h2>
+          <h2>{{ providerLabel }}に最初の指示を送る</h2>
           <p>このSession専用のworktreeで安全に作業します。</p>
         </div>
         <article v-for="event in events" :key="event.id" class="event" :class="eventKind(event)">
-          <div class="event-label">{{ eventKind(event) === 'assistant' ? 'CODEX' : eventKind(event).toUpperCase() }}</div>
+          <div class="event-label">{{ eventKind(event) === 'assistant' ? providerLabel.toUpperCase() : eventKind(event).toUpperCase() }}</div>
           <div class="event-body">{{ eventText(event) }}</div>
           <time>{{ new Date(event.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>
         </article>
-        <div v-if="activeRun" class="thinking"><span /><span /><span /> Codex is working</div>
+        <div v-if="activeRun" class="thinking"><span /><span /><span /> {{ providerLabel }} is working</div>
       </section>
 
       <section v-else class="empty-state hero">
@@ -412,11 +433,17 @@ onBeforeUnmount(() => {
       </section>
 
       <form v-if="selected && isActive" class="composer" @submit.prevent="sendPrompt">
-        <textarea v-model="prompt" rows="2" placeholder="Codexに変更内容を伝える…" :disabled="busy || !!activeRun" @keydown.ctrl.enter="sendPrompt" />
+        <textarea v-model="prompt" rows="2" :placeholder="`${providerLabel}に変更内容を伝える…`" :disabled="busy || !!activeRun" @keydown.ctrl.enter="sendPrompt" />
         <div class="composer-actions">
-          <span>Ctrl + Enterで送信</span>
+          <div class="run-options">
+            <span>{{ providerLabel }}</span>
+            <select v-model="selectedModel" :disabled="busy || !!activeRun" aria-label="Model">
+              <option value="">Default model</option>
+              <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
+            </select>
+          </div>
           <button v-if="activeRun" type="button" class="stop-button" @click="cancelRun">Stop</button>
-          <button v-else type="submit" class="send-button" :disabled="busy || !prompt.trim()">Run Codex <span>↗</span></button>
+          <button v-else type="submit" class="send-button" :disabled="busy || !prompt.trim()">Run {{ providerLabel }} <span>↗</span></button>
         </div>
       </form>
     </main>

@@ -10,6 +10,7 @@ import type {
 } from './generated/change-set.js';
 import type { CreateSessionRequest as GeneratedCreateSessionRequest } from './generated/create-session-request.js';
 import type { EventListResponse as GeneratedEventListResponse } from './generated/event-list.js';
+import type { ProviderListResponse as GeneratedProviderListResponse } from './generated/provider-list.js';
 import type { SendMessageRequest as GeneratedSendMessageRequest } from './generated/send-message-request.js';
 import type { SessionEvent as GeneratedSessionEvent } from './generated/session-event.js';
 import type { SessionListResponse as GeneratedSessionListResponse } from './generated/session-list.js';
@@ -45,4 +46,6 @@ export type ApiErrorResponse = GeneratedApiErrorResponse;
 export type ApiErrorBody = ApiErrorResponse['error'];
 export type SessionListResponse = GeneratedSessionListResponse;
 export type EventListResponse = GeneratedEventListResponse;
+export type ProviderListResponse = GeneratedProviderListResponse;
+export type Provider = ProviderListResponse['providers'][number];
 export type WsTicketResponse = GeneratedWsTicketResponse;

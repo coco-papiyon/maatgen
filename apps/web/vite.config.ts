@@ -12,6 +12,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Keep the running UI fixed until the Vite process is restarted.
+    hmr: false,
+    watch: null,
     proxy: {
       '/api': {
         target: managerTarget,

@@ -35,6 +35,21 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
   });
 
+  it('selects a configured model for the next run', async () => {
+    const mounted = await mountApp();
+    const send = vi.spyOn(mounted.environment.agentApi, 'sendMessage').mockResolvedValue({
+      id: 'run-model', sessionId: 'mock-success', status: 'running', prompt: 'モデル指定のテスト',
+    });
+    await mounted.wrapper.find('select[aria-label="Model"]').setValue('gpt-5.6-sol');
+    await mounted.wrapper.find('.composer textarea').setValue('モデル指定のテスト');
+    await mounted.wrapper.find('.composer').trigger('submit');
+    await flushPromises();
+    expect(send).toHaveBeenCalledWith(expect.any(String), {
+      message: 'モデル指定のテスト',
+      model: 'gpt-5.6-sol',
+    });
+  });
+
   it('opens a multi-hunk diff and applies a hunk review', async () => {
     const mounted = await mountApp();
     const session = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('multi-hunk'));

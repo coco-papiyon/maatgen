@@ -13,6 +13,7 @@ const schemas = [
   'change-set',
   'create-session-request',
   'event-list',
+  'provider-list',
   'send-message-request',
   'session-event',
   'session-list',

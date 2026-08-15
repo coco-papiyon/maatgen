@@ -6,10 +6,12 @@ import type {
   SendMessageRequest,
   SessionEvent,
   SessionListResponse,
+  ProviderListResponse,
   WsTicketResponse,
 } from '@maatgen/protocol';
 
 export interface AgentApi {
+  listProviders(): Promise<ProviderListResponse>;
   listSessions(cursor?: string, limit?: number): Promise<SessionListResponse>;
   createSession(request: CreateSessionRequest): Promise<AgentSession>;
   getSession(id: string): Promise<AgentSession>;
@@ -63,6 +65,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const httpAgentApi: AgentApi = {
+  listProviders() {
+    return request('/api/v1/providers');
+  },
   listSessions(cursor, limit = 25) {
     const query = new URLSearchParams({ limit: String(limit) });
     if (cursor) query.set('cursor', cursor);

@@ -39,6 +39,23 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestProviderCatalog(t *testing.T) {
+	config := testConfig()
+	config.Providers = []protocol.Provider{{ID: protocol.AgentCodex, Label: "Codex", Models: []string{"model-a"}}}
+	recorder := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/providers"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response protocol.ProviderListResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Providers) != 1 || response.Providers[0].ID != protocol.AgentCodex || response.Providers[0].Models[0] != "model-a" {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
 func TestNotFoundUsesCommonErrorEnvelope(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/missing", nil)
