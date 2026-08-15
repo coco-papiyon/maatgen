@@ -1,8 +1,8 @@
 # maatgen
 
-VS CodeおよびWebブラウザからCodex CLIを実行・監視し、変更をレビューするためのCoding Agent Managerです。
+VS CodeおよびWebブラウザからCodex CLIを実行・監視し、変更のDiff確認とRestoreを行うCoding Agent Managerです。
 
-現在はCodex Adapter、Session／Run管理、Git worktree、差分Review、Web UIまでを実装しています。
+現在はCodex Adapter、Session／Run管理、対象Repositoryの直接編集、Checkpoint／Diff／Restore、Web UI、VS Code拡張機能を実装しています。
 
 ## 必要な環境
 
@@ -30,6 +30,63 @@ ProtocolのTypeScript型は`packages/protocol/schema`のJSON Schemaから生成�
 ```bash
 npm run generate:protocol
 npm run generate:check
+```
+
+## ビルドとインストール
+
+Web版の本番ビルド、Webパッケージの作成、VSCode版のビルドをまとめて実行するには、リポジトリルートで次を実行します。
+
+```bash
+npm run build:frontend
+```
+
+生成物は次の場所に出力されます。
+
+```text
+apps/web/dist/                         # Web版の静的ファイル
+artifacts/maatgen-web-0.1.0.tgz        # Web版パッケージ
+artifacts/maatgen-0.1.0.vsix           # VSCode拡張機能パッケージ
+apps/vscode-extension/dist/            # VSCode版のビルド成果物
+```
+
+Web版をローカルで確認する場合は、Agent Managerを起動したうえで開発サーバーを使用します。
+
+```bash
+npm run dev
+```
+
+ブラウザで`http://127.0.0.1:5173/`を開いてください。本番配置では`apps/web/dist`を静的ファイルとしてWebサーバーへ配置します。
+
+### VS Code版（VSIX）のインストール
+
+VSIXを作成してインストールするには、リポジトリルートで次を実行します。
+
+```bash
+corepack pnpm install
+npm run build:frontend
+```
+
+`artifacts/maatgen-0.1.0.vsix`が生成されます。VS Codeの画面からインストールする場合は、次の手順です。
+
+1. コマンドパレット（`Ctrl+Shift+P`／`Cmd+Shift+P`）を開く
+2. `Extensions: Install from VSIX...`を選択する
+3. `artifacts/maatgen-0.1.0.vsix`を選択する
+4. VS CodeをReloadする
+
+`code`コマンドが使用できる場合は、CLIからもインストールできます。
+
+```bash
+code --install-extension artifacts/maatgen-0.1.0.vsix --force
+```
+
+既存のMaatgenがインストール済みの場合は、同じ手順でVSIXを指定するか、CLIの`--force`を付けて更新できます。インストール後は、Extensionsビューで`Maatgen`を検索して確認してください。
+
+開発用Extension Development Hostを使用する場合は、VS Codeでリポジトリを開き、`apps/vscode-extension`を対象に`F5`または「Run Extension」を実行します。この方法はVSIXをインストールせずに拡張機能を検証する場合に使用します。
+
+VSCode版のビルドだけを実行する場合は次のコマンドです。
+
+```bash
+npm --prefix apps/vscode-extension run build
 ```
 
 GitHub Actionsでは、Web／Protocolの生成差分・型検査・テスト・ビルドと、Ubuntu／Windows／macOSでのGoテスト・ビルドを実行します。CIはfake Codex CLIを使用し、実Codexは起動しません。

@@ -4,7 +4,7 @@
     {
       "label": "build:vscode-extension",
       "type": "shell",
-      "command": "corepack pnpm --filter @maatgen/vscode-extension build",
+      "command": "cd ${workspaceFolder}/apps/vscode-extension && corepack pnpm build",
       "problemMatcher": "$tsc",
       "group": "build"
     }

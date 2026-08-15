@@ -1,5 +1,5 @@
 {
-  "name": "@maatgen/vscode-extension",
+  "name": "maatgen",
   "displayName": "Maatgen",
   "description": "Run and review coding-agent sessions from VS Code.",
   "version": "0.1.0",
