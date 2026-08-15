@@ -49,6 +49,14 @@ artifacts/maatgen-0.1.0.vsix           # VSCode拡張機能パッケージ
 apps/vscode-extension/dist/            # VSCode版のビルド成果物
 ```
 
+Webパッケージには本番用の静的サーバー起動スクリプトも含まれます。パッケージを展開したディレクトリで次を実行してください。
+
+```bash
+npm start
+```
+
+既定では`http://127.0.0.1:5173/`で起動します。`PORT`または`MAATGEN_WEB_HOST`環境変数、あるいは`npm start -- --port 8080 --host 0.0.0.0`で変更できます。Agent Manager APIは別途起動し、Webサーバーから到達できるように配置してください。
+
 Web版をローカルで確認する場合は、Agent Managerを起動したうえで開発サーバーを使用します。
 
 ```bash
@@ -82,6 +90,8 @@ code --install-extension artifacts/maatgen-0.1.0.vsix --force
 既存のMaatgenがインストール済みの場合は、同じ手順でVSIXを指定するか、CLIの`--force`を付けて更新できます。インストール後は、Extensionsビューで`Maatgen`を検索して確認してください。
 
 開発用Extension Development Hostを使用する場合は、VS Codeでリポジトリを開き、`apps/vscode-extension`を対象に`F5`または「Run Extension」を実行します。この方法はVSIXをインストールせずに拡張機能を検証する場合に使用します。
+
+VS Code版のSession画面ではProviderとModelを選択できます。Providerは現在Codexのみです。ModelはRunごとに選択でき、`Default model`を選ぶとAgent Managerの既定値を使用します。Provider一覧とModel一覧はAgent Managerの`/api/v1/providers`から取得します。
 
 VSCode版のビルドだけを実行する場合は次のコマンドです。
 

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { createNonce } from './nonce.js';
 import { renderWebviewHtml } from './webview-html.js';
-import { AgentManagerClient, type SessionUsage } from './agent-manager-client.js';
+import { AgentManagerClient, type AgentProvider, type SessionUsage } from './agent-manager-client.js';
 import type { AgentSession, ChangeSet, SessionEvent } from './agent-manager-client.js';
 
 interface WorkspaceState {
@@ -13,6 +13,8 @@ type WebviewMessage =
   | { type: 'webview.ready' }
   | { type: 'workspace.refresh' }
   | { type: 'run.prompt'; message: string }
+  | { type: 'provider.select'; provider: string }
+  | { type: 'model.select'; model: string }
   | { type: 'run.cancel' }
   | { type: 'session.select'; sessionId: string }
   | { type: 'session.close' };
@@ -24,6 +26,9 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   private readonly manager: AgentManagerClient;
   private session: AgentSession | undefined;
   private sessions: AgentSession[] = [];
+  private providers: AgentProvider[] = [];
+  private selectedProvider = 'codex';
+  private selectedModel = '';
   private selectedSessionId: string | undefined;
   private events: SessionEvent[] = [];
   private pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -60,6 +65,12 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
           void this.syncSession();
         } else if (message.type === 'run.prompt') {
           void this.startRun(message.message);
+        } else if (message.type === 'provider.select' && !this.session) {
+          this.selectedProvider = message.provider;
+          this.selectedModel = '';
+          void this.syncSession();
+        } else if (message.type === 'model.select') {
+          this.selectedModel = message.model;
         } else if (message.type === 'run.cancel' && this.activeRunId) {
           void this.manager.cancelRun(this.activeRunId).then(() => this.syncSession());
         } else if (message.type === 'session.select') {
@@ -101,14 +112,28 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         await this.postState(undefined, [], undefined, undefined);
         return;
       }
+      this.providers = await this.manager.listProviders();
+      if (!this.providers.some((provider) => provider.id === this.selectedProvider)) {
+        this.selectedProvider = this.providers[0]?.id ?? 'codex';
+      }
       this.sessions = await this.manager.listSessions();
+      const previousSessionId = this.session?.id;
       const selected = this.selectedSessionId
         ? this.sessions.find((candidate) => candidate.id === this.selectedSessionId)
         : undefined;
       this.session = selected
         ?? this.session
         ?? this.sessions.find((candidate) => candidate.workspace === workspace.path && candidate.status === 'active')
-        ?? await this.manager.createSession({ agent: 'codex', workspace: workspace.path });
+        ?? await this.manager.createSession({ agent: this.selectedProvider, workspace: workspace.path });
+      this.selectedProvider = this.session.agent;
+      const provider = this.providers.find((candidate) => candidate.id === this.selectedProvider);
+      if (previousSessionId !== this.session.id) {
+        this.selectedModel = provider?.defaultModel && provider.models.includes(provider.defaultModel)
+          ? provider.defaultModel
+          : '';
+      } else if (this.selectedModel && !provider?.models.includes(this.selectedModel)) {
+        this.selectedModel = '';
+      }
       if (!this.sessions.some((candidate) => candidate.id === this.session?.id)) this.sessions = [this.session, ...this.sessions];
       const [session, events, usage, changes] = await Promise.all([
         this.manager.getSession(this.session.id),
@@ -141,7 +166,10 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   private async startRun(message: string): Promise<void> {
     if (!this.session || this.session.status !== 'active' || !message.trim() || this.activeRunId) return;
     try {
-      const run = await this.manager.sendMessage(this.session.id, { message: message.trim() });
+      const run = await this.manager.sendMessage(this.session.id, {
+        message: message.trim(),
+        ...(this.selectedModel ? { model: this.selectedModel } : {}),
+      });
       this.activeRunId = run.id;
       await this.syncSession();
     } catch (error) {
@@ -152,6 +180,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   private async postState(session: AgentSession | undefined, events: SessionEvent[], usage: SessionUsage | undefined, changes: ChangeSet | undefined): Promise<void> {
     await this.view?.webview.postMessage({
       type: 'session.state', workspace: this.getWorkspaceState(), sessions: this.sessions, session, events, usage, changes, activeRunId: this.activeRunId,
+      providers: this.providers, selectedProvider: this.selectedProvider, selectedModel: this.selectedModel,
     });
   }
 

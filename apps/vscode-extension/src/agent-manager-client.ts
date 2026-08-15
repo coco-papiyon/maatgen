@@ -1,4 +1,5 @@
 export interface AgentSession { id: string; agent: string; workspace: string; status: string; createdAt: string; closedAt?: string; }
+export interface AgentProvider { id: string; label: string; models: string[]; defaultModel?: string; }
 export interface AgentRun { id: string; sessionId: string; status: string; prompt: string; startedAt?: string; finishedAt?: string; exitCode?: number; }
 export interface SessionEvent { id: string; sessionId: string; runId?: string; sequence: number; timestamp: string; source: string; type: string; data: Record<string, unknown>; }
 export interface ChangeFile {
@@ -21,9 +22,14 @@ export interface SessionUsage {
 }
 
 interface SessionListResponse { sessions: AgentSession[]; nextCursor?: string; }
+interface ProviderListResponse { providers: AgentProvider[]; }
 
 export class AgentManagerClient {
   constructor(private readonly baseUrl: string, private readonly authToken: string) {}
+
+  listProviders(): Promise<AgentProvider[]> {
+    return this.request<ProviderListResponse>('/api/v1/providers').then((response) => response.providers);
+  }
 
   async listSessions(): Promise<AgentSession[]> {
     const sessions: AgentSession[] = [];

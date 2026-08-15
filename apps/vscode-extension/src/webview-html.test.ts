@@ -31,9 +31,20 @@ describe('renderWebviewHtml', () => {
 
   it('includes session execution, history, usage, and change surfaces', () => {
     const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain('<div class="top-panels">');
+    expect(html).toContain('<details class="session-history" open>');
+    expect(html).toContain('<details class="usage-result">');
+    expect(html).toContain('<details class="changes-result">');
+    expect(html).toContain('<section class="chat-area">');
+    expect(html).toContain('class="workspace-inline"');
+    expect(html).toContain('followLatestEvent');
+    expect(html).toContain('eventList.addEventListener(\'scroll\'');
     expect(html).toContain('session-history-list');
     expect(html).toContain("type: 'session.select'");
     expect(html).toContain('changes-list');
     expect(html).toContain("type: 'run.prompt'");
+    expect(html).toContain('id="provider-select"');
+    expect(html).toContain('id="model-select"');
+    expect(html).toContain("type: 'model.select'");
   });
 });

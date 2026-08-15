@@ -31,49 +31,59 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           <p>Coding Agent Manager</p>
         </div>
       </header>
+      <div class="top-panels">
+        <details class="session-history" open>
+          <summary><span>SESSION HISTORY</span><span class="panel-chevron" aria-hidden="true">⌄</span></summary>
+          <div id="session-history-list" class="session-history-list"></div>
+        </details>
+        <details class="usage-result">
+          <summary><span>USAGE</span><span id="usage-count" class="panel-count">0</span><span class="panel-chevron" aria-hidden="true">⌄</span></summary>
+          <div class="usage-content">
+            <div class="usage-grid">
+              <span>Input <strong id="usage-input">—</strong></span>
+              <span>Cached <strong id="usage-cached">—</strong></span>
+              <span>Output <strong id="usage-output">—</strong></span>
+              <span>Total <strong id="usage-total">—</strong></span>
+            </div>
+          </div>
+        </details>
+        <details class="changes-result">
+          <summary><span>CHANGES</span><span id="changes-count" class="panel-count">0 files</span><span class="panel-chevron" aria-hidden="true">⌄</span></summary>
+          <div class="changes-content"><div id="changes-list" class="changes-list"></div></div>
+        </details>
+      </div>
+      <section class="chat-area">
+        <section class="empty-state" id="empty-state">
+          <p class="eyebrow">Phase 7</p>
+          <h2>Extension host connected</h2>
+          <p>The Agent Manager connection will appear here after startup.</p>
+          <button id="refresh-button" type="button">Refresh workspace</button>
+        </section>
+        <section class="session-card" aria-live="polite" hidden>
+          <div class="session-card-header"><span class="eyebrow">SESSION</span><span id="session-status">Offline</span></div>
+          <div class="run-options">
+            <label>Provider <select id="provider-select" aria-label="Provider"></select></label>
+            <label>Model <select id="model-select" aria-label="Model"></select></label>
+          </div>
+          <div id="event-list" class="event-list"></div>
+          <form id="prompt-form" class="prompt-form">
+            <textarea id="prompt-input" rows="2" placeholder="Codexに指示する…"></textarea>
+            <div class="prompt-actions"><button id="close-session" type="button" class="quiet-action">Close</button><button id="run-button" type="submit">Run</button><button id="cancel-button" type="button" hidden>Stop</button></div>
+          </form>
+        </section>
+        <p id="manager-error" class="manager-error" role="alert" hidden></p>
+        <section class="assistant-result" aria-live="polite" hidden>
+          <p class="eyebrow">LATEST AGENT RESULT</p>
+          <div id="assistant-output" class="markdown-body"></div>
+        </section>
+      </section>
       <section class="status-card" aria-live="polite">
         <span class="status-dot" id="workspace-status"></span>
-        <div>
-          <p class="eyebrow">Workspace</p>
-          <p class="workspace-name" id="workspace-name">Loading...</p>
-          <p class="workspace-path" id="workspace-path"></p>
+        <div class="workspace-inline">
+          <span class="eyebrow">WORKSPACE</span>
+          <strong class="workspace-name" id="workspace-name">Loading...</strong>
+          <span class="workspace-path" id="workspace-path"></span>
         </div>
-      </section>
-      <nav class="session-history" aria-label="Session history">
-        <p class="eyebrow">SESSION HISTORY</p>
-        <div id="session-history-list" class="session-history-list"></div>
-      </nav>
-      <section class="empty-state" id="empty-state">
-        <p class="eyebrow">Phase 7</p>
-        <h2>Extension host connected</h2>
-        <p>The Agent Manager connection will appear here after startup.</p>
-        <button id="refresh-button" type="button">Refresh workspace</button>
-      </section>
-      <section class="session-card" aria-live="polite" hidden>
-        <div class="session-card-header"><span class="eyebrow">CODEX SESSION</span><span id="session-status">Offline</span></div>
-        <div id="event-list" class="event-list"></div>
-        <form id="prompt-form" class="prompt-form">
-          <textarea id="prompt-input" rows="2" placeholder="Codexに指示する…"></textarea>
-          <div class="prompt-actions"><button id="close-session" type="button" class="quiet-action">Close</button><button id="run-button" type="submit">Run</button><button id="cancel-button" type="button" hidden>Stop</button></div>
-        </form>
-      </section>
-      <p id="manager-error" class="manager-error" role="alert" hidden></p>
-      <section class="assistant-result" aria-live="polite" hidden>
-        <p class="eyebrow">LATEST AGENT RESULT</p>
-        <div id="assistant-output" class="markdown-body"></div>
-      </section>
-      <section class="usage-result" aria-live="polite" hidden>
-        <p class="eyebrow">TOKEN USAGE</p>
-        <div class="usage-grid">
-          <span>Input <strong id="usage-input">—</strong></span>
-          <span>Cached <strong id="usage-cached">—</strong></span>
-          <span>Output <strong id="usage-output">—</strong></span>
-          <span>Total <strong id="usage-total">—</strong></span>
-        </div>
-      </section>
-      <section class="changes-result" aria-live="polite" hidden>
-        <div class="result-heading"><p class="eyebrow">CHANGES</p><span id="changes-count">0 files</span></div>
-        <div id="changes-list" class="changes-list"></div>
       </section>
     </main>
     <script nonce="${nonce}">
@@ -91,17 +101,26 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const runButton = document.getElementById('run-button');
       const cancelButton = document.getElementById('cancel-button');
       const closeSessionButton = document.getElementById('close-session');
+      const providerSelect = document.getElementById('provider-select');
+      const modelSelect = document.getElementById('model-select');
       const managerError = document.getElementById('manager-error');
       const resultSection = document.querySelector('.assistant-result');
       const outputElement = document.getElementById('assistant-output');
-      const usageSection = document.querySelector('.usage-result');
+      const usageCount = document.getElementById('usage-count');
       const usageElements = {
         input: document.getElementById('usage-input'), cached: document.getElementById('usage-cached'),
         output: document.getElementById('usage-output'), total: document.getElementById('usage-total')
       };
-      const changesSection = document.querySelector('.changes-result');
       const changesCount = document.getElementById('changes-count');
       const changesList = document.getElementById('changes-list');
+      let followLatestEvent = true;
+      const isNearEventListBottom = () => eventList.scrollHeight - eventList.clientHeight - eventList.scrollTop < 24;
+      const scrollEventListToLatest = () => {
+        if (followLatestEvent) eventList.scrollTop = eventList.scrollHeight;
+      };
+      eventList.addEventListener('scroll', () => {
+        if (!isNearEventListBottom()) followLatestEvent = false;
+      });
       const formatTokens = (value) => typeof value === 'number' ? value.toLocaleString('en-US') : '—';
       const eventText = (event) => {
         const data = event.data || {};
@@ -125,7 +144,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           else body.textContent = eventText(event);
           item.append(label, body); eventList.append(item);
         });
-        eventList.scrollTop = eventList.scrollHeight;
+        scrollEventListToLatest();
       };
       const renderSessionHistory = (sessions, selectedId) => {
         historyList.replaceChildren();
@@ -155,9 +174,31 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           const meta = document.createElement('span');
           meta.textContent = [file.status || file.kind, file.hunks?.length ? file.hunks.length + ' hunks' : 'file-level change'].join(' · ');
           item.append(path, meta);
-          changesList.append(item);
+        changesList.append(item);
         });
-        changesSection.hidden = files.length === 0;
+        changesCount.textContent = files.length + ' file' + (files.length === 1 ? '' : 's');
+      };
+      const renderProviderOptions = (providers, selectedProvider, selectedModel, hasSession, activeRun) => {
+        providerSelect.replaceChildren();
+        (providers || []).forEach((provider) => {
+          const option = document.createElement('option');
+          option.value = provider.id; option.textContent = provider.label;
+          option.selected = provider.id === selectedProvider;
+          providerSelect.append(option);
+        });
+        providerSelect.disabled = hasSession || !!activeRun || !(providers || []).length;
+        modelSelect.replaceChildren();
+        const provider = (providers || []).find((item) => item.id === selectedProvider);
+        const defaultOption = document.createElement('option');
+        defaultOption.value = ''; defaultOption.textContent = 'Default model';
+        defaultOption.selected = !selectedModel; modelSelect.append(defaultOption);
+        (provider?.models || []).forEach((model) => {
+          const option = document.createElement('option');
+          option.value = model; option.textContent = model;
+          option.selected = model === selectedModel;
+          modelSelect.append(option);
+        });
+        modelSelect.disabled = !!activeRun || !(provider?.models || []).length;
       };
 
       const escapeHtml = (value) => value.replace(/[&<>\"']/g, (character) => ({
@@ -229,6 +270,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           emptyState.hidden = Boolean(event.data.session);
           sessionSection.hidden = !event.data.session;
           sessionStatus.textContent = event.data.activeRunId ? 'Running' : (event.data.session?.status ?? 'Offline');
+          renderProviderOptions(event.data.providers, event.data.selectedProvider, event.data.selectedModel, Boolean(event.data.session), Boolean(event.data.activeRunId));
           runButton.hidden = Boolean(event.data.activeRunId);
           cancelButton.hidden = !event.data.activeRunId;
           closeSessionButton.disabled = Boolean(event.data.activeRunId);
@@ -240,9 +282,9 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
             usageElements.cached.textContent = formatTokens(summary.cachedInputTokens);
             usageElements.output.textContent = formatTokens(summary.outputTokens);
             usageElements.total.textContent = formatTokens(summary.totalTokens);
-            usageSection.hidden = false;
+            usageCount.textContent = 'available';
           } else {
-            usageSection.hidden = true;
+            usageCount.textContent = '0';
           }
           managerError.hidden = true;
           return;
@@ -263,7 +305,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           usageElements.cached.textContent = formatTokens(summary.cachedInputTokens);
           usageElements.output.textContent = formatTokens(summary.outputTokens);
           usageElements.total.textContent = formatTokens(summary.totalTokens);
-          usageSection.hidden = false;
+          usageCount.textContent = 'available';
           return;
         }
         if (event.data?.type !== 'workspace.state') return;
@@ -280,9 +322,13 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         event.preventDefault();
         const message = promptInput.value.trim();
         if (!message) return;
+        followLatestEvent = true;
+        scrollEventListToLatest();
         promptInput.value = '';
         vscode.postMessage({ type: 'run.prompt', message });
       });
+      providerSelect.addEventListener('change', () => vscode.postMessage({ type: 'provider.select', provider: providerSelect.value }));
+      modelSelect.addEventListener('change', () => vscode.postMessage({ type: 'model.select', model: modelSelect.value }));
       cancelButton.addEventListener('click', () => vscode.postMessage({ type: 'run.cancel' }));
       closeSessionButton.addEventListener('click', () => vscode.postMessage({ type: 'session.close' }));
 
