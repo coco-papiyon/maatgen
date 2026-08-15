@@ -598,7 +598,6 @@ onBeforeUnmount(() => {
             </div>
             <p>{{ entry.run.prompt }}</p>
             <div v-if="activeProvider === 'copilot'" class="usage-run-values">
-              <span>Model {{ entry.usage?.model ?? '—' }}</span>
               <span>Actual model {{ entry.usage?.actualModel ?? '—' }}</span>
               <div class="usage-run-value-with-cost">
                 <span>AI credits {{ formatCredits(entry.usage?.aiCredits) }}</span>
@@ -606,8 +605,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div v-else class="usage-run-values">
-              <span>In {{ usageValue(entry.usage, 'inputTokens') }}</span>
-              <span>Out {{ usageValue(entry.usage, 'outputTokens') }}</span>
+              <span>Actual model {{ entry.usage?.actualModel ?? '—' }}</span>
               <div class="usage-run-value-with-cost">
                 <span>Total {{ usageValue(entry.usage, 'totalTokens') }}</span>
                 <span>Cost {{ formatCost(entry.usage?.costUsd) }}</span>

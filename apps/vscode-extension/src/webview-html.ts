@@ -47,7 +47,6 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
                 <span>Total <strong id="usage-total">—</strong></span>
                 <span>Cost <strong id="usage-cost">—</strong></span>
               </div>
-              <span data-copilot-usage hidden>Model <strong id="usage-requested-model">—</strong></span>
               <span data-copilot-usage hidden>Actual model <strong id="usage-model">—</strong></span>
               <div data-copilot-usage hidden class="usage-credits-cost">
                 <span>AI credits <strong id="usage-credits">—</strong></span>
@@ -117,9 +116,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const outputElement = document.getElementById('assistant-output');
       const usageCount = document.getElementById('usage-count');
       const usageElements = {
-        input: document.getElementById('usage-input'), cached: document.getElementById('usage-cached'),
-        output: document.getElementById('usage-output'), total: document.getElementById('usage-total'),
-        model: document.getElementById('usage-model'), requestedModel: document.getElementById('usage-requested-model'), credits: document.getElementById('usage-credits'), cost: document.getElementById('usage-cost'),
+        input: document.getElementById('usage-input'), cached: document.getElementById('usage-cached'), output: document.getElementById('usage-output'), total: document.getElementById('usage-total'), model: document.getElementById('usage-model'), credits: document.getElementById('usage-credits'), cost: document.getElementById('usage-cost'),
         costCopilot: document.getElementById('usage-cost-copilot')
       };
       const changesCount = document.getElementById('changes-count');
@@ -143,7 +140,6 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         usageElements.cached.textContent = formatTokens(summary.cachedInputTokens);
         usageElements.output.textContent = formatTokens(summary.outputTokens);
         usageElements.total.textContent = formatTokens(summary.totalTokens);
-        usageElements.requestedModel.textContent = typeof summary.model === 'string' ? summary.model : '—';
         usageElements.model.textContent = typeof summary.actualModel === 'string' ? summary.actualModel : '—';
         usageElements.credits.textContent = formatCredits(summary.aiCredits);
         usageElements.cost.textContent = formatCost(summary.costUsd);

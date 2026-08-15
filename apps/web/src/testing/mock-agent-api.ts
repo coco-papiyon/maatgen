@@ -149,8 +149,8 @@ export class MockAgentApi implements AgentApi {
       if (typeof entry.usage?.aiCredits === 'number') {
         summary.aiCredits = (summary.aiCredits ?? 0) + entry.usage.aiCredits;
       }
-      if (typeof entry.usage?.model === 'string') {
-        summary.model = summary.model && summary.model !== entry.usage.model ? 'multiple' : entry.usage.model;
+      if (typeof entry.usage?.actualModel === 'string') {
+        summary.actualModel = summary.actualModel && summary.actualModel !== entry.usage.actualModel ? 'multiple' : entry.usage.actualModel;
       }
       if (typeof entry.usage?.costUsd === 'number') {
         summary.costUsd = (summary.costUsd ?? 0) + entry.usage.costUsd;
@@ -268,7 +268,7 @@ function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[];
     ], oneHunk('mock-success')),
     scenario('mock-failure', 'C:/demo/failure', [event('mock-failure', 1, 'run_failed', { code: 'codex_unavailable', message: 'Mock: Codex CLI is unavailable' })], emptyChanges('mock-failure')),
     scenario('mock-copilot-failure', 'C:/demo/copilot-failure', [
-      event('mock-copilot-failure', 1, 'usage_reported', { model: 'gpt-5.4', aiCredits: 0.125 }),
+      event('mock-copilot-failure', 1, 'usage_reported', { model: 'auto', actualModel: 'gpt-5.4', aiCredits: 0.125 }),
       event('mock-copilot-failure', 2, 'run_failed', { code: 'copilot_unavailable', message: 'Mock: GitHub Copilot CLI is unavailable' }),
     ], emptyChanges('mock-copilot-failure'), 'copilot'),
     scenario('mock-cancelled', 'C:/demo/cancelled', [event('mock-cancelled', 1, 'run_cancelled', {})], emptyChanges('mock-cancelled')),
