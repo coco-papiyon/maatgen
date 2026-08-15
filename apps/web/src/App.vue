@@ -59,6 +59,28 @@ const streamLabel = computed(() => ({
   disconnected: 'Offline',
 })[streamState.value]);
 
+function restoreActiveRun(items: SessionEvent[]) {
+  const terminalRunIDs = new Set(items
+    .filter((event) => ['run_completed', 'run_failed', 'run_cancelled'].includes(event.type))
+    .map((event) => event.runId)
+    .filter((id): id is string => Boolean(id)));
+  const started = [...items].reverse().find((event) => event.type === 'run_started'
+    && Boolean(event.runId)
+    && !terminalRunIDs.has(event.runId));
+  if (!started?.runId) {
+    if (activeRun.value && terminalRunIDs.has(activeRun.value.id)) activeRun.value = undefined;
+    return;
+  }
+  const userPrompt = [...items].reverse().find((event) => event.type === 'user_prompt' && event.runId === started.runId);
+  activeRun.value = {
+    id: started.runId,
+    sessionId: started.sessionId,
+    status: 'running',
+    prompt: userPrompt ? eventText(userPrompt) : '',
+    startedAt: started.timestamp,
+  };
+}
+
 function toggleSystemMessages() {
   localStorage.setItem('maatgen.showSystemMessages', String(showSystemMessages.value));
 }
@@ -154,11 +176,9 @@ async function refreshSelected(full = false) {
   selected.value = session;
   if (full) events.value = newEvents;
   else events.value.push(...newEvents.filter((event) => event.sequence > lastSequence.value));
+  restoreActiveRun(events.value);
   changes.value = changeSet;
   updateDiagnosticFromEvents(newEvents);
-  if (newEvents.some((event) => ['run_completed', 'run_failed', 'run_cancelled'].includes(event.type))) {
-    activeRun.value = undefined;
-  }
 }
 
 async function refreshSelectedState(sessionId: string) {
@@ -191,9 +211,7 @@ function startEventStream(sessionId: string) {
       if (selected.value?.id !== sessionId || event.sequence <= lastSequence.value) return;
       events.value.push(event);
       streamError.value = '';
-      if (['run_completed', 'run_failed', 'run_cancelled'].includes(event.type)) {
-        activeRun.value = undefined;
-      }
+      restoreActiveRun(events.value);
       updateDiagnosticFromEvents([event]);
       if (['change_detected', 'change_reviewed', 'run_completed', 'run_failed', 'run_cancelled'].includes(event.type)) {
         void refreshSelectedState(sessionId).catch((cause) => {
@@ -454,7 +472,7 @@ onBeforeUnmount(() => {
               <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
             </select>
           </div>
-          <button v-if="activeRun" type="button" class="stop-button" @click="cancelRun">Stop</button>
+          <button v-if="activeRun" type="button" class="stop-button" :disabled="busy" aria-label="処理を停止" @click="cancelRun">停止</button>
           <button v-else type="submit" class="send-button" :disabled="busy || !prompt.trim()">Run {{ providerLabel }} <span>↗</span></button>
         </div>
       </form>

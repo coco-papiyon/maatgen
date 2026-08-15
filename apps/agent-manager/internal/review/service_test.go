@@ -119,7 +119,7 @@ func TestAcceptFileAddsBinaryFromAgentWorktree(t *testing.T) {
 	}
 }
 
-func TestAcceptAllAppliesPendingChangesAndClosesSession(t *testing.T) {
+func TestAcceptAllAppliesPendingChangesAndKeepsSessionActive(t *testing.T) {
 	store, session := createReviewStore(t)
 	original := "one\ntwo\n"
 	modified := "ONE\nTWO\n"
@@ -144,15 +144,15 @@ func TestAcceptAllAppliesPendingChangesAndClosesSession(t *testing.T) {
 	}
 	assertReviewFile(t, session.Workspace, "all.txt", modified)
 	closed, err := store.GetSession(context.Background(), session.ID)
-	if err != nil || closed.Status != protocol.SessionClosed || closed.CleanupStatus != protocol.CleanupCompleted || closer.calls != 1 {
-		t.Fatalf("closed session = %#v, calls = %d, err = %v", closed, closer.calls, err)
+	if err != nil || closed.Status != protocol.SessionActive || closer.calls != 0 {
+		t.Fatalf("session = %#v, close calls = %d, err = %v", closed, closer.calls, err)
 	}
-	if _, err := service.AcceptAll(context.Background(), session.ID); err != nil || closer.calls != 1 {
+	if _, err := service.AcceptAll(context.Background(), session.ID); err != nil || closer.calls != 0 {
 		t.Fatalf("idempotent accept all: calls = %d, err = %v", closer.calls, err)
 	}
 }
 
-func TestRejectAllLeavesFilesUnchangedAndClosesSession(t *testing.T) {
+func TestRejectAllLeavesFilesUnchangedAndKeepsSessionActive(t *testing.T) {
 	store, session := createReviewStore(t)
 	original, modified := "before\n", "after\n"
 	writeReviewFile(t, session.Workspace, "reject-all.txt", original)
@@ -164,12 +164,17 @@ func TestRejectAllLeavesFilesUnchangedAndClosesSession(t *testing.T) {
 	if err := store.ReplaceChangeSet(context.Background(), changeSet); err != nil {
 		t.Fatal(err)
 	}
-	service := New(store, WithSessionCloser(&recordingCloser{store: store}))
+	closer := &recordingCloser{store: store}
+	service := New(store, WithSessionCloser(closer))
 	updated, err := service.RejectAll(context.Background(), session.ID)
 	if err != nil || updated.Files[0].Status != protocol.ReviewRejected {
 		t.Fatalf("reject all = %#v, %v", updated, err)
 	}
 	assertReviewFile(t, session.Workspace, "reject-all.txt", original)
+	current, err := store.GetSession(context.Background(), session.ID)
+	if err != nil || current.Status != protocol.SessionActive || closer.calls != 0 {
+		t.Fatalf("session = %#v, close calls = %d, err = %v", current, closer.calls, err)
+	}
 }
 
 func createReviewStore(t *testing.T) (*storesqlite.Store, protocol.AgentSession) {

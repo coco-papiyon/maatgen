@@ -115,7 +115,7 @@ Runが正常終了すると、Session開始時の`baseCommit`とAgent worktree�
 
 Web UIのChanges一覧から差分詳細を開き、HunkまたはFile単位でAccept／Rejectできます。未Reviewの変更はAccept All／Reject Allで一括処理できます。Accept時にメインWorking Treeが想定状態から変更されていた場合は`409 Conflict`となり、外部変更を上書きしません。一括Acceptが途中で競合した場合はその時点で停止し、確定済みのReview状態は保持されます。
 
-すべての変更のReviewが確定するとSessionが自動的に閉じ、Agent worktreeが削除されます。明示的にSessionを閉じることもできます。実行中のRunがある場合は`409 Conflict`となります。削除に失敗した場合はSessionへcleanup状態が保存され、同じReview操作またはclose APIを再送するとcleanupを再試行します。
+Reviewの確定後もSessionと会話履歴は維持され、同じCodex threadへ続けて指示を送れます。Sessionを明示的に閉じるとAgent worktreeが削除されます。実行中のRunがある場合は`409 Conflict`となります。削除に失敗した場合はSessionへcleanup状態が保存され、close APIまたは同じReview操作を再送するとcleanupを再試行します。
 
 health以外のHTTP APIには`Authorization: Bearer <token>`が必要です。起動時に生成されるtokenと実際のlisten addressは、データディレクトリ内の`runtime.json`へ保存されます。tokenはログへ出力されません。
 

@@ -209,13 +209,9 @@ func firstPending(changeSet protocol.ChangeSet) (*protocol.FileChange, *protocol
 	return nil, nil
 }
 
-func (s *Service) finalize(ctx context.Context, sessionID string, changeSet protocol.ChangeSet) (protocol.ChangeSet, error) {
-	if s.closer == nil || !allReviewed(changeSet) {
-		return changeSet, nil
-	}
-	if _, err := s.closer.CloseSession(ctx, sessionID); err != nil {
-		return changeSet, err
-	}
+func (s *Service) finalize(_ context.Context, _ string, changeSet protocol.ChangeSet) (protocol.ChangeSet, error) {
+	// A reviewed change set no longer ends the conversation. The session and
+	// its Codex thread remain active until the user explicitly closes them.
 	return changeSet, nil
 }
 

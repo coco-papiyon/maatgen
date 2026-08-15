@@ -160,7 +160,6 @@ export class MockAgentApi implements AgentApi {
     else file.status = status;
     if (file.reviewMode === 'hunk') file.status = aggregateStatus(file.hunks.map((item) => item.status));
     this.appendEvent(sessionId, 'change_reviewed', 'manager', { changeId, decision: status });
-    this.closeWhenReviewed(sessionId, changeSet);
     return clone(changeSet);
   }
 
@@ -172,13 +171,7 @@ export class MockAgentApi implements AgentApi {
       if (file.reviewMode === 'hunk') file.status = aggregateStatus(file.hunks.map((item) => item.status));
     }
     this.appendEvent(sessionId, 'change_reviewed', 'manager', { decision: status, all: true });
-    this.closeWhenReviewed(sessionId, changeSet);
     return clone(changeSet);
-  }
-
-  private closeWhenReviewed(sessionId: string, changeSet: ChangeSet) {
-    const pending = changeSet.files.some((file) => file.status === 'pending' || file.hunks.some((hunk) => hunk.status === 'pending'));
-    if (!pending) void this.closeSession(sessionId);
   }
 
   private appendEvent(sessionId: string, type: SessionEvent['type'], source: SessionEvent['source'], data: unknown, runId?: string) {

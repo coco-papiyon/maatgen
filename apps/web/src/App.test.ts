@@ -4,6 +4,7 @@ import App from './App.vue';
 import { AgentApiError } from './api';
 import type { EventStreamFactory } from './event-stream';
 import { createMockEnvironment, MockAgentApi } from './testing/mock-agent-api';
+import type { SessionEvent } from '@maatgen/protocol';
 
 let wrapper: VueWrapper | undefined;
 
@@ -59,6 +60,59 @@ describe('App with MockAgentApi', () => {
       message: 'モデル指定のテスト',
       model: 'gpt-5.6-sol',
     });
+  });
+
+  it('keeps the composer available and continues the same session after a run completes', async () => {
+    const api = new MockAgentApi();
+    let pushEvent: ((event: SessionEvent) => void) | undefined;
+    const eventStreamFactory: EventStreamFactory = (options) => {
+      pushEvent = options.onEvent;
+      return { start: () => options.onState('connected'), stop: () => options.onState('disconnected') };
+    };
+    wrapper = mount(App, { props: { agentApi: api, eventStreamFactory } });
+    await flushPromises();
+    const send = vi.spyOn(api, 'sendMessage').mockResolvedValue({
+      id: 'run-first', sessionId: 'mock-success', status: 'running', prompt: '最初の指示',
+    });
+
+    await wrapper.find('.composer textarea').setValue('最初の指示');
+    await wrapper.find('.composer').trigger('submit');
+    await flushPromises();
+    pushEvent!({
+      id: 'completed-first', sessionId: 'mock-success', runId: 'run-first', sequence: 5,
+      timestamp: new Date().toISOString(), schemaVersion: 1, source: 'manager', type: 'run_completed', data: {},
+    });
+    await flushPromises();
+
+    expect(wrapper.find('.composer').exists()).toBe(true);
+    await wrapper.find('.composer textarea').setValue('続きの指示');
+    await wrapper.find('.composer').trigger('submit');
+    await flushPromises();
+    expect(send).toHaveBeenLastCalledWith('mock-success', { message: '続きの指示' });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('restores an in-progress run and lets the user stop it after reopening a session', async () => {
+    class RunningApi extends MockAgentApi {
+      override async getEvents(id: string, afterSequence = 0) {
+        const existing = await super.getEvents(id, afterSequence);
+        if (id !== 'mock-success' || afterSequence > 0) return existing;
+        return [...existing, {
+          id: 'running-event', sessionId: id, runId: 'run-restored', sequence: 5,
+          timestamp: new Date().toISOString(), schemaVersion: 1 as const, source: 'manager' as const,
+          type: 'run_started' as const, data: {},
+        }];
+      }
+    }
+    const api = new RunningApi();
+    const cancel = vi.spyOn(api, 'cancelRun').mockResolvedValue();
+    wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+
+    expect(wrapper.find('.stop-button').text()).toBe('停止');
+    await wrapper.find('.stop-button').trigger('click');
+    await flushPromises();
+    expect(cancel).toHaveBeenCalledWith('run-restored');
   });
 
   it('opens a multi-hunk diff and applies a hunk review', async () => {
