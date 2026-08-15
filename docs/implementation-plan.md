@@ -6,7 +6,7 @@
 
 > 2026-08-15設計変更: Agent専用worktreeとAccept／Reject方式を廃止し、対象Working Treeの直接編集、Run単位checkpoint、必要箇所のRestore方式へ置換する。既存のWorktree／Review実装は後方互換性を維持せず置換対象とする。
 
-初期リリースでは Codex CLI のみを対象とする。Claude Code と GitHub Copilot CLI は、Codex対応版で共通Protocol、Session管理、Checkpoint／Diff／Restore、Extension連携が安定した後に追加する。
+Codex CLI版の共通Protocol、Session管理、Checkpoint／Diff／Restore、Web／VS Code連携が完了したため、次のAdapterとしてGitHub Copilot CLIを対象に加える。Claude Codeは引き続き後続対象とする。
 
 初期のCodex連携には、安定扱いの `codex exec --json` を使用する。Codex App Serverはexperimentalであるため、初期実装では採用しない。
 
@@ -58,9 +58,9 @@ AgentSession
 ```ts
 interface AgentSession {
   id: string;
-  agent: 'codex';
+  agent: 'codex' | 'copilot';
   workspace: string;
-  codexThreadId?: string;
+  agentThreadId?: string;
   status: 'active' | 'closed';
   createdAt: string;
   closedAt?: string;
@@ -87,7 +87,7 @@ interface AgentRun {
 
 ### 3.3 Adapter境界
 
-初期版はCodexのみ実装するが、Agent ManagerからCLI固有処理を分離する。
+CodexとCopilotを実装し、Agent ManagerからCLI固有処理を分離する。
 
 ```go
 type AgentAdapter interface {
@@ -99,11 +99,11 @@ type AgentAdapter interface {
 
 ```text
 AgentAdapter
-└─ CodexAdapter
+├─ CodexAdapter
+└─ CopilotAdapter
 
 将来
-├─ ClaudeAdapter
-└─ CopilotAdapter
+└─ ClaudeAdapter
 ```
 
 Claude／Copilotの仕様が確定するまでは、過度なcapability抽象化は行わない。
@@ -119,8 +119,8 @@ interface SessionEvent {
   runId?: string;
   sequence: number;
   timestamp: string;
-  schemaVersion: 1;
-  source: 'user' | 'codex' | 'manager';
+  schemaVersion: 2;
+  source: 'user' | 'codex' | 'copilot' | 'manager';
   type:
     | 'user_prompt'
     | 'assistant_message'
@@ -141,7 +141,7 @@ interface SessionEvent {
 }
 ```
 
-Codexの`thread.started`から得られるThread IDは、ManagerのSession IDとは別に保存する。
+Codexの`thread.started`またはCopilot JSONLの`sessionId`から得られるAgent Thread IDは、ManagerのSession IDとは別に保存する。
 
 `reasoning`はCodexが出力した要約だけを保存し、内部推論を再構成・推測しない。
 
@@ -206,7 +206,7 @@ Run後に利用者または後続Runが同じ箇所を編集している場合�
 
 ### 3.8 同一Sessionでの継続修正
 
-Run完了後もSessionをactiveのまま保持する。利用者はAgentの変更を直接編集でき、その現在状態から同じSessionへ次のPromptを送信する。次のRunは新しいbefore checkpointを作成し、`codexThreadId`を使ってresumeする。
+Run完了後もSessionをactiveのまま保持する。利用者はAgentの変更を直接編集でき、その現在状態から同じSessionへ次のPromptを送信する。次のRunは新しいbefore checkpointを作成し、`agentThreadId`を使ってCodexまたはCopilotをresumeする。
 
 同一Sessionで実行中のRunは1つまでとし、実行中の追加Promptは`409 Conflict`とする。実行中の利用者編集は妨げないが、Agentと同じ箇所を同時編集した場合は差分の帰属を保証しない。
 
@@ -401,9 +401,9 @@ ExtensionにはCodex固有の実行ロジックを持たせない。
 
 ### Phase 9：追加Adapter
 
-Codex MVPの完了後に、同じ`AgentAdapter`と`SessionEvent`契約へClaude Code、GitHub Copilot CLIを追加する。
+Codex MVPの完了後に、同じ`AgentAdapter`と`SessionEvent`契約へGitHub Copilot CLIを追加する。Claude CodeはCopilot対応後に追加する。
 
-追加順序は、各CLIの構造化出力、resume方式、Usage、cancel方式を調査して決定する。UIやSession管理へCLI固有分岐を追加しない。
+Copilotは`--output-format json`、`--prompt`、`--resume=<sessionId>`を使用する。JSONL parser、引数、利用不可エラーだけをAdapterへ閉じ込め、Session／Run／Checkpoint／RestoreとWeb／VS Code UIは共通契約を使う。
 
 ## 6. HTTP API
 
@@ -702,7 +702,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-54 | Cost計算の料金表管理 | — | — | 使用量分析 | 未 |
 | D-55 | Agent比較指標 | — | — | Analytics | 未 |
 | D-56 | Claude Codeの出力・resume方式 | — | — | Claude Adapter | 未 |
-| D-57 | Copilot CLIの出力・認証方式 | — | — | Copilot Adapter | 未 |
+| D-57 | Copilot CLIの出力・認証方式 | programmatic JSONLとCLI管理のログイン情報を使用 | `--output-format json`を正規化し、認証情報は保存せずCLIのログイン状態を利用する。Session IDは`agentThreadId`へ保存して`--resume`する | Copilot Adapter | 検討済み |
 | D-58 | GitHub Issue／PR連携方式 | — | — | GitHub連携 | 未 |
 | D-59 | Multi-Agent Sessionの分離単位 | — | — | 複数Agent実行 | 未 |
 | D-60 | リモート実行・外部公開の認証 | — | — | 将来のServer化 | 未 |
@@ -842,3 +842,14 @@ docs/decisions/
 - [ ] `vscode.diff`とCheckpoint Restore command
 - [ ] CodeLens／Decoration
 - [ ] Extension終了時のManager cleanup（active Sessionのcheckpointは維持）
+
+### Phase 9：GitHub Copilot CLI Adapter
+
+- [x] `copilot`実行ファイルのPATH検出と`--version`検証
+- [x] programmatic mode、permission bypass、remote export無効化の引数生成
+- [x] `--resume=<sessionId>`による同一Session継続
+- [x] Copilot JSONLからAssistant／Intent／Tool／Usage／Error Eventへの正規化（extended thinkingはRawのみ）
+- [x] Agent別Adapter選択、Agent Thread ID、Raw Event sourceの共通化
+- [x] Protocol／SQLite schemaのCodex＋Copilot対応
+- [x] Web／VS CodeのProvider／Model選択とCLI診断表示
+- [x] fake Copilot CLI、parser、複数Adapter統合テスト

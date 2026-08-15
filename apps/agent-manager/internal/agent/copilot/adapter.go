@@ -1,4 +1,4 @@
-package codex
+package copilot
 
 import (
 	"context"
@@ -35,19 +35,19 @@ type Adapter struct {
 
 func New(binaryName string) *Adapter {
 	if strings.TrimSpace(binaryName) == "" {
-		binaryName = "codex"
+		binaryName = "copilot"
 	}
 	return &Adapter{binaryName: binaryName, runner: process.Runner{}}
 }
 
-func (*Adapter) Name() protocol.AgentName { return protocol.AgentCodex }
+func (*Adapter) Name() protocol.AgentName { return protocol.AgentCopilot }
 
 func (*Adapter) ParseLine(line string) agent.ParsedLine { return ParseLine(line) }
 
 func (a *Adapter) Check(ctx context.Context) (agent.Info, error) {
 	path, err := exec.LookPath(a.binaryName)
 	if err != nil {
-		return agent.Info{}, fmt.Errorf("%w: executable was not found", ErrUnavailable)
+		return agent.Info{}, fmt.Errorf("%w: GitHub Copilot executable was not found", ErrUnavailable)
 	}
 	path, err = filepath.Abs(path)
 	if err != nil {
@@ -60,9 +60,7 @@ func (a *Adapter) Check(ctx context.Context) (agent.Info, error) {
 
 	var versionLines []string
 	result, err := a.runner.Run(ctx, process.Spec{
-		Path:    path,
-		Args:    append(append([]string{}, a.prefixArgs...), "--version"),
-		Timeout: 5 * time.Second,
+		Path: path, Args: append(append([]string{}, a.prefixArgs...), "--version"), Timeout: 5 * time.Second,
 	}, func(output process.Output) error {
 		if output.Stream == process.Stdout {
 			versionLines = append(versionLines, output.Line)
@@ -76,7 +74,7 @@ func (a *Adapter) Check(ctx context.Context) (agent.Info, error) {
 	if result.ExitCode != 0 || version == "" {
 		return agent.Info{}, fmt.Errorf("%w: version check exited with code %d", ErrUnavailable, result.ExitCode)
 	}
-	info := agent.Info{Name: protocol.AgentCodex, Path: path, Version: version}
+	info := agent.Info{Name: protocol.AgentCopilot, Path: path, Version: version}
 	a.mu.Lock()
 	a.info = info
 	a.mu.Unlock()
@@ -85,14 +83,14 @@ func (a *Adapter) Check(ctx context.Context) (agent.Info, error) {
 
 func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.Emitter) (agent.RunResult, error) {
 	if strings.TrimSpace(request.Prompt) == "" {
-		return agent.RunResult{}, errors.New("Codex prompt is required")
+		return agent.RunResult{}, errors.New("GitHub Copilot prompt is required")
 	}
 	directory, err := filepath.Abs(request.Directory)
 	if err != nil {
-		return agent.RunResult{}, fmt.Errorf("resolve Codex repository: %w", err)
+		return agent.RunResult{}, fmt.Errorf("resolve GitHub Copilot repository: %w", err)
 	}
 	if file, err := os.Stat(directory); err != nil || !file.IsDir() {
-		return agent.RunResult{}, errors.New("Codex repository must be an existing directory")
+		return agent.RunResult{}, errors.New("GitHub Copilot repository must be an existing directory")
 	}
 
 	a.mu.RLock()
@@ -106,29 +104,28 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 
 	args := append([]string{}, a.prefixArgs...)
 	args = append(args,
-		"--ask-for-approval", "never",
-		"--sandbox", "workspace-write",
-		"--cd", directory,
+		"-C", directory,
+		"--prompt", request.Prompt,
+		"--output-format", "json",
+		"--allow-all",
+		"--no-ask-user",
+		"--no-auto-update",
+		"--no-color",
+		"--no-remote",
+		"--no-remote-export",
 	)
+	if request.ThreadID != "" {
+		args = append(args, "--resume="+request.ThreadID)
+	}
 	if request.Model != "" {
 		args = append(args, "--model", request.Model)
-	}
-	args = append(args, "exec")
-	if request.ThreadID != "" {
-		args = append(args, "resume", "--json", request.ThreadID, "-")
-	} else {
-		args = append(args, "--json", "-")
 	}
 	timeout := request.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	result, err := a.runner.Run(ctx, process.Spec{
-		Path:    info.Path,
-		Args:    args,
-		Dir:     directory,
-		Stdin:   request.Prompt,
-		Timeout: timeout,
+		Path: info.Path, Args: args, Dir: directory, Timeout: timeout,
 	}, func(output process.Output) error {
 		if emit == nil {
 			return nil

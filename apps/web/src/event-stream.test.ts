@@ -29,7 +29,7 @@ function sessionEvent(sequence: number, sessionId = 'session 1'): SessionEvent {
     sessionId,
     sequence,
     timestamp: '2026-01-01T00:00:00Z',
-    schemaVersion: 1,
+    schemaVersion: 2,
     source: 'manager',
     type: 'run_started',
     data: {},

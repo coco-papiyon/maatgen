@@ -67,7 +67,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           </div>
           <div id="event-list" class="event-list"></div>
           <form id="prompt-form" class="prompt-form">
-            <textarea id="prompt-input" rows="2" placeholder="Codexに指示する…"></textarea>
+            <textarea id="prompt-input" rows="2" placeholder="Agentに指示する…"></textarea>
             <div class="prompt-actions"><button id="close-session" type="button" class="quiet-action">Close</button><button id="run-button" type="submit">Run</button><button id="cancel-button" type="button" hidden>Stop</button></div>
           </form>
         </section>
@@ -156,7 +156,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           const title = document.createElement('strong');
           title.textContent = session.workspace.split(/[\\/]/).pop() || session.workspace;
           const meta = document.createElement('span');
-          meta.textContent = session.status + ' · ' + new Date(session.createdAt).toLocaleString();
+          meta.textContent = session.agent + ' · ' + session.status + ' · ' + new Date(session.createdAt).toLocaleString();
           button.append(title, meta);
           button.addEventListener('click', () => vscode.postMessage({ type: 'session.select', sessionId: session.id }));
           historyList.append(button);
@@ -189,6 +189,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         providerSelect.disabled = hasSession || !!activeRun || !(providers || []).length;
         modelSelect.replaceChildren();
         const provider = (providers || []).find((item) => item.id === selectedProvider);
+        promptInput.placeholder = (provider?.label || 'Agent') + 'に指示する…';
         const defaultOption = document.createElement('option');
         defaultOption.value = ''; defaultOption.textContent = 'Default model';
         defaultOption.selected = !selectedModel; modelSelect.append(defaultOption);

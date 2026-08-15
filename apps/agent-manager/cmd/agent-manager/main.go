@@ -16,7 +16,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/copilot"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/changeset"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/eventbroker"
@@ -105,7 +107,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	runs := runservice.New(store, codex.New("codex"), runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector))
+	runs := runservice.NewMulti(store, []agent.Adapter{codex.New("codex"), copilot.New("copilot")}, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector))
 	restores, err := restoreservice.New(store, checkpointManager)
 	if err != nil {
 		return err

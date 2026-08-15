@@ -198,7 +198,7 @@ export class MockAgentApi implements AgentApi {
       sessionId,
       sequence: events.length + 1,
       timestamp: new Date().toISOString(),
-      schemaVersion: 1,
+      schemaVersion: 2,
       source,
       type,
       data,
@@ -258,16 +258,17 @@ function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[];
       event('mock-success', 4, 'usage_reported', { totalTokens: 2400 }),
     ], oneHunk('mock-success')),
     scenario('mock-failure', 'C:/demo/failure', [event('mock-failure', 1, 'run_failed', { code: 'codex_unavailable', message: 'Mock: Codex CLI is unavailable' })], emptyChanges('mock-failure')),
+    scenario('mock-copilot-failure', 'C:/demo/copilot-failure', [event('mock-copilot-failure', 1, 'run_failed', { code: 'copilot_unavailable', message: 'Mock: GitHub Copilot CLI is unavailable' })], emptyChanges('mock-copilot-failure'), 'copilot'),
     scenario('mock-cancelled', 'C:/demo/cancelled', [event('mock-cancelled', 1, 'run_cancelled', {})], emptyChanges('mock-cancelled')),
     scenario('mock-multi-hunk', 'C:/demo/multi-hunk', [event('mock-multi-hunk', 1, 'assistant_message', { text: '2つのHunkを個別に戻せます。' })], multiHunk('mock-multi-hunk')),
   ];
 }
 
-function scenario(id: string, workspace: string, events: SessionEvent[], changes: ChangeSet) {
+function scenario(id: string, workspace: string, events: SessionEvent[], changes: ChangeSet, agent: AgentSession['agent'] = 'codex') {
   return {
     session: {
       id,
-      agent: 'codex' as const,
+      agent,
       workspace,
       status: 'active' as const,
       createdAt: now,
@@ -278,7 +279,7 @@ function scenario(id: string, workspace: string, events: SessionEvent[], changes
 }
 
 function event(sessionId: string, sequence: number, type: SessionEvent['type'], data: unknown): SessionEvent {
-  return { id: `${sessionId}-event-${sequence}`, sessionId, sequence, timestamp: now, schemaVersion: 1, source: 'manager', type, data };
+  return { id: `${sessionId}-event-${sequence}`, sessionId, sequence, timestamp: now, schemaVersion: 2, source: 'manager', type, data };
 }
 
 function emptyChanges(sessionId: string): ChangeSet {

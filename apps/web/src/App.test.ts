@@ -40,7 +40,7 @@ describe('App with MockAgentApi', () => {
   it('renders session history, timeline events, changes, and live state', async () => {
     const mounted = await mountApp();
     expect(mounted.wrapper.find('.error-banner').exists() ? mounted.wrapper.find('.error-banner').text() : '').toBe('');
-    expect(mounted.wrapper.findAll('.session-item')).toHaveLength(4);
+    expect(mounted.wrapper.findAll('.session-item')).toHaveLength(5);
     expect(mounted.wrapper.text()).toContain('認証処理を確認し、テストを追加しました。');
     expect(mounted.wrapper.find('.stream-state').text()).toBe('Live');
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
@@ -81,7 +81,7 @@ describe('App with MockAgentApi', () => {
     Object.defineProperty(timeline, 'scrollHeight', { configurable: true, value: 1234 });
     pushEvent!({
       id: 'latest-event', sessionId: 'mock-success', sequence: 5,
-      timestamp: new Date().toISOString(), schemaVersion: 1, source: 'manager',
+      timestamp: new Date().toISOString(), schemaVersion: 2, source: 'manager',
       type: 'assistant_message', data: { text: '追加の結果' },
     });
     await flushPromises();
@@ -150,7 +150,7 @@ describe('App with MockAgentApi', () => {
     await flushPromises();
     pushEvent!({
       id: 'completed-first', sessionId: 'mock-success', runId: 'run-first', sequence: 5,
-      timestamp: new Date().toISOString(), schemaVersion: 1, source: 'manager', type: 'run_completed', data: {},
+      timestamp: new Date().toISOString(), schemaVersion: 2, source: 'manager', type: 'run_completed', data: {},
     });
     await flushPromises();
 
@@ -169,7 +169,7 @@ describe('App with MockAgentApi', () => {
         if (id !== 'mock-success' || afterSequence > 0) return existing;
         return [...existing, {
           id: 'running-event', sessionId: id, runId: 'run-restored', sequence: 5,
-          timestamp: new Date().toISOString(), schemaVersion: 1 as const, source: 'manager' as const,
+          timestamp: new Date().toISOString(), schemaVersion: 2 as const, source: 'manager' as const,
           type: 'run_started' as const, data: {},
         }];
       }
@@ -224,6 +224,10 @@ describe('App with MockAgentApi', () => {
     await wrapper.find('.load-more').trigger('click');
     await flushPromises();
     expect(wrapper.findAll('.session-item')).toHaveLength(4);
+    expect(wrapper.find('.load-more').exists()).toBe(true);
+    await wrapper.find('.load-more').trigger('click');
+    await flushPromises();
+    expect(wrapper.findAll('.session-item')).toHaveLength(5);
     expect(wrapper.find('.load-more').exists()).toBe(false);
   });
 
@@ -254,5 +258,13 @@ describe('App with MockAgentApi', () => {
     await failure!.trigger('click');
     await flushPromises();
     expect(mounted.wrapper.find('.diagnostic-card.codex').text()).toContain('Codex CLIを利用できません');
+  });
+
+  it('shows the GitHub Copilot installation diagnostic from a failed run event', async () => {
+    const mounted = await mountApp();
+    const failure = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('copilot-failure'));
+    await failure!.trigger('click');
+    await flushPromises();
+    expect(mounted.wrapper.find('.diagnostic-card.copilot').text()).toContain('GitHub Copilot CLIを利用できません');
   });
 });

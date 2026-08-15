@@ -5,6 +5,6 @@
  */
 
 export interface CreateSessionRequest {
-  agent: 'codex';
+  agent: 'codex' | 'copilot';
   workspace: string;
 }

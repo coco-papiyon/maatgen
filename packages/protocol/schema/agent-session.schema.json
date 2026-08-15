@@ -7,9 +7,9 @@
   "required": ["id", "agent", "workspace", "status", "createdAt"],
   "properties": {
     "id": { "type": "string", "minLength": 1 },
-    "agent": { "const": "codex" },
+    "agent": { "enum": ["codex", "copilot"] },
     "workspace": { "type": "string", "minLength": 1 },
-    "codexThreadId": { "type": "string", "minLength": 1 },
+    "agentThreadId": { "type": "string", "minLength": 1 },
     "status": { "enum": ["active", "closed"] },
     "createdAt": { "type": "string", "format": "date-time" },
     "closedAt": { "type": "string", "format": "date-time" }

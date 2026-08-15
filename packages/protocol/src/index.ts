@@ -17,7 +17,7 @@ import type { SessionListResponse as GeneratedSessionListResponse } from './gene
 import type { TokenUsage as GeneratedTokenUsage } from './generated/token-usage.js';
 import type { WsTicketResponse as GeneratedWsTicketResponse } from './generated/ws-ticket.js';
 
-export const SCHEMA_VERSION = 1 as const;
+export const SCHEMA_VERSION = 2 as const;
 
 export type AgentSession = GeneratedAgentSession;
 export type AgentName = AgentSession['agent'];

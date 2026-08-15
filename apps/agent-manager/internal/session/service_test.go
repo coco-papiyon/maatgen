@@ -25,6 +25,14 @@ func TestCreateSessionUsesRepositoryDirectly(t *testing.T) {
 	}
 }
 
+func TestCreateCopilotSession(t *testing.T) {
+	store := &fakeStore{}
+	service := New(store, &fakeRepositoryManager{root: "C:/repo"})
+	service.newID = func() (string, error) { return "session-copilot", nil }
+	created, err := service.CreateSession(context.Background(), protocol.CreateSessionRequest{Agent: protocol.AgentCopilot, Workspace: "C:/repo"})
+	if err != nil || created.Agent != protocol.AgentCopilot { t.Fatalf("session = %#v, err = %v", created, err) }
+}
+
 func TestCloseSessionRejectsActiveRunAndCleansCheckpointRefs(t *testing.T) {
 	store := &fakeStore{session: protocol.AgentSession{ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repo", Status: protocol.SessionActive, CreatedAt: time.Now()}, closeErr: storage.ErrRunActive}
 	repositories := &fakeRepositoryManager{root: "C:/repo"}

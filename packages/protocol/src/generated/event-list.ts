@@ -13,8 +13,8 @@ export interface SessionEvent {
   runId?: string;
   sequence: number;
   timestamp: string;
-  schemaVersion: 1;
-  source: 'user' | 'codex' | 'manager';
+  schemaVersion: 2;
+  source: 'user' | 'codex' | 'copilot' | 'manager';
   type:
     | 'user_prompt'
     | 'assistant_message'

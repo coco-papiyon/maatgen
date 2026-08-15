@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -44,7 +45,7 @@ func TestSessionAndRunLifecycle(t *testing.T) {
 		t.Fatalf("update thread id: %v", err)
 	}
 	gotSession, err = store.GetSession(ctx, session.ID)
-	if err != nil || gotSession.CodexThreadID == nil || *gotSession.CodexThreadID != threadID {
+	if err != nil || gotSession.AgentThreadID == nil || *gotSession.AgentThreadID != threadID {
 		t.Fatalf("updated session = %#v, err = %v", gotSession, err)
 	}
 
@@ -180,4 +181,30 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 		t.Fatalf("second open: %v", err)
 	}
 	defer second.Close()
+}
+
+func TestMultiAgentMigrationPreservesCodexSessions(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "manager.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil { t.Fatal(err) }
+	for version, name := range []string{"001_initial.sql", "002_change_store.sql", "003_session_cleanup.sql", "004_direct_checkpoints.sql"} {
+		content, readErr := migrationsFS.ReadFile("migrations/" + name)
+		if readErr != nil { t.Fatal(readErr) }
+		if _, err = db.ExecContext(ctx, string(content)); err != nil { t.Fatalf("apply %s: %v", name, err) }
+		if _, err = db.ExecContext(ctx, "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)", version+1, formatTime(time.Now().UTC())); err != nil { t.Fatal(err) }
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO sessions(id, agent, workspace, codex_thread_id, status, created_at) VALUES ('session-old', 'codex', 'C:/repo', 'thread-old', 'active', '2026-08-15T00:00:00Z')`); err != nil { t.Fatal(err) }
+	if _, err = db.ExecContext(ctx, `INSERT INTO runs(id, session_id, status, prompt, created_at) VALUES ('run-old', 'session-old', 'completed', 'done', '2026-08-15T00:00:00Z')`); err != nil { t.Fatal(err) }
+	if _, err = db.ExecContext(ctx, `INSERT INTO events(id, session_id, run_id, sequence, source, event_type, schema_version, payload_json, created_at) VALUES ('event-old', 'session-old', 'run-old', 1, 'codex', 'run_completed', 1, '{}', '2026-08-15T00:00:00Z')`); err != nil { t.Fatal(err) }
+	if err = db.Close(); err != nil { t.Fatal(err) }
+
+	store, err := Open(ctx, path)
+	if err != nil { t.Fatalf("upgrade store: %v", err) }
+	defer store.Close()
+	session, err := store.GetSession(ctx, "session-old")
+	if err != nil || session.AgentThreadID == nil || *session.AgentThreadID != "thread-old" { t.Fatalf("session = %#v, err = %v", session, err) }
+	if _, err = store.GetRun(ctx, "run-old"); err != nil { t.Fatalf("preserved run: %v", err) }
+	events, err := store.ListEventsAfter(ctx, "session-old", 0, 10)
+	if err != nil || len(events) != 1 || events[0].Source != protocol.EventSourceCodex { t.Fatalf("events = %#v, err = %v", events, err) }
 }

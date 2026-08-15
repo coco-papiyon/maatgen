@@ -23,8 +23,8 @@ func TestSessionEventFixture(t *testing.T) {
 	if event.SchemaVersion != SchemaVersion {
 		t.Fatalf("schema version = %d, want %d", event.SchemaVersion, SchemaVersion)
 	}
-	if event.Source != EventSourceManager {
-		t.Fatalf("source = %q, want %q", event.Source, EventSourceManager)
+	if event.Source != EventSourceCopilot {
+		t.Fatalf("source = %q, want %q", event.Source, EventSourceCopilot)
 	}
 }
 

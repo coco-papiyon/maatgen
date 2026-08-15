@@ -46,5 +46,7 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('id="provider-select"');
     expect(html).toContain('id="model-select"');
     expect(html).toContain("type: 'model.select'");
+    expect(html).toContain("session.agent + ' · ' + session.status");
+    expect(html).toContain("(provider?.label || 'Agent') + 'に指示する…'");
   });
 });

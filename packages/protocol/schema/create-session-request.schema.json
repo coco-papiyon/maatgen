@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["agent", "workspace"],
   "properties": {
-    "agent": { "const": "codex" },
+    "agent": { "enum": ["codex", "copilot"] },
     "workspace": { "type": "string", "minLength": 1 }
   }
 }

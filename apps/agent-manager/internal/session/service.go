@@ -43,7 +43,7 @@ func New(store Store, repositories RepositoryManager) *Service {
 }
 
 func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSessionRequest) (protocol.AgentSession, error) {
-	if request.Agent != protocol.AgentCodex {
+	if request.Agent != protocol.AgentCodex && request.Agent != protocol.AgentCopilot {
 		return protocol.AgentSession{}, ErrUnsupportedAgent
 	}
 	if strings.TrimSpace(request.Workspace) == "" {

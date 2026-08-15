@@ -60,15 +60,36 @@ func (s *Store) Close() error {
 
 func (s *Store) initialize(ctx context.Context) error {
 	for _, pragma := range []string{
-		"PRAGMA foreign_keys = ON",
 		"PRAGMA busy_timeout = 5000",
 		"PRAGMA journal_mode = WAL",
+		"PRAGMA foreign_keys = OFF",
+		// Migrations that rebuild a parent table keep child foreign keys bound
+		// to the final table name rather than following the temporary rename.
+		"PRAGMA legacy_alter_table = ON",
 	} {
 		if _, err := s.db.ExecContext(ctx, pragma); err != nil {
 			return fmt.Errorf("configure sqlite: %w", err)
 		}
 	}
-	return s.migrate(ctx)
+	if err := s.migrate(ctx); err != nil {
+		_, _ = s.db.ExecContext(context.WithoutCancel(ctx), "PRAGMA legacy_alter_table = OFF")
+		_, _ = s.db.ExecContext(context.WithoutCancel(ctx), "PRAGMA foreign_keys = ON")
+		return err
+	}
+	var foreignKeyViolation string
+	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE((SELECT `table` FROM pragma_foreign_key_check LIMIT 1), '')").Scan(&foreignKeyViolation); err != nil {
+		return fmt.Errorf("check migrated sqlite foreign keys: %w", err)
+	}
+	if foreignKeyViolation != "" {
+		return fmt.Errorf("check migrated sqlite foreign keys: table %s has an invalid reference", foreignKeyViolation)
+	}
+	if _, err := s.db.ExecContext(ctx, "PRAGMA legacy_alter_table = OFF"); err != nil {
+		return fmt.Errorf("restore sqlite alter-table behavior: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		return fmt.Errorf("enable sqlite foreign keys: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -140,12 +161,12 @@ func (s *Store) migrate(ctx context.Context) error {
 func (s *Store) CreateSession(ctx context.Context, session protocol.AgentSession) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions(
-			id, agent, workspace, codex_thread_id, status, created_at, closed_at
+			id, agent, workspace, agent_thread_id, status, created_at, closed_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Agent,
 		session.Workspace,
-		nullableString(session.CodexThreadID),
+		nullableString(session.AgentThreadID),
 		session.Status,
 		formatTime(session.CreatedAt),
 		nullableTime(session.ClosedAt),
@@ -158,7 +179,7 @@ func (s *Store) CreateSession(ctx context.Context, session protocol.AgentSession
 
 func (s *Store) GetSession(ctx context.Context, id string) (protocol.AgentSession, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, agent, workspace, codex_thread_id, status, created_at, closed_at
+		SELECT id, agent, workspace, agent_thread_id, status, created_at, closed_at
 		FROM sessions WHERE id = ?`, id)
 	return scanSession(row)
 }
@@ -168,7 +189,7 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 		limit = 100
 	}
 	query := `
-		SELECT id, agent, workspace, codex_thread_id, status, created_at, closed_at
+		SELECT id, agent, workspace, agent_thread_id, status, created_at, closed_at
 		FROM sessions`
 	args := []any{}
 	if before != nil {
@@ -201,7 +222,7 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 
 func (s *Store) UpdateSessionThreadID(ctx context.Context, id, threadID string) error {
 	result, err := s.db.ExecContext(ctx,
-		"UPDATE sessions SET codex_thread_id = ? WHERE id = ?", threadID, id,
+		"UPDATE sessions SET agent_thread_id = ? WHERE id = ?", threadID, id,
 	)
 	return updateResult("update session thread", result, err)
 }
@@ -327,7 +348,7 @@ func scanSession(row scanner) (protocol.AgentSession, error) {
 	}
 	session.CreatedAt = parsedCreatedAt
 	if threadID.Valid {
-		session.CodexThreadID = &threadID.String
+		session.AgentThreadID = &threadID.String
 	}
 	if closedAt.Valid {
 		parsed, err := parseTime(closedAt.String)

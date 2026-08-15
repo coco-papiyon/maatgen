@@ -5,11 +5,14 @@ import (
 	"time"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 type AgentName string
 
-const AgentCodex AgentName = "codex"
+const (
+	AgentCodex   AgentName = "codex"
+	AgentCopilot AgentName = "copilot"
+)
 
 type Provider struct {
 	ID           AgentName `json:"id"`
@@ -44,7 +47,7 @@ type AgentSession struct {
 	ID            string        `json:"id"`
 	Agent         AgentName     `json:"agent"`
 	Workspace     string        `json:"workspace"`
-	CodexThreadID *string       `json:"codexThreadId,omitempty"`
+	AgentThreadID *string       `json:"agentThreadId,omitempty"`
 	Status        SessionStatus `json:"status"`
 	CreatedAt     time.Time     `json:"createdAt"`
 	ClosedAt      *time.Time    `json:"closedAt,omitempty"`
@@ -103,6 +106,7 @@ type EventSource string
 const (
 	EventSourceUser    EventSource = "user"
 	EventSourceCodex   EventSource = "codex"
+	EventSourceCopilot EventSource = "copilot"
 	EventSourceManager EventSource = "manager"
 )
 

@@ -48,6 +48,6 @@ describe('protocol contracts', () => {
     const fixture = readJSON('../fixtures/session-event.json');
     const validate = ajv.compile(schema);
 
-    expect(validate({ ...fixture, schemaVersion: 2 })).toBe(false);
+    expect(validate({ ...fixture, schemaVersion: 3 })).toBe(false);
   });
 });

@@ -5,23 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
 
-type NormalizedEvent struct {
-	Type string
-	Data json.RawMessage
-}
-
-type ParsedLine struct {
-	RawJSON   json.RawMessage
-	CodexType string
-	ThreadID  string
-	Usage     *protocol.TokenUsage
-	Events    []NormalizedEvent
-	Malformed bool
-	Ignored   bool
-}
+type NormalizedEvent = agent.NormalizedEvent
+type ParsedLine = agent.ParsedLine
 
 type rawEnvelope struct {
 	Type     string          `json:"type"`
@@ -60,8 +49,6 @@ func ParseLine(line string) ParsedLine {
 	if err := json.Unmarshal(parsed.RawJSON, &envelope); err != nil || envelope.Type == "" {
 		return malformedJSON(parsed.RawJSON, "Codex JSONL event is missing a valid type")
 	}
-	parsed.CodexType = envelope.Type
-
 	switch envelope.Type {
 	case "thread.started":
 		if envelope.ThreadID == "" {

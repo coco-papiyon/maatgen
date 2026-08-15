@@ -323,6 +323,20 @@ CodingAgent
 - Error 表現
 - 終了コード
 
+### 9.1 GitHub Copilot CLI Adapter
+
+GitHub Copilot CLIはprogrammatic modeを使用し、対象Repositoryをcwdとして次の引数で実行する。
+
+```text
+copilot -C <repository> --prompt <message> --output-format json \
+  --allow-all --no-ask-user --no-auto-update --no-color \
+  --no-remote --no-remote-export [--model <model>] [--resume=<sessionId>]
+```
+
+`--output-format json`のJSONLはCopilot Adapter内で解釈する。`assistant.message`、`assistant.intent`、`tool.execution_start`、`tool.execution_complete`、`assistant.usage`、`session.error`を共通`SessionEvent`へ正規化し、未知Eventはマスク済みRaw Eventとして保持する。extended thinkingである`assistant.reasoning`はユーザー向けReasoning Summaryへ変換せず、sub-agent由来のassistant Eventもmain chatへ混在させない。
+
+初回RunでJSONLの`sessionId`を`AgentSession.agentThreadId`へ保存し、次Runから`--resume=<sessionId>`で同じ会話を継続する。CLI未導入、認証／quota error、timeout、cancelはCodexと同じRun終端処理およびafter snapshot取得へ合流する。
+
 ---
 
 ## 10. Session
@@ -333,7 +347,9 @@ CodingAgent
 export interface AgentSession {
   id: string;
 
-  agent: 'codex' | 'claude' | 'copilot';
+  agent: 'codex' | 'copilot';
+
+  agentThreadId?: string;
 
   model?: string;
 

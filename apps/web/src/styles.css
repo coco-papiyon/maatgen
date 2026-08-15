@@ -102,9 +102,9 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .error-banner { margin: 12px 24px 0; padding: 10px 12px; border: 1px solid #72463e; border-radius: 6px; background: #251714; color: #ffb4aa; font-size: 12px; }
 .diagnostic-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 12px 24px 0; padding: 12px 14px; border: 1px solid #725f38; border-radius: 7px; color: #e7d29c; background: #211c10; }
 .diagnostic-card.auth { border-color: #72463e; color: #ffb4aa; background: #251714; }
-.diagnostic-card.codex { border-color: #554a76; color: #c9bef1; background: #1b1727; }
+.diagnostic-card.codex, .diagnostic-card.copilot { border-color: #554a76; color: #c9bef1; background: #1b1727; }
 .diagnostic-card strong { display: block; font-size: 12px; }.diagnostic-card p { margin: 3px 0 0; color: #a99e7e; font-size: 10px; line-height: 1.5; }
-.diagnostic-card.auth p { color: #c58f87; }.diagnostic-card.codex p { color: #9f96bd; }
+.diagnostic-card.auth p { color: #c58f87; }.diagnostic-card.codex p, .diagnostic-card.copilot p { color: #9f96bd; }
 .diagnostic-card button { flex: 0 0 auto; padding: 7px 10px; border: 1px solid currentColor; border-radius: 5px; color: inherit; background: transparent; font-size: 10px; cursor: pointer; }
 
 .timeline { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: 22px max(24px, 7vw) 30px; overscroll-behavior: contain; }

@@ -31,7 +31,7 @@ const busy = ref(false);
 const error = ref('');
 const streamError = ref('');
 const streamState = ref<EventStreamState>('disconnected');
-const diagnostic = ref<{ kind: 'manager' | 'auth' | 'codex'; title: string; message: string }>();
+const diagnostic = ref<{ kind: 'manager' | 'auth' | 'codex' | 'copilot'; title: string; message: string }>();
 const selectedChangeId = ref('');
 const activeSidePanel = ref<'usage' | 'changes'>(localStorage.getItem('maatgen.sidePanel') === 'usage' ? 'usage' : 'changes');
 const showSystemMessages = ref(localStorage.getItem('maatgen.showSystemMessages') === 'true');
@@ -383,16 +383,23 @@ function handleFailure(cause: unknown) {
 }
 
 function updateDiagnosticFromEvents(items: SessionEvent[]) {
-  const unavailable = items.some((event) => {
+  const unavailable = items.find((event) => {
     const data = event.data as Record<string, unknown> | undefined;
-    return event.type === 'run_failed' && data?.code === 'codex_unavailable';
+    return event.type === 'run_failed' && ['codex_unavailable', 'copilot_unavailable'].includes(String(data?.code));
   });
   if (unavailable) {
-    diagnostic.value = {
-      kind: 'codex',
-      title: 'Codex CLIを利用できません',
-      message: 'Codex CLIをインストールしてPATHを確認し、codex --versionが成功する状態にしてください。',
-    };
+    const code = String((unavailable.data as Record<string, unknown> | undefined)?.code);
+    diagnostic.value = code === 'copilot_unavailable'
+      ? {
+          kind: 'copilot',
+          title: 'GitHub Copilot CLIを利用できません',
+          message: 'GitHub Copilot CLIをインストール・ログインしてPATHを確認し、copilot --versionが成功する状態にしてください。',
+        }
+      : {
+          kind: 'codex',
+          title: 'Codex CLIを利用できません',
+          message: 'Codex CLIをインストールしてPATHを確認し、codex --versionが成功する状態にしてください。',
+        };
   }
 }
 
@@ -500,7 +507,7 @@ onBeforeUnmount(() => {
 
       <section v-if="diagnostic" class="diagnostic-card" :class="diagnostic.kind" role="alert">
         <div><strong>{{ diagnostic.title }}</strong><p>{{ diagnostic.message }}</p></div>
-        <button v-if="diagnostic.kind !== 'codex'" :disabled="busy" @click="retryConnection">再試行</button>
+        <button v-if="!['codex', 'copilot'].includes(diagnostic.kind)" :disabled="busy" @click="retryConnection">再試行</button>
       </section>
       <div v-else-if="error" class="error-banner" role="alert">{{ error }}</div>
 

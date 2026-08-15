@@ -1,0 +1,50 @@
+package copilot
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
+)
+
+func TestParseCopilotEvents(t *testing.T) {
+	tests := []struct{ line, eventType string }{
+		{`{"type":"assistant.turn_start","data":{"sessionId":"d40fc21a-7d30-4e50-9bb0-c922aae7988f","turnId":"1"}}`, protocol.EventTypeRunStarted},
+		{`{"type":"assistant.message","id":"event-1","data":{"messageId":"message-1","content":"Implemented it."}}`, protocol.EventTypeAssistantMessage},
+		{`{"type":"assistant.intent","id":"intent-1","data":{"intent":"Checking the implementation"}}`, protocol.EventTypeReasoningSummary},
+		{`{"type":"tool.execution_start","data":{"toolCallId":"tool-1","toolName":"powershell","arguments":{"command":"go test ./..."}}}`, protocol.EventTypeCommandStarted},
+		{`{"type":"tool.execution_complete","data":{"toolCallId":"tool-1","success":true,"result":{"content":"ok"}}}`, protocol.EventTypeCommandCompleted},
+		{`{"type":"assistant.usage","data":{"model":"gpt-5.4","inputTokens":120,"outputTokens":30,"reasoningTokens":10,"cacheReadTokens":20}}`, protocol.EventTypeUsageReported},
+		{`{"type":"session.idle","data":{}}`, protocol.EventTypeRunCompleted},
+	}
+	for _, test := range tests {
+		parsed := ParseLine(test.line)
+		if parsed.Malformed || len(parsed.Events) != 1 || parsed.Events[0].Type != test.eventType || !json.Valid(parsed.RawJSON) {
+			t.Fatalf("ParseLine(%s) = %#v", test.line, parsed)
+		}
+		if test.eventType == protocol.EventTypeUsageReported && (parsed.Usage == nil || parsed.Usage.TotalTokens == nil || *parsed.Usage.TotalTokens != 150) {
+			t.Fatalf("usage = %#v", parsed.Usage)
+		}
+	}
+}
+
+func TestParseCopilotThreadErrorAndMalformed(t *testing.T) {
+	started := ParseLine(`{"type":"assistant.turn_start","sessionId":"session-123","data":{"turnId":"1"}}`)
+	if started.ThreadID != "session-123" { t.Fatalf("thread ID = %q", started.ThreadID) }
+	failed := ParseLine(`{"type":"session.error","data":{"errorType":"authentication","message":"Login required"}}`)
+	if failed.Events[0].Type != protocol.EventTypeRunFailed { t.Fatalf("failed = %#v", failed) }
+	malformed := ParseLine(`not-json`)
+	if !malformed.Malformed || malformed.Events[0].Type != protocol.EventTypeError { t.Fatalf("malformed = %#v", malformed) }
+	unknown := ParseLine(`{"type":"session.context_changed","data":{"cwd":"/repo"}}`)
+	if !unknown.Ignored { t.Fatalf("unknown = %#v", unknown) }
+}
+
+func TestIgnoreSubagentAssistantMessage(t *testing.T) {
+	parsed := ParseLine(`{"type":"assistant.message","agentId":"subagent-1","data":{"messageId":"message-1","content":"internal"}}`)
+	if !parsed.Ignored || len(parsed.Events) != 0 { t.Fatalf("parsed = %#v", parsed) }
+}
+
+func TestDoesNotExposeCopilotExtendedThinking(t *testing.T) {
+	parsed := ParseLine(`{"type":"assistant.reasoning","data":{"reasoningId":"reason-1","content":"private chain of thought"}}`)
+	if !parsed.Ignored || len(parsed.Events) != 0 { t.Fatalf("parsed = %#v", parsed) }
+}

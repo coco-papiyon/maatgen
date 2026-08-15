@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
-	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
@@ -56,8 +55,8 @@ type activeRun struct {
 }
 
 type Service struct {
-	store   Store
-	adapter agent.Adapter
+	store    Store
+	adapters map[protocol.AgentName]agent.Adapter
 	ctx     context.Context
 	cancel  context.CancelFunc
 
@@ -84,11 +83,20 @@ func WithCheckpointManager(manager CheckpointManager) Option {
 }
 
 func New(store Store, adapter agent.Adapter, options ...Option) *Service {
+	return NewMulti(store, []agent.Adapter{adapter}, options...)
+}
+
+func NewMulti(store Store, adapters []agent.Adapter, options ...Option) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	service := &Service{
-		store: store, adapter: adapter, ctx: ctx, cancel: cancel,
+		store: store, adapters: make(map[protocol.AgentName]agent.Adapter), ctx: ctx, cancel: cancel,
 		activeByRun: make(map[string]activeRun), activeBySession: make(map[string]string),
 		now: time.Now, newID: generateID,
+	}
+	for _, adapter := range adapters {
+		if adapter != nil {
+			service.adapters[adapter.Name()] = adapter
+		}
 	}
 	for _, option := range options {
 		option(service)
@@ -231,6 +239,12 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	}
 
 	var completedData, failedData json.RawMessage
+	var accumulatedUsage protocol.TokenUsage
+	adapter, configured := s.adapters[session.Agent]
+	if !configured {
+		s.finishPersistenceFailure(run, fmt.Errorf("agent %q is not configured", session.Agent))
+		return
+	}
 	model := ""
 	if request.Model != nil {
 		model = strings.TrimSpace(*request.Model)
@@ -239,29 +253,34 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	if request.TimeoutSeconds != nil {
 		timeout = time.Duration(*request.TimeoutSeconds) * time.Second
 	}
-	result, runErr := s.adapter.Run(ctx, agent.RunRequest{
-		Directory: session.Workspace, Prompt: run.Prompt, ThreadID: stringValue(session.CodexThreadID),
+	result, runErr := adapter.Run(ctx, agent.RunRequest{
+		Directory: session.Workspace, Prompt: run.Prompt, ThreadID: stringValue(session.AgentThreadID),
 		Model: model, Timeout: timeout,
 	}, func(output agent.Output) error {
 		if output.Stream == agent.OutputStderr {
-			return s.persistRaw(ctx, session.ID, run.ID, map[string]any{"stream": "stderr", "line": output.Line})
+			return s.persistRaw(ctx, session.ID, run.ID, session.Agent, map[string]any{"stream": "stderr", "line": output.Line})
 		}
-		parsed := codex.ParseLine(output.Line)
+		parsed := adapter.ParseLine(output.Line)
 		redactedRaw, err := security.RedactJSON(parsed.RawJSON)
 		if err != nil {
 			return err
 		}
-		if err := s.persistRedactedRaw(ctx, session.ID, run.ID, redactedRaw); err != nil {
+		if err := s.persistRedactedRaw(ctx, session.ID, run.ID, session.Agent, redactedRaw); err != nil {
 			return err
 		}
 		if parsed.ThreadID != "" {
 			if err := s.store.UpdateSessionThreadID(ctx, session.ID, parsed.ThreadID); err != nil {
 				return err
 			}
-			session.CodexThreadID = &parsed.ThreadID
+			session.AgentThreadID = &parsed.ThreadID
 		}
 		if parsed.Usage != nil {
-			if err := s.store.UpsertRunUsage(ctx, run.ID, *parsed.Usage, redactedRaw); err != nil {
+			usage := *parsed.Usage
+			if session.Agent == protocol.AgentCopilot {
+				accumulatedUsage = addUsage(accumulatedUsage, usage)
+				usage = accumulatedUsage
+			}
+			if err := s.store.UpsertRunUsage(ctx, run.ID, usage, redactedRaw); err != nil {
 				return err
 			}
 		}
@@ -276,7 +295,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 				failedData = candidate.Data
 				continue
 			}
-			source := protocol.EventSourceCodex
+			source := eventSource(session.Agent)
 			if parsed.Malformed {
 				source = protocol.EventSourceManager
 			}
@@ -311,28 +330,28 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	case result.TimedOut || errors.Is(runErr, process.ErrTimeout):
 		run.Status = protocol.RunFailed
 		terminalType = protocol.EventTypeRunFailed
-		terminalData = mustJSON(map[string]any{"message": "Codex run timed out", "timeout": true})
-	case errors.Is(runErr, codex.ErrUnavailable):
+		terminalData = mustJSON(map[string]any{"message": agentLabel(session.Agent) + " run timed out", "timeout": true})
+	case errors.Is(runErr, agent.ErrUnavailable):
 		run.Status = protocol.RunFailed
 		terminalType = protocol.EventTypeRunFailed
 		terminalData = mustJSON(map[string]any{
-			"code": "codex_unavailable", "message": "Codex CLI is not installed or unavailable",
+			"code": string(session.Agent) + "_unavailable", "message": agentLabel(session.Agent) + " CLI is not installed or unavailable",
 		})
 	case runErr != nil || result.ExitCode != 0:
 		run.Status = protocol.RunFailed
 		terminalType = protocol.EventTypeRunFailed
 		terminalData = failedData
 		if len(terminalData) == 0 {
-			terminalData = mustJSON(map[string]any{"message": "Codex run failed", "exitCode": result.ExitCode})
+			terminalData = mustJSON(map[string]any{"message": agentLabel(session.Agent) + " run failed", "exitCode": result.ExitCode})
 		}
 	default:
 		run.Status = protocol.RunCompleted
 		if len(terminalData) > 0 {
-			terminalSource = protocol.EventSourceCodex
+			terminalSource = eventSource(session.Agent)
 		}
 	}
 	if terminalType == protocol.EventTypeRunFailed && len(failedData) > 0 && !result.TimedOut {
-		terminalSource = protocol.EventSourceCodex
+		terminalSource = eventSource(session.Agent)
 	}
 	if len(terminalData) == 0 {
 		terminalData = json.RawMessage(`{}`)
@@ -357,7 +376,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		run.Status = protocol.RunFailed
 		terminalType = protocol.EventTypeRunFailed
 		terminalSource = protocol.EventSourceManager
-		terminalData = mustJSON(map[string]any{"message": "capture changes after Codex run", "code": "checkpoint_capture_failed"})
+		terminalData = mustJSON(map[string]any{"message": "capture changes after agent run", "code": "checkpoint_capture_failed"})
 	}
 	_ = s.store.UpdateRun(persistCtx, run)
 	// Release the per-session execution slot before publishing the terminal event.
@@ -392,16 +411,54 @@ func (s *Service) appendRawEvent(ctx context.Context, sessionID, runID string, s
 	})
 }
 
-func (s *Service) persistRaw(ctx context.Context, sessionID, runID string, value any) error {
-	return s.persistRedactedRaw(ctx, sessionID, runID, mustRedactedJSON(value))
+func (s *Service) persistRaw(ctx context.Context, sessionID, runID string, agentName protocol.AgentName, value any) error {
+	return s.persistRedactedRaw(ctx, sessionID, runID, agentName, mustRedactedJSON(value))
 }
 
-func (s *Service) persistRedactedRaw(ctx context.Context, sessionID, runID string, raw json.RawMessage) error {
+func (s *Service) persistRedactedRaw(ctx context.Context, sessionID, runID string, agentName protocol.AgentName, raw json.RawMessage) error {
 	_, err := s.store.AppendRedactedRawEvent(ctx, storage.RedactedRawEvent{
-		SessionID: sessionID, RunID: &runID, Agent: protocol.AgentCodex,
+		SessionID: sessionID, RunID: &runID, Agent: agentName,
 		RawJSON: raw, CreatedAt: s.now().UTC(),
 	})
 	return err
+}
+
+func eventSource(agentName protocol.AgentName) protocol.EventSource {
+	if agentName == protocol.AgentCopilot {
+		return protocol.EventSourceCopilot
+	}
+	return protocol.EventSourceCodex
+}
+
+func agentLabel(agentName protocol.AgentName) string {
+	if agentName == protocol.AgentCopilot {
+		return "GitHub Copilot"
+	}
+	return "Codex"
+}
+
+func addUsage(total, next protocol.TokenUsage) protocol.TokenUsage {
+	result := protocol.TokenUsage{Source: next.Source}
+	result.InputTokens = addInt64(total.InputTokens, next.InputTokens)
+	result.CachedInputTokens = addInt64(total.CachedInputTokens, next.CachedInputTokens)
+	result.OutputTokens = addInt64(total.OutputTokens, next.OutputTokens)
+	result.ReasoningOutputTokens = addInt64(total.ReasoningOutputTokens, next.ReasoningOutputTokens)
+	result.TotalTokens = addInt64(total.TotalTokens, next.TotalTokens)
+	return result
+}
+
+func addInt64(left, right *int64) *int64 {
+	if left == nil && right == nil {
+		return nil
+	}
+	var value int64
+	if left != nil {
+		value += *left
+	}
+	if right != nil {
+		value += *right
+	}
+	return &value
 }
 
 func (s *Service) release(runID, sessionID string) {

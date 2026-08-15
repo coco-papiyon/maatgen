@@ -2,10 +2,14 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
+
+var ErrUnavailable = errors.New("agent CLI is unavailable")
 
 type Info struct {
 	Name    protocol.AgentName `json:"name"`
@@ -33,6 +37,20 @@ type Output struct {
 	Line   string
 }
 
+type NormalizedEvent struct {
+	Type string
+	Data json.RawMessage
+}
+
+type ParsedLine struct {
+	RawJSON   json.RawMessage
+	ThreadID  string
+	Usage     *protocol.TokenUsage
+	Events    []NormalizedEvent
+	Malformed bool
+	Ignored   bool
+}
+
 type RunResult struct {
 	ExitCode   int
 	StartedAt  time.Time
@@ -47,4 +65,5 @@ type Adapter interface {
 	Name() protocol.AgentName
 	Check(ctx context.Context) (Info, error)
 	Run(ctx context.Context, request RunRequest, emit Emitter) (RunResult, error)
+	ParseLine(line string) ParsedLine
 }

@@ -20,8 +20,8 @@
     "runId": { "type": "string", "minLength": 1 },
     "sequence": { "type": "integer", "minimum": 1 },
     "timestamp": { "type": "string", "format": "date-time" },
-    "schemaVersion": { "const": 1 },
-    "source": { "enum": ["user", "codex", "manager"] },
+    "schemaVersion": { "const": 2 },
+    "source": { "enum": ["user", "codex", "copilot", "manager"] },
     "type": {
       "enum": [
         "user_prompt",
