@@ -57,7 +57,10 @@ button { color: inherit; }
 .usage-summary > div { display: flex; flex-direction: column; gap: 4px; padding: 8px; background: #121a14; }
 .usage-summary span { color: #77847a; font: 9px ui-monospace, monospace; text-transform: uppercase; }
 .usage-summary strong { color: #d8e7da; font: 600 12px ui-monospace, monospace; }
-.usage-summary .usage-total { grid-column: 1 / -1; background: #17241a; }.usage-summary .usage-total strong { color: var(--green); font-size: 14px; }
+.usage-summary .usage-total { grid-column: 1 / -1; background: #17241a; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; }
+.usage-summary .usage-total > div { background: #17241a; }
+.usage-summary .usage-total strong { color: var(--green); font-size: 14px; }
+.usage-run-value-with-cost { display: flex; gap: 12px; }
 .usage-run-list { padding: 0 10px 10px; }.usage-run { padding: 9px 0; border-top: 1px solid #263228; }
 .usage-run-header { display: flex; justify-content: space-between; color: #647166; font: 9px ui-monospace, monospace; }
 .usage-status { color: var(--green); text-transform: uppercase; }.usage-status.failed { color: var(--danger); }.usage-status.cancelled { color: #d7b868; }

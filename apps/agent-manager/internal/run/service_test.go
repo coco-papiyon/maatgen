@@ -95,30 +95,48 @@ func TestRunServiceSelectsCopilotAdapterAndPersistsThread(t *testing.T) {
 	ctx := context.Background()
 	store, _ := createRunTestStore(t)
 	session := protocol.AgentSession{ID: "session-copilot", Agent: protocol.AgentCopilot, Workspace: t.TempDir(), Status: protocol.SessionActive, CreatedAt: time.Now().UTC()}
-	if err := store.CreateSession(ctx, session); err != nil { t.Fatal(err) }
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
 	codexAdapter := &fakeAdapter{}
 	copilotAdapter := &fakeAdapter{name: protocol.AgentCopilot, lines: []agent.Output{
 		{Stream: agent.OutputStdout, Line: `{"type":"assistant.turn_start","sessionId":"copilot-session-123","data":{"turnId":"1"}}`},
 		{Stream: agent.OutputStdout, Line: `{"type":"assistant.message","data":{"messageId":"message-1","content":"Implemented with Copilot."}}`},
-		{Stream: agent.OutputStdout, Line: `{"type":"assistant.usage","data":{"inputTokens":10,"outputTokens":3}}`},
-		{Stream: agent.OutputStdout, Line: `{"type":"assistant.usage","data":{"inputTokens":20,"outputTokens":5}}`},
+		{Stream: agent.OutputStdout, Line: `{"type":"assistant.usage","data":{"model":"gpt-5.4","copilotUsage":{"totalNanoAiu":250000000}}}`},
+		{Stream: agent.OutputStdout, Line: `{"type":"assistant.usage","data":{"model":"gpt-5.4","copilotUsage":{"totalNanoAiu":500000000}}}`},
 		{Stream: agent.OutputStdout, Line: `{"type":"session.idle","data":{}}`},
 	}}
 	service := NewMulti(store, []agent.Adapter{codexAdapter, copilotAdapter}, WithCheckpointManager(&fakeCheckpointManager{}), WithChangeDetector(&fakeChangeDetector{}))
 	t.Cleanup(func() { _ = service.Close(context.Background()) })
 	run, err := service.StartRun(ctx, session.ID, protocol.SendMessageRequest{Message: "implement"})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	waitForRunStatus(t, store, run.ID, protocol.RunCompleted)
 	updated, err := store.GetSession(ctx, session.ID)
-	if err != nil || updated.AgentThreadID == nil || *updated.AgentThreadID != "copilot-session-123" { t.Fatalf("session = %#v, err = %v", updated, err) }
-	if len(codexAdapter.requests) != 0 || len(copilotAdapter.requests) != 1 { t.Fatalf("Codex requests = %d, Copilot requests = %d", len(codexAdapter.requests), len(copilotAdapter.requests)) }
+	if err != nil || updated.AgentThreadID == nil || *updated.AgentThreadID != "copilot-session-123" {
+		t.Fatalf("session = %#v, err = %v", updated, err)
+	}
+	if len(codexAdapter.requests) != 0 || len(copilotAdapter.requests) != 1 {
+		t.Fatalf("Codex requests = %d, Copilot requests = %d", len(codexAdapter.requests), len(copilotAdapter.requests))
+	}
 	events, err := store.ListEventsAfter(ctx, session.ID, 0, 100)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	found := false
-	for _, event := range events { if event.Type == protocol.EventTypeAssistantMessage && event.Source == protocol.EventSourceCopilot { found = true } }
-	if !found { t.Fatalf("events = %#v", events) }
+	for _, event := range events {
+		if event.Type == protocol.EventTypeAssistantMessage && event.Source == protocol.EventSourceCopilot {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("events = %#v", events)
+	}
 	usage, _, err := store.GetRunUsage(ctx, run.ID)
-	if err != nil || usage.TotalTokens == nil || *usage.TotalTokens != 38 { t.Fatalf("usage = %#v, err = %v", usage, err) }
+	if err != nil || usage.Model != nil || usage.ActualModel == nil || *usage.ActualModel != "gpt-5.4" || usage.AICredits == nil || *usage.AICredits != 0.75 || usage.TotalTokens != nil {
+		t.Fatalf("usage = %#v, err = %v", usage, err)
+	}
 }
 
 func TestRunServiceRejectsConcurrentRunAndCancels(t *testing.T) {
@@ -308,7 +326,9 @@ func (*fakeCheckpointManager) Capture(_ context.Context, _ string, sessionID, ru
 var _ ChangeDetector = (*fakeChangeDetector)(nil)
 
 func (f *fakeAdapter) Name() protocol.AgentName {
-	if f.name != "" { return f.name }
+	if f.name != "" {
+		return f.name
+	}
 	return protocol.AgentCodex
 }
 
@@ -317,7 +337,9 @@ func (*fakeAdapter) Check(context.Context) (agent.Info, error) {
 }
 
 func (f *fakeAdapter) ParseLine(line string) agent.ParsedLine {
-	if f.Name() == protocol.AgentCopilot { return copilotadapter.ParseLine(line) }
+	if f.Name() == protocol.AgentCopilot {
+		return copilotadapter.ParseLine(line)
+	}
 	return codex.ParseLine(line)
 }
 

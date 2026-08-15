@@ -40,10 +40,19 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           <summary><span>USAGE</span><span id="usage-count" class="panel-count">0</span><span class="panel-chevron" aria-hidden="true">⌄</span></summary>
           <div class="usage-content">
             <div class="usage-grid">
-              <span>Input <strong id="usage-input">—</strong></span>
-              <span>Cached <strong id="usage-cached">—</strong></span>
-              <span>Output <strong id="usage-output">—</strong></span>
-              <span>Total <strong id="usage-total">—</strong></span>
+              <span data-token-usage>Input <strong id="usage-input">—</strong></span>
+              <span data-token-usage>Cached <strong id="usage-cached">—</strong></span>
+              <span data-token-usage>Output <strong id="usage-output">—</strong></span>
+              <div data-token-usage class="usage-total-cost">
+                <span>Total <strong id="usage-total">—</strong></span>
+                <span>Cost <strong id="usage-cost">—</strong></span>
+              </div>
+              <span data-copilot-usage hidden>Model <strong id="usage-requested-model">—</strong></span>
+              <span data-copilot-usage hidden>Actual model <strong id="usage-model">—</strong></span>
+              <div data-copilot-usage hidden class="usage-credits-cost">
+                <span>AI credits <strong id="usage-credits">—</strong></span>
+                <span>Cost <strong id="usage-cost-copilot">—</strong></span>
+              </div>
             </div>
           </div>
         </details>
@@ -109,7 +118,9 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const usageCount = document.getElementById('usage-count');
       const usageElements = {
         input: document.getElementById('usage-input'), cached: document.getElementById('usage-cached'),
-        output: document.getElementById('usage-output'), total: document.getElementById('usage-total')
+        output: document.getElementById('usage-output'), total: document.getElementById('usage-total'),
+        model: document.getElementById('usage-model'), requestedModel: document.getElementById('usage-requested-model'), credits: document.getElementById('usage-credits'), cost: document.getElementById('usage-cost'),
+        costCopilot: document.getElementById('usage-cost-copilot')
       };
       const changesCount = document.getElementById('changes-count');
       const changesList = document.getElementById('changes-list');
@@ -122,6 +133,23 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         if (!isNearEventListBottom()) followLatestEvent = false;
       });
       const formatTokens = (value) => typeof value === 'number' ? value.toLocaleString('en-US') : '—';
+      const formatCredits = (value) => typeof value === 'number' ? value.toLocaleString('en-US', { maximumFractionDigits: 6 }) : '—';
+      const formatCost = (value) => typeof value === 'number' ? '$' + value.toFixed(6) : '—';
+      const renderUsage = (summary) => {
+        const isCopilotUsage = typeof summary.model === 'string' || typeof summary.aiCredits === 'number';
+        document.querySelectorAll('[data-token-usage]').forEach((element) => { element.hidden = isCopilotUsage; });
+        document.querySelectorAll('[data-copilot-usage]').forEach((element) => { element.hidden = !isCopilotUsage; });
+        usageElements.input.textContent = formatTokens(summary.inputTokens);
+        usageElements.cached.textContent = formatTokens(summary.cachedInputTokens);
+        usageElements.output.textContent = formatTokens(summary.outputTokens);
+        usageElements.total.textContent = formatTokens(summary.totalTokens);
+        usageElements.requestedModel.textContent = typeof summary.model === 'string' ? summary.model : '—';
+        usageElements.model.textContent = typeof summary.actualModel === 'string' ? summary.actualModel : '—';
+        usageElements.credits.textContent = formatCredits(summary.aiCredits);
+        usageElements.cost.textContent = formatCost(summary.costUsd);
+        usageElements.costCopilot.textContent = formatCost(summary.costUsd);
+        usageCount.textContent = 'available';
+      };
       const eventText = (event) => {
         const data = event.data || {};
         if (typeof data.text === 'string') return data.text;
@@ -278,12 +306,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           renderEvents(event.data.events || []);
           renderChanges(event.data.changes);
           if (event.data.usage?.summary) {
-            const summary = event.data.usage.summary;
-            usageElements.input.textContent = formatTokens(summary.inputTokens);
-            usageElements.cached.textContent = formatTokens(summary.cachedInputTokens);
-            usageElements.output.textContent = formatTokens(summary.outputTokens);
-            usageElements.total.textContent = formatTokens(summary.totalTokens);
-            usageCount.textContent = 'available';
+            renderUsage(event.data.usage.summary);
           } else {
             usageCount.textContent = '0';
           }
@@ -301,12 +324,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           return;
         }
         if (event.data?.type === 'usage.summary') {
-          const summary = event.data.summary || {};
-          usageElements.input.textContent = formatTokens(summary.inputTokens);
-          usageElements.cached.textContent = formatTokens(summary.cachedInputTokens);
-          usageElements.output.textContent = formatTokens(summary.outputTokens);
-          usageElements.total.textContent = formatTokens(summary.totalTokens);
-          usageCount.textContent = 'available';
+          renderUsage(event.data.summary || {});
           return;
         }
         if (event.data?.type !== 'workspace.state') return;

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/pricing"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 )
@@ -64,12 +65,16 @@ func TestEventUsageAndRawEventPersistence(t *testing.T) {
 	}
 
 	input, cached, output, reasoning, total := int64(100), int64(40), int64(20), int64(5), int64(120)
+	model, aiCredits, costUSD := "gpt-5.4", 0.125, 0.00125
 	usage := protocol.TokenUsage{
 		InputTokens:           &input,
 		CachedInputTokens:     &cached,
 		OutputTokens:          &output,
 		ReasoningOutputTokens: &reasoning,
 		TotalTokens:           &total,
+		Model:                 &model,
+		AICredits:             &aiCredits,
+		CostUSD:               &costUSD,
 		Source:                "cli",
 	}
 	rawUsage := json.RawMessage(`{"input_tokens":100,"output_tokens":20}`)
@@ -80,7 +85,7 @@ func TestEventUsageAndRawEventPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get usage: %v", err)
 	}
-	if gotUsage.TotalTokens == nil || *gotUsage.TotalTokens != total || string(gotRaw) != string(rawUsage) {
+	if gotUsage.TotalTokens == nil || *gotUsage.TotalTokens != total || gotUsage.Model == nil || *gotUsage.Model != model || gotUsage.AICredits == nil || *gotUsage.AICredits != aiCredits || gotUsage.CostUSD == nil || *gotUsage.CostUSD != costUSD || string(gotRaw) != string(rawUsage) {
 		t.Fatalf("usage = %#v, raw = %s", gotUsage, gotRaw)
 	}
 
@@ -104,6 +109,22 @@ func TestEventUsageAndRawEventPersistence(t *testing.T) {
 	if len(rawEvents) != 1 || rawEvents[0].ID != rawEvent.ID {
 		t.Fatalf("raw events = %#v", rawEvents)
 	}
+}
+
+func TestBackfillRunCosts(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil { t.Fatal(err) }
+	defer store.Close()
+	createSessionAndRun(t, ctx, store, time.Now().UTC())
+	model := "gpt-5.4"
+	input, cached, output := int64(1000), int64(200), int64(300)
+	if err := store.UpsertModelPricing(ctx, pricing.ModelPricing{Provider: "codex", Model: model, InputPerMillion: 2, CachedInputPerMillion: 0.2, OutputPerMillion: 10, SourceURL: "test", RetrievedAt: time.Now().UTC()}); err != nil { t.Fatal(err) }
+	if err := store.UpsertRunUsage(ctx, "run-1", protocol.TokenUsage{InputTokens: &input, CachedInputTokens: &cached, OutputTokens: &output, Source: "cli"}, nil); err != nil { t.Fatal(err) }
+	count, err := store.BackfillRunCosts(ctx, map[string]string{"codex": model})
+	if err != nil || count != 1 { t.Fatalf("backfill count = %d, err = %v", count, err) }
+	usage, _, err := store.GetRunUsage(ctx, "run-1")
+	if err != nil || usage.CostUSD == nil || *usage.CostUSD <= 0 { t.Fatalf("usage = %#v, err = %v", usage, err) }
 }
 
 func TestRejectsInvalidEventJSON(t *testing.T) {

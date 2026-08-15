@@ -405,6 +405,12 @@ Codex MVPの完了後に、同じ`AgentAdapter`と`SessionEvent`契約へGitHub 
 
 Copilotは`--output-format json`、`--prompt`、`--resume=<sessionId>`を使用する。JSONL parser、引数、利用不可エラーだけをAdapterへ閉じ込め、Session／Run／Checkpoint／RestoreとWeb／VS Code UIは共通契約を使う。
 
+実行結果の`model`には指定モデル（Codex未指定は`default`、Copilot自動選択は`auto`）を、`actualModel`には実モデルを保存する。Copilotの`assistant.usage.model`または`assistant.message.data.model`を実モデルとして保存し、`auto`指定時にも選択されたモデルを確認可能にする。Codexのdefault指定時もCLIが返したモデルを`actualModel`へ保存する。Copilotではtoken数を保存せず、リクエスト単位の`copilotUsage.totalNanoAiu`をAI creditsへ変換してRun／Session単位に集計する。旧CLIの`result.usage.premiumRequests`形式もフォールバックとして取り込む。
+
+Manager起動時に[OpenAIモデル比較](https://developers.openai.com/api/docs/models/compare)と[GitHub Copilotモデル料金](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing)を取得し、モデル料金をSQLiteへ保持する。Run完了時にCodexはtoken単価から、CopilotはAI credit単価からUSDコストを計算し、Web／VS Codeへ表示する。
+
+`--backfill-costs`は未計算の全Usageを再処理する。保存モデルがない旧Codex Usageは現在の既定モデル（未指定時は設定リスト先頭）を用い、Copilot Usageはモデルの有無にかかわらず保存済みAI creditから計算する。
+
 ## 6. HTTP API
 
 ```text
@@ -480,9 +486,13 @@ cached_input_tokens
 output_tokens
 reasoning_output_tokens
 total_tokens
+model
+ai_credits
 source
 raw_json
 ```
+
+`model_pricing`にはprovider、model、入力／cached入力／cache write／出力の1M token単価、source URL、retrieved_atを保存する。
 
 ### redacted_raw_events
 
@@ -703,6 +713,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-55 | Agent比較指標 | — | — | Analytics | 未 |
 | D-56 | Claude Codeの出力・resume方式 | — | — | Claude Adapter | 未 |
 | D-57 | Copilot CLIの出力・認証方式 | programmatic JSONLとCLI管理のログイン情報を使用 | `--output-format json`を正規化し、認証情報は保存せずCLIのログイン状態を利用する。Session IDは`agentThreadId`へ保存して`--resume`する | Copilot Adapter | 検討済み |
+| D-64 | Copilot Usageの記録単位 | 実動作モデルとAI credits | `assistant.usage.model`を保存し、`copilotUsage.totalNanoAiu / 1_000_000_000`をRun内で加算する。Copilotのtoken数とモデル倍率`cost`は共通Usageへ保存しない | Copilot Adapter | 検討済み |
 | D-58 | GitHub Issue／PR連携方式 | — | — | GitHub連携 | 未 |
 | D-59 | Multi-Agent Sessionの分離単位 | — | — | 複数Agent実行 | 未 |
 | D-60 | リモート実行・外部公開の認証 | — | — | 将来のServer化 | 未 |

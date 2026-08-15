@@ -82,12 +82,16 @@ type AgentRun struct {
 }
 
 type TokenUsage struct {
-	InputTokens           *int64 `json:"inputTokens,omitempty"`
-	CachedInputTokens     *int64 `json:"cachedInputTokens,omitempty"`
-	OutputTokens          *int64 `json:"outputTokens,omitempty"`
-	ReasoningOutputTokens *int64 `json:"reasoningOutputTokens,omitempty"`
-	TotalTokens           *int64 `json:"totalTokens,omitempty"`
-	Source                string `json:"source"`
+	InputTokens           *int64   `json:"inputTokens,omitempty"`
+	CachedInputTokens     *int64   `json:"cachedInputTokens,omitempty"`
+	OutputTokens          *int64   `json:"outputTokens,omitempty"`
+	ReasoningOutputTokens *int64   `json:"reasoningOutputTokens,omitempty"`
+	TotalTokens           *int64   `json:"totalTokens,omitempty"`
+	Model                 *string  `json:"model,omitempty"`
+	ActualModel           *string  `json:"actualModel,omitempty"`
+	AICredits             *float64 `json:"aiCredits,omitempty"`
+	CostUSD               *float64 `json:"costUsd,omitempty"`
+	Source                string   `json:"source"`
 }
 
 type SessionUsage struct {

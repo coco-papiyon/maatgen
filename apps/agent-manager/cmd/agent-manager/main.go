@@ -22,6 +22,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/changeset"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/eventbroker"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/pricing"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	restoreservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/restore"
 	runservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/run"
@@ -57,6 +58,7 @@ func run() error {
 	authToken := flag.String("auth-token", "", "bearer token; generated when omitted")
 	allowedOrigins := flag.String("allowed-origins", "http://localhost:5173,http://127.0.0.1:5173", "comma-separated browser origins")
 	configFile := flag.String("config", toolconfig.DefaultRelativePath, "tool configuration path relative to the executable")
+	backfillCosts := flag.Bool("backfill-costs", false, "refresh pricing and recalculate historical run costs, then exit")
 	flag.Parse()
 	executablePath, err := os.Executable()
 	if err != nil {
@@ -106,6 +108,28 @@ func run() error {
 		slog.Info("removed empty sessions", "count", deleted)
 	}
 	defer store.Close()
+	pricingModels := make(map[string][]string)
+	fallbackModels := make(map[string]string)
+	for _, provider := range toolConfig.Providers {
+		pricingModels[string(provider.ID)] = provider.Models
+		fallback := provider.DefaultModel
+		if fallback == "" && len(provider.Models) > 0 { fallback = provider.Models[0] }
+		if fallback != "auto" { fallbackModels[string(provider.ID)] = fallback }
+	}
+	pricingCtx, cancelPricing := context.WithTimeout(context.Background(), 10*time.Second)
+	fetcher := pricing.Fetcher{}
+	for _, value := range fetcher.Refresh(pricingCtx, pricingModels) {
+		_ = store.UpsertModelPricing(pricingCtx, value)
+	}
+	if backfilled, backfillErr := store.BackfillRunCosts(pricingCtx, fallbackModels); backfillErr != nil {
+		slog.Warn("historical run cost backfill failed", "error", backfillErr)
+	} else if backfilled > 0 {
+		slog.Info("backfilled historical run costs", "count", backfilled)
+	}
+	cancelPricing()
+	if *backfillCosts {
+		return nil
+	}
 	checkpointManager, err := checkpoint.New()
 	if err != nil {
 		return err
@@ -115,7 +139,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	runs := runservice.NewMulti(store, []agent.Adapter{codex.New("codex"), copilot.New("copilot")}, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector))
+	runs := runservice.NewMulti(store, []agent.Adapter{codex.New("codex"), copilot.New("copilot")}, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store))
 	restores, err := restoreservice.New(store, checkpointManager)
 	if err != nil {
 		return err

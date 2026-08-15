@@ -4,5 +4,9 @@
   "outputTokens": 20,
   "reasoningOutputTokens": 5,
   "totalTokens": 120,
+  "model": "gpt-5.4",
+  "actualModel": "gpt-5.4",
+  "aiCredits": 0.125,
+  "costUsd": 0.00125,
   "source": "cli"
 }

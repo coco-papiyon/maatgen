@@ -115,6 +115,7 @@ function eventText(event: SessionEvent): string {
   if (event.type === 'run_completed') return 'Runが完了しました';
   if (event.type === 'run_cancelled') return 'Runをキャンセルしました';
   if (event.type === 'usage_reported') {
+    if (typeof data?.aiCredits === 'number') return `AI credits: ${formatCredits(data.aiCredits)}`;
     const total = data?.totalTokens ?? data?.total_tokens;
     return total ? `Token usage: ${String(total)}` : 'Token usageを更新しました';
   }
@@ -161,7 +162,17 @@ function formatTokens(value?: number): string {
   return value === undefined ? '—' : value.toLocaleString('en-US');
 }
 
-function usageValue(usageData: TokenUsage | undefined, key: keyof Omit<TokenUsage, 'source'>): string {
+function formatCredits(value?: number): string {
+  return value === undefined ? '—' : value.toLocaleString('en-US', { maximumFractionDigits: 6 });
+}
+
+function formatCost(value?: number): string {
+  return value === undefined ? '—' : `$${value.toFixed(6)}`;
+}
+
+type TokenUsageKey = 'inputTokens' | 'cachedInputTokens' | 'outputTokens' | 'reasoningOutputTokens' | 'totalTokens';
+
+function usageValue(usageData: TokenUsage | undefined, key: TokenUsageKey): string {
   return formatTokens(usageData?.[key]);
 }
 
@@ -562,11 +573,22 @@ onBeforeUnmount(() => {
           <span>Usage</span><span class="count accent">{{ usage.runs.length }}</span>
         </div>
         <div class="usage-summary">
-          <div><span>Input</span><strong>{{ formatTokens(usage.summary.inputTokens) }}</strong></div>
-          <div><span>Cached</span><strong>{{ formatTokens(usage.summary.cachedInputTokens) }}</strong></div>
-          <div><span>Output</span><strong>{{ formatTokens(usage.summary.outputTokens) }}</strong></div>
-          <div><span>Reasoning</span><strong>{{ formatTokens(usage.summary.reasoningOutputTokens) }}</strong></div>
-          <div class="usage-total"><span>Total</span><strong>{{ formatTokens(usage.summary.totalTokens) }}</strong></div>
+          <template v-if="activeProvider === 'copilot'">
+            <div class="usage-total usage-total-with-cost">
+              <div><span>AI credits</span><strong>{{ formatCredits(usage.summary.aiCredits) }}</strong></div>
+              <div><span>Cost</span><strong>{{ formatCost(usage.summary.costUsd) }}</strong></div>
+            </div>
+          </template>
+          <template v-else>
+            <div><span>Input</span><strong>{{ formatTokens(usage.summary.inputTokens) }}</strong></div>
+            <div><span>Cached</span><strong>{{ formatTokens(usage.summary.cachedInputTokens) }}</strong></div>
+            <div><span>Output</span><strong>{{ formatTokens(usage.summary.outputTokens) }}</strong></div>
+            <div><span>Reasoning</span><strong>{{ formatTokens(usage.summary.reasoningOutputTokens) }}</strong></div>
+            <div class="usage-total usage-total-with-cost">
+              <div><span>Total</span><strong>{{ formatTokens(usage.summary.totalTokens) }}</strong></div>
+              <div><span>Cost</span><strong>{{ formatCost(usage.summary.costUsd) }}</strong></div>
+            </div>
+          </template>
         </div>
         <div v-if="usage.runs.length" class="usage-run-list">
           <article v-for="entry in usage.runs" :key="entry.run.id" class="usage-run">
@@ -575,10 +597,21 @@ onBeforeUnmount(() => {
               <time>{{ new Date(entry.run.finishedAt ?? entry.run.startedAt ?? '').toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>
             </div>
             <p>{{ entry.run.prompt }}</p>
-            <div class="usage-run-values">
+            <div v-if="activeProvider === 'copilot'" class="usage-run-values">
+              <span>Model {{ entry.usage?.model ?? '—' }}</span>
+              <span>Actual model {{ entry.usage?.actualModel ?? '—' }}</span>
+              <div class="usage-run-value-with-cost">
+                <span>AI credits {{ formatCredits(entry.usage?.aiCredits) }}</span>
+                <span>Cost {{ formatCost(entry.usage?.costUsd) }}</span>
+              </div>
+            </div>
+            <div v-else class="usage-run-values">
               <span>In {{ usageValue(entry.usage, 'inputTokens') }}</span>
               <span>Out {{ usageValue(entry.usage, 'outputTokens') }}</span>
-              <span>Total {{ usageValue(entry.usage, 'totalTokens') }}</span>
+              <div class="usage-run-value-with-cost">
+                <span>Total {{ usageValue(entry.usage, 'totalTokens') }}</span>
+                <span>Cost {{ formatCost(entry.usage?.costUsd) }}</span>
+              </div>
             </div>
           </article>
         </div>

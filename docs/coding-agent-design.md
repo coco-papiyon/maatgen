@@ -333,7 +333,13 @@ copilot -C <repository> --prompt <message> --output-format json \
   --no-remote --no-remote-export [--model <model>] [--resume=<sessionId>]
 ```
 
-`--output-format json`のJSONLはCopilot Adapter内で解釈する。`assistant.message`、`assistant.intent`、`tool.execution_start`、`tool.execution_complete`、`assistant.usage`、`session.error`を共通`SessionEvent`へ正規化し、未知Eventはマスク済みRaw Eventとして保持する。extended thinkingである`assistant.reasoning`はユーザー向けReasoning Summaryへ変換せず、sub-agent由来のassistant Eventもmain chatへ混在させない。
+`--output-format json`のJSONLはCopilot Adapter内で解釈する。`assistant.message`、`assistant.intent`、`tool.execution_start`、`tool.execution_complete`、`assistant.usage`、`result`、`session.error`を共通`SessionEvent`へ正規化し、未知Eventはマスク済みRaw Eventとして保持する。実動作モデルは`assistant.message.data.model`も補助的に参照する。extended thinkingである`assistant.reasoning`はユーザー向けReasoning Summaryへ変換せず、sub-agent由来のassistant Eventもmain chatへ混在させない。
+
+CopilotのUsageはtoken数を共通Usageへ転記せず、`assistant.usage`または`assistant.message.data.model`の`model`を実動作モデルとして記録する。特に`--model auto`では、この値を選択結果として表示する。課金量はモデル倍率の`cost`ではなく、`copilotUsage.totalNanoAiu / 1_000_000_000`をAI creditsとしてRun内で加算する。旧CLIが`assistant.usage`を出さず最終`result.usage.premiumRequests`だけを出す場合は、その値を取得して既存Usageへ保存する。
+
+料金表はManager起動時に公式Webページから取得し、`model_pricing`へモデル別の入力／cached入力／cache write／出力単価と取得元URL・取得時刻を保存する。Codexは保存済みtoken数からUSDコストを算出し、CopilotはAI credit（1 credit = $0.01）をUSDへ変換する。料金取得に失敗してもRunは継続し、コストは未算出として扱う。
+
+過去データのバックフィルは`cost_usd IS NULL`の全Usageを対象にする。CopilotはAI creditだけで計算でき、旧Codexデータにモデルが保存されていない場合は現在のprovider default、未指定なら先頭の設定モデルを使用する。
 
 初回RunでJSONLの`sessionId`を`AgentSession.agentThreadId`へ保存し、次Runから`--resume=<sessionId>`で同じ会話を継続する。CLI未導入、認証／quota error、timeout、cancelはCodexと同じRun終端処理およびafter snapshot取得へ合流する。
 
@@ -352,6 +358,8 @@ export interface AgentSession {
   agentThreadId?: string;
 
   model?: string;
+
+  actualModel?: string;
 
   workspace: string;
 
@@ -437,7 +445,7 @@ Raw Event を保存することで、将来的な CLI フォーマット変更�
 
 ---
 
-## 12. Token Usage
+## 12. Usage
 
 Agent ごとに取得可能な情報が異なるため、Token Usage の各項目は Optional とする。
 
@@ -451,6 +459,10 @@ export interface TokenUsage {
 
   totalTokens?: number;
 
+  model?: string;
+
+  aiCredits?: number;
+
   source:
     | 'cli'
     | 'api'
@@ -459,7 +471,7 @@ export interface TokenUsage {
 }
 ```
 
-Token 使用量は Session 単位だけでなく、可能な場合は Event 単位でも記録する。
+`model`は実行時に指定したモデル（Codexの未指定は`default`、Copilotの自動選択は`auto`）で、`actualModel`はCLIが返す実際のモデルとする。Codexはtoken使用量を記録し、Codexのdefault指定時もCLIが返した実モデルを`actualModel`へ保存する。Copilotは`assistant.usage.model`または`assistant.message.data.model`を`actualModel`へ保存し、token使用量は記録しない。UsageはSession単位だけでなく、可能な場合はEvent単位でも記録する。
 
 ---
 

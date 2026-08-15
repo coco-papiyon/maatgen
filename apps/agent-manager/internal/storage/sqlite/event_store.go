@@ -133,14 +133,18 @@ func (s *Store) UpsertRunUsage(ctx context.Context, runID string, usage protocol
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO run_usage(
 			run_id, input_tokens, cached_input_tokens, output_tokens,
-			reasoning_output_tokens, total_tokens, source, raw_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			reasoning_output_tokens, total_tokens, model, actual_model, ai_credits, cost_usd, source, raw_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(run_id) DO UPDATE SET
 			input_tokens = excluded.input_tokens,
 			cached_input_tokens = excluded.cached_input_tokens,
 			output_tokens = excluded.output_tokens,
 			reasoning_output_tokens = excluded.reasoning_output_tokens,
 			total_tokens = excluded.total_tokens,
+			model = excluded.model,
+			actual_model = excluded.actual_model,
+			ai_credits = excluded.ai_credits,
+			cost_usd = excluded.cost_usd,
 			source = excluded.source,
 			raw_json = excluded.raw_json`,
 		runID,
@@ -149,6 +153,10 @@ func (s *Store) UpsertRunUsage(ctx context.Context, runID string, usage protocol
 		nullableInt64(usage.OutputTokens),
 		nullableInt64(usage.ReasoningOutputTokens),
 		nullableInt64(usage.TotalTokens),
+		nullableString(usage.Model),
+		nullableString(usage.ActualModel),
+		nullableFloat64(usage.AICredits),
+		nullableFloat64(usage.CostUSD),
 		usage.Source,
 		raw,
 	)
@@ -161,16 +169,21 @@ func (s *Store) UpsertRunUsage(ctx context.Context, runID string, usage protocol
 func (s *Store) GetRunUsage(ctx context.Context, runID string) (protocol.TokenUsage, json.RawMessage, error) {
 	var usage protocol.TokenUsage
 	var input, cached, output, reasoning, total sql.NullInt64
-	var raw sql.NullString
+	var model, actualModel, raw sql.NullString
+	var aiCredits, costUSD sql.NullFloat64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT input_tokens, cached_input_tokens, output_tokens,
-		       reasoning_output_tokens, total_tokens, source, raw_json
+		       reasoning_output_tokens, total_tokens, model, actual_model, ai_credits, cost_usd, source, raw_json
 		FROM run_usage WHERE run_id = ?`, runID).Scan(
 		&input,
 		&cached,
 		&output,
 		&reasoning,
 		&total,
+		&model,
+		&actualModel,
+		&aiCredits,
+		&costUSD,
 		&usage.Source,
 		&raw,
 	)
@@ -185,6 +198,10 @@ func (s *Store) GetRunUsage(ctx context.Context, runID string) (protocol.TokenUs
 	usage.OutputTokens = int64Pointer(output)
 	usage.ReasoningOutputTokens = int64Pointer(reasoning)
 	usage.TotalTokens = int64Pointer(total)
+	usage.Model = nullStringPointer(model)
+	usage.ActualModel = nullStringPointer(actualModel)
+	usage.AICredits = float64Pointer(aiCredits)
+	usage.CostUSD = float64Pointer(costUSD)
 	if raw.Valid {
 		return usage, json.RawMessage(raw.String), nil
 	}
@@ -195,7 +212,7 @@ func (s *Store) GetSessionUsage(ctx context.Context, sessionID string) (protocol
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT r.id, r.session_id, r.status, r.prompt, r.started_at, r.finished_at, r.exit_code,
 			u.input_tokens, u.cached_input_tokens, u.output_tokens, u.reasoning_output_tokens,
-			u.total_tokens, u.source
+			u.total_tokens, u.model, u.actual_model, u.ai_credits, u.cost_usd, u.source
 		FROM runs r
 		LEFT JOIN run_usage u ON u.run_id = r.id
 		WHERE r.session_id = ?
@@ -211,9 +228,10 @@ func (s *Store) GetSessionUsage(ctx context.Context, sessionID string) (protocol
 		var startedAt, finishedAt sql.NullString
 		var exitCode sql.NullInt64
 		var input, cached, output, reasoning, total sql.NullInt64
-		var source sql.NullString
+		var model, actualModel, source sql.NullString
+		var aiCredits, costUSD sql.NullFloat64
 		if err := rows.Scan(&run.ID, &run.SessionID, &run.Status, &run.Prompt, &startedAt, &finishedAt, &exitCode,
-			&input, &cached, &output, &reasoning, &total, &source); err != nil {
+			&input, &cached, &output, &reasoning, &total, &model, &actualModel, &aiCredits, &costUSD, &source); err != nil {
 			return protocol.SessionUsage{}, fmt.Errorf("scan session usage: %w", err)
 		}
 		if run.StartedAt, err = parseNullableTime(startedAt); err != nil {
@@ -234,6 +252,10 @@ func (s *Store) GetSessionUsage(ctx context.Context, sessionID string) (protocol
 			usage.OutputTokens = int64Pointer(output)
 			usage.ReasoningOutputTokens = int64Pointer(reasoning)
 			usage.TotalTokens = int64Pointer(total)
+			usage.Model = nullStringPointer(model)
+			usage.ActualModel = nullStringPointer(actualModel)
+			usage.AICredits = float64Pointer(aiCredits)
+			usage.CostUSD = float64Pointer(costUSD)
 			addUsage(&result.Summary, usage)
 		}
 		result.Runs = append(result.Runs, protocol.RunUsageEntry{Run: run, Usage: usage})
@@ -249,11 +271,11 @@ func addUsage(summary *protocol.TokenUsage, usage *protocol.TokenUsage) {
 		return
 	}
 	values := map[**int64]*int64{
-		&summary.InputTokens: usage.InputTokens,
-		&summary.CachedInputTokens: usage.CachedInputTokens,
-		&summary.OutputTokens: usage.OutputTokens,
+		&summary.InputTokens:           usage.InputTokens,
+		&summary.CachedInputTokens:     usage.CachedInputTokens,
+		&summary.OutputTokens:          usage.OutputTokens,
 		&summary.ReasoningOutputTokens: usage.ReasoningOutputTokens,
-		&summary.TotalTokens: usage.TotalTokens,
+		&summary.TotalTokens:           usage.TotalTokens,
 	}
 	for target, value := range values {
 		if value == nil {
@@ -265,6 +287,52 @@ func addUsage(summary *protocol.TokenUsage, usage *protocol.TokenUsage) {
 		}
 		**target += *value
 	}
+	if usage.AICredits != nil {
+		if summary.AICredits == nil {
+			zero := float64(0)
+			summary.AICredits = &zero
+		}
+		*summary.AICredits += *usage.AICredits
+	}
+	if usage.CostUSD != nil {
+		if summary.CostUSD == nil {
+			zero := float64(0)
+			summary.CostUSD = &zero
+		}
+		*summary.CostUSD += *usage.CostUSD
+	}
+	if usage.Model != nil {
+		if summary.Model == nil {
+			model := *usage.Model
+			summary.Model = &model
+		} else if *summary.Model != *usage.Model {
+			multiple := "multiple"
+			summary.Model = &multiple
+		}
+	}
+	if usage.ActualModel != nil {
+		if summary.ActualModel == nil {
+			model := *usage.ActualModel
+			summary.ActualModel = &model
+		} else if *summary.ActualModel != *usage.ActualModel {
+			multiple := "multiple"
+			summary.ActualModel = &multiple
+		}
+	}
+}
+
+func nullableFloat64(value *float64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func float64Pointer(value sql.NullFloat64) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Float64
 }
 
 func (s *Store) AppendRedactedRawEvent(ctx context.Context, event storage.RedactedRawEvent) (storage.RedactedRawEvent, error) {

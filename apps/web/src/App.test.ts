@@ -56,6 +56,18 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('#usage-tab').attributes('aria-selected')).toBe('true');
   });
 
+  it('shows Copilot AI credits instead of token metrics', async () => {
+    const mounted = await mountApp();
+    await mounted.wrapper.findAll('.session-item')[2]!.trigger('click');
+    await flushPromises();
+    await mounted.wrapper.find('#usage-tab').trigger('click');
+    const panel = mounted.wrapper.find('#usage-panel').text();
+    // Summary should show AI credits and cost, but not aggregated token metrics or a single "Actual model"
+    expect(panel).toContain('AI credits');
+    expect(panel).toContain('0.125');
+    expect(panel).not.toContain('Input');
+  });
+
   it('keeps the composer visible while only the conversation timeline scrolls', async () => {
     const mounted = await mountApp();
     const styles = readFileSync('src/styles.css', 'utf8');

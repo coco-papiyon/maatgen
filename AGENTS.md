@@ -36,3 +36,21 @@
 
 - Run the relevant TypeScript tests/typecheck and Go tests after changes.
 - Do not use destructive Git commands against the user's repository unless the task explicitly requires them.
+
+## Pricing and cost updates
+
+- Model pricing is external data. Do not hard-code a new token price in a parser or UI.
+- The Agent Manager refreshes pricing at startup from the official sources:
+  - OpenAI model comparison: `https://developers.openai.com/api/docs/models/compare`
+  - GitHub Copilot model pricing: `https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing`
+- Retrieved rates are retained in the SQLite `model_pricing` table with provider, model, input/cached-input/cache-write/output rates per one million tokens, source URL, and retrieval time. A failed refresh must not delete the last known rate.
+- Codex cost is calculated from recorded token usage and the retained model rate. Cached input tokens are charged at the cached-input rate and subtracted from ordinary input tokens. Copilot cost is calculated from recorded AI credits; one Copilot AI credit is USD 0.01. Do not use Copilot's `assistant.usage.cost` as a currency amount because it is a model multiplier.
+- `assistant.usage.model` is the authoritative actual model for Copilot, including when the requested model is `auto`; for CLI JSONL versions that omit `assistant.usage`, retain `assistant.message.data.model` as a fallback. If the CLI only emits `result.usage.premiumRequests`, retain that value as the Copilot usage quantity because no token-level AIU is present in that output format.
+
+### Updating pricing behavior
+
+1. Add or rename models in `apps/agent-manager/config/providers.json` first. Startup refresh only requests rates for configured models.
+2. Verify the official source table and update the extractor in `apps/agent-manager/internal/pricing/pricing.go` only when the source markup or model naming changes. Add a fixture test for each new table shape.
+3. Keep the source URL and retrieval timestamp in the stored row. Do not overwrite existing rows when a fetch or parse fails.
+4. Run the Agent Manager once to refresh rates, or use `go -C apps/agent-manager run ./cmd/agent-manager --data-dir <data-dir> --config config/providers.json --backfill-costs` from the repository root to refresh rates and recalculate historical rows. Copilot rows with AI credits do not require a model; historical Codex rows without a stored model use the provider's current default model, or its first configured model when no default is set. Then run Go tests and Web/VS Code typechecks/tests. Inspect the `model_pricing` rows and a completed Run's `costUsd` before release.
+5. If a provider changes the billing unit or currency, update the pricing package, Protocol schema, SQLite migration, both UIs, and `docs/coding-agent-design.md` / `docs/implementation-plan.md` together.

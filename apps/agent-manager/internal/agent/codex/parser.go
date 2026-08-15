@@ -37,6 +37,7 @@ type rawUsage struct {
 	CachedInputTokens     *int64 `json:"cached_input_tokens"`
 	OutputTokens          *int64 `json:"output_tokens"`
 	ReasoningOutputTokens *int64 `json:"reasoning_output_tokens"`
+	Model                 string `json:"model"`
 }
 
 func ParseLine(line string) ParsedLine {
@@ -161,6 +162,9 @@ func parseUsage(raw json.RawMessage) (protocol.TokenUsage, error) {
 		InputTokens: source.InputTokens, CachedInputTokens: source.CachedInputTokens,
 		OutputTokens: source.OutputTokens, ReasoningOutputTokens: source.ReasoningOutputTokens,
 		Source: "cli",
+	}
+	if source.Model != "" {
+		usage.ActualModel = &source.Model
 	}
 	if source.InputTokens != nil && source.OutputTokens != nil {
 		total := *source.InputTokens + *source.OutputTokens

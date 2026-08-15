@@ -10,5 +10,9 @@ export interface TokenUsage {
   outputTokens?: number;
   reasoningOutputTokens?: number;
   totalTokens?: number;
+  model?: string;
+  actualModel?: string;
+  aiCredits?: number;
+  costUsd?: number;
   source: 'cli' | 'unknown';
 }

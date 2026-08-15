@@ -13,6 +13,7 @@ import (
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/pricing"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/security"
@@ -41,6 +42,10 @@ type Store interface {
 	ReplaceChangeSet(ctx context.Context, changeSet protocol.ChangeSet) error
 }
 
+type PricingReader interface {
+	GetModelPricing(ctx context.Context, provider, model string) (pricing.ModelPricing, error)
+}
+
 type ChangeDetector interface {
 	Generate(ctx context.Context, repository string, checkpoint protocol.Checkpoint) (protocol.ChangeSet, error)
 }
@@ -57,8 +62,8 @@ type activeRun struct {
 type Service struct {
 	store    Store
 	adapters map[protocol.AgentName]agent.Adapter
-	ctx     context.Context
-	cancel  context.CancelFunc
+	ctx      context.Context
+	cancel   context.CancelFunc
 
 	mu              sync.Mutex
 	activeByRun     map[string]activeRun
@@ -68,6 +73,7 @@ type Service struct {
 	newID           func(string) (string, error)
 	changeDetector  ChangeDetector
 	checkpoints     CheckpointManager
+	pricing         PricingReader
 }
 
 type Option func(*Service)
@@ -80,6 +86,10 @@ func WithChangeDetector(detector ChangeDetector) Option {
 
 func WithCheckpointManager(manager CheckpointManager) Option {
 	return func(service *Service) { service.checkpoints = manager }
+}
+
+func WithPricingReader(reader PricingReader) Option {
+	return func(service *Service) { service.pricing = reader }
 }
 
 func New(store Store, adapter agent.Adapter, options ...Option) *Service {
@@ -249,6 +259,10 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	if request.Model != nil {
 		model = strings.TrimSpace(*request.Model)
 	}
+	requestedModel := model
+	if requestedModel == "" && session.Agent == protocol.AgentCodex {
+		requestedModel = "default"
+	}
 	var timeout time.Duration
 	if request.TimeoutSeconds != nil {
 		timeout = time.Duration(*request.TimeoutSeconds) * time.Second
@@ -276,9 +290,21 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		}
 		if parsed.Usage != nil {
 			usage := *parsed.Usage
+			if usage.Model == nil && requestedModel != "" {
+				usage.Model = &requestedModel
+			}
+			if usage.ActualModel == nil && model != "" {
+				usage.ActualModel = &model
+			}
 			if session.Agent == protocol.AgentCopilot {
 				accumulatedUsage = addUsage(accumulatedUsage, usage)
 				usage = accumulatedUsage
+			}
+			if s.pricing != nil && usage.ActualModel != nil {
+				if rates, pricingErr := s.pricing.GetModelPricing(ctx, string(session.Agent), *usage.ActualModel); pricingErr == nil {
+					cost := pricing.CostUSD(usage, rates, usage.AICredits)
+					usage.CostUSD = &cost
+				}
 			}
 			if err := s.store.UpsertRunUsage(ctx, run.ID, usage, redactedRaw); err != nil {
 				return err
@@ -444,6 +470,20 @@ func addUsage(total, next protocol.TokenUsage) protocol.TokenUsage {
 	result.OutputTokens = addInt64(total.OutputTokens, next.OutputTokens)
 	result.ReasoningOutputTokens = addInt64(total.ReasoningOutputTokens, next.ReasoningOutputTokens)
 	result.TotalTokens = addInt64(total.TotalTokens, next.TotalTokens)
+	result.AICredits = addFloat64(total.AICredits, next.AICredits)
+	result.CostUSD = addFloat64(total.CostUSD, next.CostUSD)
+	if next.Model != nil {
+		model := *next.Model
+		result.Model = &model
+	} else {
+		result.Model = total.Model
+	}
+	if next.ActualModel != nil {
+		actualModel := *next.ActualModel
+		result.ActualModel = &actualModel
+	} else {
+		result.ActualModel = total.ActualModel
+	}
 	return result
 }
 
@@ -452,6 +492,20 @@ func addInt64(left, right *int64) *int64 {
 		return nil
 	}
 	var value int64
+	if left != nil {
+		value += *left
+	}
+	if right != nil {
+		value += *right
+	}
+	return &value
+}
+
+func addFloat64(left, right *float64) *float64 {
+	if left == nil && right == nil {
+		return nil
+	}
+	var value float64
 	if left != nil {
 		value += *left
 	}

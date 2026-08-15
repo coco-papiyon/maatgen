@@ -86,6 +86,13 @@ func TestParseCommandAndFileChangePayloads(t *testing.T) {
 	}
 }
 
+func TestParseCodexUsageActualModel(t *testing.T) {
+	parsed := ParseLine(`{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2,"model":"gpt-5.6"}}`)
+	if parsed.Usage == nil || parsed.Usage.ActualModel == nil || *parsed.Usage.ActualModel != "gpt-5.6" {
+		t.Fatalf("usage = %#v", parsed.Usage)
+	}
+}
+
 func TestParseFailuresUnknownAndMalformedLines(t *testing.T) {
 	lines := parseFixture(t, "testdata/failures.jsonl")
 	if len(lines) != 4 {

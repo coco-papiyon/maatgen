@@ -14,6 +14,8 @@ type envelope struct {
 	ID        string          `json:"id"`
 	AgentID   string          `json:"agentId"`
 	SessionID string          `json:"sessionId"`
+	Model     string          `json:"model"`
+	Usage     *resultUsage    `json:"usage"`
 	Data      json.RawMessage `json:"data"`
 }
 
@@ -35,6 +37,19 @@ type eventData struct {
 	OutputTokens    *int64          `json:"outputTokens"`
 	ReasoningTokens *int64          `json:"reasoningTokens"`
 	CacheReadTokens *int64          `json:"cacheReadTokens"`
+	Model           string          `json:"model"`
+	CopilotUsage    *copilotUsage   `json:"copilotUsage"`
+}
+
+type copilotUsage struct {
+	TotalNanoAIU *float64 `json:"totalNanoAiu"`
+}
+
+// resultUsage is emitted by the Copilot CLI's programmatic JSONL mode. Older
+// CLI versions expose the billing unit as premiumRequests on the final result
+// instead of emitting assistant.usage events.
+type resultUsage struct {
+	PremiumRequests *float64 `json:"premiumRequests"`
 }
 
 func ParseLine(line string) agent.ParsedLine {
@@ -65,6 +80,10 @@ func ParseLine(line string) agent.ParsedLine {
 	case "assistant.turn_start":
 		parsed.Events = []agent.NormalizedEvent{newEvent(protocol.EventTypeRunStarted, map[string]any{"copilotType": source.Type})}
 	case "assistant.message":
+		if data.Model != "" {
+			usage := protocol.TokenUsage{Source: "cli", ActualModel: stringPointer(data.Model)}
+			parsed.Usage = &usage
+		}
 		if strings.TrimSpace(data.Content) == "" {
 			parsed.Ignored = true
 			break
@@ -82,13 +101,27 @@ func ParseLine(line string) agent.ParsedLine {
 		// user-facing reasoning.
 		parsed.Ignored = true
 	case "assistant.usage":
-		usage := protocol.TokenUsage{
-			InputTokens: data.InputTokens, CachedInputTokens: data.CacheReadTokens,
-			OutputTokens: data.OutputTokens, ReasoningOutputTokens: data.ReasoningTokens, Source: "cli",
+		usage := protocol.TokenUsage{Source: "cli"}
+		if data.Model != "" {
+			usage.ActualModel = &data.Model
 		}
-		if data.InputTokens != nil && data.OutputTokens != nil {
-			total := *data.InputTokens + *data.OutputTokens
-			usage.TotalTokens = &total
+		if data.CopilotUsage != nil && data.CopilotUsage.TotalNanoAIU != nil {
+			credits := *data.CopilotUsage.TotalNanoAIU / 1_000_000_000
+			usage.AICredits = &credits
+		}
+		parsed.Usage = &usage
+		parsed.Events = []agent.NormalizedEvent{newEvent(protocol.EventTypeUsageReported, usage)}
+	case "result":
+		if source.Usage == nil || source.Usage.PremiumRequests == nil {
+			parsed.Ignored = true
+			break
+		}
+		// The CLI currently reports premiumRequests in its result envelope. It
+		// is the only usage value available in this output format, so retain it
+		// as the recorded Copilot credit quantity for the existing usage schema.
+		usage := protocol.TokenUsage{Source: "cli", AICredits: source.Usage.PremiumRequests}
+		if source.Model != "" {
+			usage.ActualModel = stringPointer(source.Model)
 		}
 		parsed.Usage = &usage
 		parsed.Events = []agent.NormalizedEvent{newEvent(protocol.EventTypeUsageReported, usage)}
@@ -141,6 +174,10 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
 
 func malformedLine(line, message string) agent.ParsedLine {

@@ -11,6 +11,10 @@
     "outputTokens": { "type": "integer", "minimum": 0 },
     "reasoningOutputTokens": { "type": "integer", "minimum": 0 },
     "totalTokens": { "type": "integer", "minimum": 0 },
+    "model": { "type": "string", "minLength": 1 },
+    "actualModel": { "type": "string", "minLength": 1 },
+    "aiCredits": { "type": "number", "minimum": 0 },
+    "costUsd": { "type": "number", "minimum": 0 },
     "source": { "enum": ["cli", "unknown"] }
   }
 }
