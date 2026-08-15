@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maatgen.local/schema/session-list.schema.json",
+  "title": "SessionListResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sessions"],
+  "properties": {
+    "sessions": {
+      "type": "array",
+      "items": { "$ref": "agent-session.schema.json" }
+    },
+    "nextCursor": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

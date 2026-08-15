@@ -1,0 +1,8 @@
+{
+  "inputTokens": 100,
+  "cachedInputTokens": 40,
+  "outputTokens": 20,
+  "reasoningOutputTokens": 5,
+  "totalTokens": 120,
+  "source": "cli"
+}

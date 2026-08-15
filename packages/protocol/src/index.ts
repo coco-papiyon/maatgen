@@ -1,116 +1,48 @@
+import type { AgentRun as GeneratedAgentRun } from './generated/agent-run.js';
+import type { AgentSession as GeneratedAgentSession } from './generated/agent-session.js';
+import type { ApiErrorResponse as GeneratedApiErrorResponse } from './generated/api-error.js';
+import type {
+  ChangeHunk as GeneratedChangeHunk,
+  ChangeSet as GeneratedChangeSet,
+  FileChange as GeneratedFileChange,
+  HunkStatus as GeneratedHunkStatus,
+  ReviewStatus as GeneratedReviewStatus,
+} from './generated/change-set.js';
+import type { CreateSessionRequest as GeneratedCreateSessionRequest } from './generated/create-session-request.js';
+import type { EventListResponse as GeneratedEventListResponse } from './generated/event-list.js';
+import type { SendMessageRequest as GeneratedSendMessageRequest } from './generated/send-message-request.js';
+import type { SessionEvent as GeneratedSessionEvent } from './generated/session-event.js';
+import type { SessionListResponse as GeneratedSessionListResponse } from './generated/session-list.js';
+import type { TokenUsage as GeneratedTokenUsage } from './generated/token-usage.js';
+import type { WsTicketResponse as GeneratedWsTicketResponse } from './generated/ws-ticket.js';
+
 export const SCHEMA_VERSION = 1 as const;
 
-export type AgentName = 'codex';
+export type AgentSession = GeneratedAgentSession;
+export type AgentName = AgentSession['agent'];
+export type SessionStatus = AgentSession['status'];
+export type CleanupStatus = NonNullable<AgentSession['cleanupStatus']>;
 
-export type SessionStatus = 'active' | 'closed';
+export type AgentRun = GeneratedAgentRun;
+export type RunStatus = AgentRun['status'];
 
-export type RunStatus =
-  | 'queued'
-  | 'starting'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+export type TokenUsage = GeneratedTokenUsage;
 
-export interface AgentSession {
-  id: string;
-  agent: AgentName;
-  workspace: string;
-  worktree: string;
-  baseCommit: string;
-  codexThreadId?: string;
-  status: SessionStatus;
-  createdAt: string;
-  closedAt?: string;
-}
+export type EventSource = GeneratedSessionEvent['source'];
+export type SessionEventType = GeneratedSessionEvent['type'];
+export type SessionEvent<TData = unknown> = Omit<GeneratedSessionEvent, 'data'> & { data: TData };
 
-export interface AgentRun {
-  id: string;
-  sessionId: string;
-  status: RunStatus;
-  prompt: string;
-  startedAt?: string;
-  finishedAt?: string;
-  exitCode?: number;
-}
+export type ChangeSet = GeneratedChangeSet;
+export type FileChange = GeneratedFileChange;
+export type ChangeHunk = GeneratedChangeHunk;
+export type FileChangeKind = FileChange['kind'];
+export type ReviewStatus = GeneratedReviewStatus;
+export type HunkStatus = GeneratedHunkStatus;
 
-export interface TokenUsage {
-  inputTokens?: number;
-  cachedInputTokens?: number;
-  outputTokens?: number;
-  reasoningOutputTokens?: number;
-  totalTokens?: number;
-  source: 'cli' | 'unknown';
-}
-
-export type EventSource = 'user' | 'codex' | 'manager';
-
-export type SessionEventType =
-  | 'user_prompt'
-  | 'assistant_message'
-  | 'reasoning_summary'
-  | 'command_started'
-  | 'command_completed'
-  | 'file_change_reported'
-  | 'usage_reported'
-  | 'change_detected'
-  | 'change_reviewed'
-  | 'run_started'
-  | 'run_completed'
-  | 'run_failed'
-  | 'run_cancelled'
-  | 'error';
-
-export interface SessionEvent<TData = unknown> {
-  id: string;
-  sessionId: string;
-  runId?: string;
-  sequence: number;
-  timestamp: string;
-  schemaVersion: typeof SCHEMA_VERSION;
-  source: EventSource;
-  type: SessionEventType;
-  data: TData;
-}
-
-export type FileChangeKind =
-  | 'modify'
-  | 'add'
-  | 'delete'
-  | 'rename'
-  | 'binary'
-  | 'mode_change';
-
-export type ReviewStatus =
-  | 'pending'
-  | 'partially_accepted'
-  | 'accepted'
-  | 'rejected';
-
-export interface ChangeHunk {
-  id: string;
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  originalText: string;
-  modifiedText: string;
-  status: Exclude<ReviewStatus, 'partially_accepted'>;
-}
-
-export interface FileChange {
-  id: string;
-  oldPath?: string;
-  newPath?: string;
-  kind: FileChangeKind;
-  original?: string;
-  modified?: string;
-  reviewMode: 'hunk' | 'file';
-  status: ReviewStatus;
-  hunks: ChangeHunk[];
-}
-
-export interface ChangeSet {
-  sessionId: string;
-  files: FileChange[];
-}
+export type CreateSessionRequest = GeneratedCreateSessionRequest;
+export type SendMessageRequest = GeneratedSendMessageRequest;
+export type ApiErrorResponse = GeneratedApiErrorResponse;
+export type ApiErrorBody = ApiErrorResponse['error'];
+export type SessionListResponse = GeneratedSessionListResponse;
+export type EventListResponse = GeneratedEventListResponse;
+export type WsTicketResponse = GeneratedWsTicketResponse;

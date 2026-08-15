@@ -14,14 +14,17 @@
     "schema"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "generate": "node scripts/generate-types.mjs",
+    "generate:check": "node scripts/generate-types.mjs --check",
+    "build": "corepack pnpm generate:check && tsc -p tsconfig.json",
+    "test": "corepack pnpm generate:check && vitest run",
+    "typecheck": "corepack pnpm generate:check && tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^20.17.10",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
+    "json-schema-to-typescript": "15.0.4",
     "typescript": "^5.7.2",
     "vitest": "^3.0.0"
   }

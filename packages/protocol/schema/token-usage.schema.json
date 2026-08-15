@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maatgen.local/schema/token-usage.schema.json",
+  "title": "TokenUsage",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source"],
+  "properties": {
+    "inputTokens": { "type": "integer", "minimum": 0 },
+    "cachedInputTokens": { "type": "integer", "minimum": 0 },
+    "outputTokens": { "type": "integer", "minimum": 0 },
+    "reasoningOutputTokens": { "type": "integer", "minimum": 0 },
+    "totalTokens": { "type": "integer", "minimum": 0 },
+    "source": { "enum": ["cli", "unknown"] }
+  }
+}

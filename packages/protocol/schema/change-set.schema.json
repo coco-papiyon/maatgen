@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maatgen.local/schema/change-set.schema.json",
+  "title": "ChangeSet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sessionId", "files"],
+  "properties": {
+    "sessionId": { "type": "string", "minLength": 1 },
+    "files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fileChange" }
+    }
+  },
+  "$defs": {
+    "reviewStatus": {
+      "enum": ["pending", "partially_accepted", "accepted", "rejected"]
+    },
+    "hunkStatus": {
+      "enum": ["pending", "accepted", "rejected"]
+    },
+    "changeHunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "oldStart", "oldLines", "newStart", "newLines", "originalText", "modifiedText", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "oldStart": { "type": "integer", "minimum": 0 },
+        "oldLines": { "type": "integer", "minimum": 0 },
+        "newStart": { "type": "integer", "minimum": 0 },
+        "newLines": { "type": "integer", "minimum": 0 },
+        "originalText": { "type": "string" },
+        "modifiedText": { "type": "string" },
+        "status": { "$ref": "#/$defs/hunkStatus" }
+      }
+    },
+    "fileChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "reviewMode", "status", "hunks"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "oldPath": { "type": "string", "minLength": 1 },
+        "newPath": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["modify", "add", "delete", "rename", "binary", "mode_change"] },
+        "original": { "type": "string" },
+        "modified": { "type": "string" },
+        "reviewMode": { "enum": ["hunk", "file"] },
+        "status": { "$ref": "#/$defs/reviewStatus" },
+        "hunks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/changeHunk" }
+        }
+      }
+    }
+  }
+}

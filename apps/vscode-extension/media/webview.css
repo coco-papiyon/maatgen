@@ -1,0 +1,33 @@
+:root {
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  font-family: var(--vscode-font-family);
+  --panel: var(--vscode-sideBarSectionHeader-background);
+  --line: var(--vscode-sideBar-border, var(--vscode-widget-border));
+  --muted: var(--vscode-descriptionForeground);
+  --green: var(--vscode-testing-iconPassed, #57d47b);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 180px; }
+button { font: inherit; }
+
+.extension-shell { display: grid; gap: 14px; padding: 14px; }
+.extension-header { display: flex; align-items: center; gap: 10px; }
+.extension-header h1 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
+.extension-header p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+.brand-mark { display: grid; place-items: center; width: 27px; height: 27px; color: var(--vscode-sideBar-background); background: var(--green); border-radius: 7px 2px 7px 2px; font: 700 15px var(--vscode-editor-font-family); }
+
+.status-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: start; padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+.status-dot { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--vscode-disabledForeground); }
+.status-dot.connected { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 14%, transparent); }
+.eyebrow { margin: 0 0 4px; color: var(--muted); font: 600 9px var(--vscode-editor-font-family); letter-spacing: .08em; text-transform: uppercase; }
+.workspace-name { margin: 0; font-size: 12px; font-weight: 600; }
+.workspace-path { margin: 3px 0 0; overflow: hidden; color: var(--muted); font: 10px var(--vscode-editor-font-family); text-overflow: ellipsis; white-space: nowrap; }
+
+.empty-state { padding: 14px; border: 1px dashed var(--line); border-radius: 7px; }
+.empty-state h2 { margin: 0 0 6px; font-size: 13px; }
+.empty-state > p:not(.eyebrow) { margin: 0 0 12px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.empty-state button { width: 100%; padding: 6px 10px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; border-radius: 3px; cursor: pointer; }
+.empty-state button:hover { background: var(--vscode-button-hoverBackground); }
+.empty-state button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }

@@ -1,0 +1,4 @@
+{"type":"turn.failed","error":{"message":"model request failed"}}
+{"type":"error","message":"connection interrupted"}
+{"type":"future.event","value":1}
+not-json

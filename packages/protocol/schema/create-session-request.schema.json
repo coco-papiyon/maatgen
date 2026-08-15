@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maatgen.dev/schema/create-session-request.schema.json",
+  "title": "CreateSessionRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent", "workspace"],
+  "properties": {
+    "agent": { "const": "codex" },
+    "workspace": { "type": "string", "minLength": 1 }
+  }
+}

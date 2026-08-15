@@ -1,0 +1,27 @@
+{
+  "sessionId": "session-1",
+  "files": [
+    {
+      "id": "file-1",
+      "oldPath": "src/example.ts",
+      "newPath": "src/example.ts",
+      "kind": "modify",
+      "original": "return 1;\n",
+      "modified": "return 2;\n",
+      "reviewMode": "hunk",
+      "status": "pending",
+      "hunks": [
+        {
+          "id": "hunk-1",
+          "oldStart": 1,
+          "oldLines": 1,
+          "newStart": 1,
+          "newLines": 1,
+          "originalText": "return 1;\n",
+          "modifiedText": "return 2;\n",
+          "status": "pending"
+        }
+      ]
+    }
+  ]
+}

@@ -573,28 +573,28 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-04 | Go HTTPルーター | Go標準の`net/http`と`http.ServeMux`を使用 | `net/http`と`http.ServeMux` | Phase 0開始前 | 検討済み |
 | D-05 | WebSocketライブラリ | `github.com/coder/websocket` | `github.com/coder/websocket` | Phase 0開始前 | 検討済み |
 | D-06 | SQLiteドライバ | `modernc.org/sqlite`を`database/sql`経由で使用 | `modernc.org/sqlite`と`database/sql` | Phase 0開始前 | 検討済み |
-| D-07 | Protocolの正規ソース | JSON Schemaをwire契約の正規ソースとし、TypeScript型とGo型を生成・検証 | JSON Schemaと共有fixtureをwire契約の正規ソースとする | Phase 0開始前 | 検討済み |
+| D-07 | Protocolの正規ソース | JSON Schemaをwire契約の正規ソースとし、TypeScript型とGo型を生成・検証 | JSON Schemaをwire契約の正規ソースとする。TypeScript公開型は`json-schema-to-typescript`で生成し、genericなどの補助型だけを手書きする。Go型は`time.Time`、`json.RawMessage`、内部定数を持つ手書き型とし、共有fixtureでSchema互換性を検証する | Phase 0開始前 | 検討済み |
 | D-08 | APIのバージョニング | HTTPは`/api/v1`、Eventは`schemaVersion`を併用 | HTTPは`/api/v1`、Eventは`schemaVersion`を併用 | Phase 0開始前 | 検討済み |
 | D-09 | Agent Managerのbind先 | `127.0.0.1`のみ | `127.0.0.1`のみ | Phase 0開始前 | 検討済み |
 | D-10 | Portの割当 | 3100を優先し、使用中またはport=0指定時はOSの空きportを使用 | 3100とし、引数で指定可能とする | Phase 0開始前 | 検討済み |
-| D-11 | Port／tokenの通知方法 | 親プロセス指定のruntime metadata fileへJSONを書き、stdoutにも機械可読な1行を出力 | — | Phase 0開始前 | 検討済み |
-| D-12 | Managerデータ保存先 | OS標準のユーザーデータディレクトリ配下の`maatgen/` | — | Phase 0開始前 | 検討済み |
-| D-13 | Worktree保存先 | Managerデータディレクトリ配下 | — | Phase 0開始前 | 検討済み |
+| D-11 | Port／tokenの通知方法 | 親プロセス指定のruntime metadata fileへJSONを書き、stdoutにも機械可読な1行を出力 | runtime metadata JSONにaddress／token／PID／versionを保存し、ログにはfile pathだけを出力 | Phase 0開始前 | 検討済み |
+| D-12 | Managerデータ保存先 | OS標準のユーザーデータディレクトリ配下の`maatgen/` | `os.UserConfigDir()/maatgen`。`--data-dir`で変更可能 | Phase 0開始前 | 検討済み |
+| D-13 | Worktree保存先 | Managerデータディレクトリ配下 | Managerデータディレクトリの`worktrees/<sessionId>` | Phase 0開始前 | 検討済み |
 | D-14 | Session開始条件 | Git repositoryかつclean Working Tree | Git repositoryかつclean Working Tree | Phase 0開始前 | 検討済み |
-| D-15 | Codex実行バイナリ検出 | PATHから検出し、shellを介さず`codex --version`で検証・絶対パスとversionを保存 | — | Phase 0開始前 | 検討済み |
+| D-15 | Codex実行バイナリ検出 | PATHから検出し、shellを介さず`codex --version`で検証・絶対パスとversionを保存 | `exec.LookPath`で検出し、shellなしの`--version`成功後に絶対パスとversionをAdapterへ保持 | Phase 0開始前 | 検討済み |
 | D-16 | Codex sandbox policy | `workspace-write` | `workspace-write` | Codex Adapter着手前 | 検討済み |
-| D-17 | Codex approval policy | 初期版は明示的な固定値として設定 | — | Codex Adapter着手前 | 検討済み |
-| D-18 | Codex model指定 | 未指定時はCodex設定に委譲し、要求値だけ保存 | — | Codex Adapter着手前 | 検討済み |
-| D-19 | Codex timeout | Run単位の上限時間を設定可能にする | — | Codex Adapter着手前 | 検討済み |
+| D-17 | Codex approval policy | 初期版は明示的な固定値として設定 | `--ask-for-approval never`。承認待ちを発生させず、失敗をCodexへ返す | Codex Adapter着手前 | 検討済み |
+| D-18 | Codex model指定 | 未指定時はCodex設定に委譲し、要求値だけ保存 | 未指定時はCLI設定へ委譲し、指定時だけ`--model`を渡す | Codex Adapter着手前 | 検討済み |
+| D-19 | Codex timeout | Run単位の上限時間を設定可能にする | 既定30分。Run要求で変更可能とし、timeout時はプロセスツリーを終了する | Codex Adapter着手前 | 検討済み |
 | D-20 | 認証方式 | HTTP Bearer token、WebSocket短命ticket | HTTP Bearer token、WebSocket短命ticket | Phase 2開始前 | 検討済み |
 | D-21 | 許可Origin | Vite開発URLとVS Code Webviewのみ | — | Phase 2開始前 | 検討中 |
 | D-22 | Raw Event保存方針 | マスク済みJSONのみ保存 | マスク済みJSONのみ保存 | Phase 2開始前 | 検討済み |
-| D-23 | Secret Masking対象 | API key、token、password、環境変数名のallowlist | — | Phase 2開始前 | 検討中 |
+| D-23 | Secret Masking対象 | API key、token、password、環境変数名のallowlist | JSON keyは`token`、`password`、`secret`、`apiKey`、`authorization`を大文字小文字・区切り差を無視してマスクする。文字列中のBearer token、`sk-`形式、key／token／password代入値もマスクする | Phase 2開始前 | 検討済み |
 | D-24 | ログ保持期間 | 初期値と最大DBサイズを設定可能にする | — | Phase 2開始前 | 未 |
 | D-25 | 同時実行制限 | SessionごとにRunを1つまで | SessionごとにRunを1つまで | Phase 2開始前 | 検討済み |
 | D-26 | 実行中の追加Prompt | 初期版は409で拒否 | 初期版は409で拒否 | Phase 2開始前 | 検討済み |
 | D-27 | Session終了操作 | 明示的なclose APIを用意 | 明示的なclose APIを用意 | Phase 2開始前 | 検討済み |
-| D-28 | Worktree cleanup | 全Review完了またはclose後に実行、失敗は再試行 | — | Phase 4開始前 | 検討中 |
+| D-28 | Worktree cleanup | 全Review完了またはclose後に実行、失敗は再試行 | 明示closeで即時cleanupする。失敗状態と試行回数を保存し、冪等なclose APIの再送で再試行する。全Review完了時の自動cleanupはReview実装時に同じ処理を呼ぶ | Phase 4開始前 | 検討済み |
 | D-29 | Hunk ID方式 | 内容を含むSHA-256 | 内容を含むSHA-256 | Phase 4開始前 | 検討済み |
 | D-30 | Accept／Rejectの可逆性 | MVPでは不可逆 | MVPでは不可逆 | Phase 5開始前 | 検討済み |
 | D-31 | Accept競合時の動作 | 上書きせず409 Conflict | 上書きせず409 Conflict | Phase 5開始前 | 検討済み |
@@ -624,21 +624,21 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 
 | ID | 決定対象 | 推奨（案） | 決定事項 | 決定タイミング | ステータス |
 |---|---|---|---|---|---|
-| D-33 | UIレイアウトとレスポンシブ方針 | — | — | Phase 1 | 未 |
-| D-34 | VS Codeテーマ変数の対応範囲 | — | — | Phase 1またはPhase 7 | 未 |
-| D-35 | Event payloadの詳細フィールド | — | — | 各Parser実装時 | 未 |
-| D-36 | JSONLの不正行の表示方法 | — | — | Codex Adapter実装時 | 未 |
-| D-37 | stderrのUI表示レベル | — | — | Codex Adapter実装時 | 未 |
-| D-38 | Usageが累積値の場合の集計方法 | — | — | Usage fixture確認時 | 未 |
-| D-39 | Session履歴のpagination | — | — | Phase 2またはPhase 6 | 未 |
+| D-33 | UIレイアウトとレスポンシブ方針 | Session履歴、会話、変更一覧の3ペインを基本とし、狭い画面では段階的に情報量を減らす | Desktopは左Session／中央Conversation／右Changesの3ペイン、1050px未満でChangesを省略、720px未満でSessionとConversationを縦積みにする | Phase 1 | 検討済み |
+| D-34 | VS Codeテーマ変数の対応範囲 | foreground／background／font／border／button／focusをVS Codeテーマ変数へ合わせ、製品固有アクセントだけfallbackを持つ | Webviewの文字色、背景色、フォント、境界線、button、focus、status色は`--vscode-*`を使用する。製品アクセントは`--vscode-testing-iconPassed`を優先し、未定義時だけ固定色へfallbackする | Phase 1またはPhase 7 | 検討済み |
+| D-35 | Event payloadの詳細フィールド | Agent共通表示に必要な最小フィールドへ正規化し、Codex固有の元JSONは別保存 | message／reasoningはtext、commandはcommand／status／output／exitCode、file changeはchanges、全itemにitemIdを保持 | 各Parser実装時 | 検討済み |
+| D-36 | JSONLの不正行の表示方法 | Error Eventへ変換して後続行の処理を継続 | `invalid_codex_jsonl` Error Eventへ変換し、元行は有効なJSON wrapperに格納して後続行を継続 | Codex Adapter実装時 | 検討済み |
+| D-37 | stderrのUI表示レベル | stderrは診断用Raw Eventとしてマスク後に保存し、通常UIには直接表示しない。Run失敗時は共通のError／Run Failed Eventを表示する | stderrはマスク済みRaw Eventとして保存する。stderr単独ではUI Eventにせず、終了結果に基づくRun Failed EventをUIへ表示する | Codex Adapter実装時 | 検討済み |
+| D-38 | Usageが累積値の場合の集計方法 | `turn.completed`の値をRunの最終値として保存 | `turn.completed.usage`をRun単位の最終値として上書き保存し、Event間では加算しない | Usage fixture確認時 | 検討済み |
+| D-39 | Session履歴のpagination | `createdAt`とSession IDによるkeyset paginationを使い、cursorはopaqueな文字列として扱う | `createdAt`とSession IDによるkeyset pagination。HTTPは`nextCursor`を返し、Web UIは25件ずつLoad moreで追加する | Phase 2またはPhase 6 | 検討済み |
 | D-40 | APIエラーコードの詳細一覧 | — | — | API統合テスト前 | 未 |
-| D-41 | WebSocket再接続backoff | — | — | Web UI統合時 | 未 |
+| D-41 | WebSocket再接続backoff | 0.5秒開始、最大10秒の指数backoff。再接続ごとに短命ticketを再取得し、最後のsequenceから再開する | 0.5秒開始、最大10秒の指数backoff。再接続ごとに短命ticketを再取得し、最後のsequenceから再開する。受信成功時にbackoffをリセットする | Web UI統合時 | 検討済み |
 | D-42 | 大きなDiff／ログの遅延読み込み | — | — | Web UI統合時 | 未 |
-| D-43 | 新規・削除ファイルの表示UI | — | — | Diff UI実装時 | 未 |
-| D-44 | File mode変更の表示UI | — | — | Diff UI実装時 | 未 |
-| D-45 | cleanup失敗時のユーザー通知 | — | — | Worktree実装時 | 未 |
-| D-46 | fake Codex CLIのfixture仕様 | — | — | Codex Adapter着手前 | 未 |
-| D-47 | CIでの実Codex手動テスト方法 | — | — | CI構築時 | 未 |
+| D-43 | 新規・削除ファイルの表示UI | 既存Diffと同じ左右比較を使い、存在しない側を明示する | Original／Modifiedの左右比較を使い、存在しない内容は`∅`で表示する | Diff UI実装時 | 検討済み |
+| D-44 | File mode変更の表示UI | File単位Reviewとして変更種別を明示する | 内容DiffではなくFile単位Reviewの案内とAccept／Rejectを表示する | Diff UI実装時 | 検討済み |
+| D-45 | cleanup失敗時のユーザー通知 | APIエラーとSession状態の両方で通知し、再試行操作を可能にする | close APIは`503 worktree_cleanup_failed`を返し、Sessionへ`cleanupStatus`、`cleanupError`、`cleanupAttempts`、`cleanupUpdatedAt`を保存する。同じclose APIで再試行する | Worktree実装時 | 検討済み |
+| D-46 | fake Codex CLIのfixture仕様 | Go test helper processでversion、JSONL、stderr、終了コード、遅延を再現 | Go test binaryのhelper modeとJSONL testdataを使用し、外部scriptへ依存しない | Codex Adapter着手前 | 検討済み |
+| D-47 | CIでの実Codex手動テスト方法 | CIはfake CLIのみとし、実Codexはリリース前にcleanな検証用repositoryで主要フローを手動確認する | CIはfake CLIでUbuntu／Windows／macOSを検証する。実Codexはリリース前に`codex --version`確認後、Session作成、Prompt、Diff、Review、cleanupを手動確認する | CI構築時 | 検討済み |
 
 ### 11.3 Codex MVP後に決めること
 
@@ -689,7 +689,104 @@ docs/decisions/
 - [x] TypeScript／Goで共有するfixture
 - [x] TypeScriptのtypecheck、contract test、build
 - [x] GoのProtocol／HTTP handler test、build
-- [ ] 残りのProtocol JSON Schema
-- [ ] JSON Schemaからの型生成
-- [ ] 共通APIエラー形式
-- [ ] CI workflow
+- [x] 残りのProtocol JSON Schema
+- [x] JSON SchemaからのTypeScript型生成と生成差分検出
+- [x] 共通APIエラー形式
+- [x] CI workflow
+
+### Phase 1：Web UI
+
+- [x] Vue 3／Vite Webアプリ基盤
+- [x] 実Agent Managerへ接続する`AgentApi`
+- [x] Session作成・履歴・close／cleanup retry UI
+- [x] Chat／Timeline／Cancel／Error表示
+- [x] Changed Files／Hunk概要表示
+- [x] Desktop 3ペインとモバイル向けレスポンシブ表示
+- [x] `npm run dev`によるManager／Web UI同時起動
+- [x] WebSocket streamingと再接続表示
+- [x] Diff詳細表示
+- [x] Hunk／File単位のAccept／Reject UI
+- [x] Component testとMock scenario
+- [x] Session履歴のkeyset pagination
+- [x] Manager未起動、認証失敗、Codex未導入の診断表示
+
+### Phase 2：Agent Manager基盤（先行実装）
+
+- [x] `modernc.org/sqlite`と`database/sql`の導入
+- [x] 初期SQLite migration
+- [x] Sessionの作成・取得・一覧・Thread ID更新・close
+- [x] Runの作成・取得・状態更新
+- [x] foreign keyとmigrationの冪等性テスト
+- [x] Manager起動時のデータディレクトリ作成とDB初期化
+- [x] Event StoreとSession単位の自動sequence採番
+- [x] `afterSequence`によるEvent再取得
+- [x] Run Usage Store
+- [x] redacted Raw Event Store
+- [x] Change Store
+- [x] Session一覧・詳細取得HTTP API
+- [x] pagination parameterの検証と共通APIエラー変換
+- [x] 256-bit token生成とruntime metadata
+- [x] Bearer token認証
+- [x] Event取得HTTP API
+- [x] 30秒間有効な一回限りのWebSocket ticket
+- [x] Origin allowlist
+- [x] WebSocketによる既存／新着Event配信
+- [x] SQLite pollingからセッション単位Event Brokerへの置き換え
+
+### Phase 3：Codex Adapter（先行実装）
+
+- [x] `codex`実行ファイルのPATH検出と絶対パス化
+- [x] shellを介さない`codex --version`検証
+- [x] `workspace-write`／approval `never`／stdin Promptの固定引数生成
+- [x] 新規`exec`とThread `resume`の引数生成
+- [x] stdout／stderrの行単位streaming基盤
+- [x] Run単位timeoutとcontext cancel
+- [x] Windows Job Object（親Job制約時は`taskkill /T`）／Unix process groupによるプロセスツリー終了
+- [x] Go test helperによるfake Codex CLI
+- [x] Codex JSONL parserと正規化Event候補への変換
+- [x] Thread IDとRun単位Usageの抽出
+- [x] 未知eventのraw保持と不正JSONLのError Event化
+- [x] Run永続化とmessage／cancel API統合
+- [x] Session単位の同時Run制限とgraceful shutdown時の実行停止
+- [x] stdout／stderr Raw EventのSecret Masking
+
+### Phase 4：Git WorktreeとChangeSet（先行実装）
+
+- [x] Git実行ファイルの検出
+- [x] Git repositoryとclean Working Treeの検証
+- [x] Session作成時のHEAD取得
+- [x] Managerデータディレクトリ配下へのdetached worktree作成
+- [x] Session作成HTTP APIとSQLite保存
+- [x] SQLite保存失敗時のworktree rollback
+- [x] Session close時のworktree cleanupとcleanup retry
+- [x] Git差分からのChangeSet生成
+- [x] text／binary／rename／delete／mode changeの分類
+- [x] unified diffからのHunk生成と内容ベースSHA-256 ID
+- [x] Run正常完了時のChangeSet自動更新
+- [x] ChangeSet取得HTTP API
+
+### Phase 5：Review適用
+
+- [x] Hunk単位のAccept／Reject
+- [x] binary／rename／delete／mode changeを含むFile単位Review
+- [x] 既Accept Hunkから期待内容を再構築する競合検出
+- [x] atomic file writeと`409 working_tree_conflict`
+- [x] Review状態とReview Eventの永続化
+- [x] 冪等な同一操作の再送
+- [x] 詳細DiffとAccept／Reject UI
+- [x] Accept All／Reject All
+- [x] 全Review確定時のSession closeとworktree cleanup
+
+### Phase 7：VS Code Extension
+
+- [x] Extension workspaceとExtension Development Host起動設定
+- [x] Explorer内の`WebviewViewProvider`
+- [x] `default-src 'none'`とnonceによるWebview CSP
+- [x] Workspace名／pathのExtension-Webviewメッセージ連携
+- [x] VS Codeテーマ変数に対応した初期UI
+- [ ] Web UI componentと`AgentApi`契約の再利用
+- [ ] Agent Manager起動、runtime metadata読込、health check
+- [ ] Extension host経由のHTTP／WebSocket bridge
+- [ ] `vscode.diff`とWorkspaceEdit
+- [ ] CodeLens／Decoration
+- [ ] Extension終了時のManager cleanup

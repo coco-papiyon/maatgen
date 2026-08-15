@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build:vscode-extension",
+      "type": "shell",
+      "command": "corepack pnpm --filter @maatgen/vscode-extension build",
+      "problemMatcher": "$tsc",
+      "group": "build"
+    }
+  ]
+}

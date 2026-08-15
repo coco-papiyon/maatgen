@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maatgen.local/schema/ws-ticket.schema.json",
+  "title": "WsTicketResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ticket", "expiresAt"],
+  "properties": {
+    "ticket": { "type": "string", "minLength": 40 },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  }
+}

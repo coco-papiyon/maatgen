@@ -1,0 +1,50 @@
+{
+  "name": "@maatgen/vscode-extension",
+  "displayName": "Maatgen",
+  "description": "Run and review coding-agent sessions from VS Code.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "coco-papiyon",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:maatgen.sessions",
+    "onCommand:maatgen.refresh"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "maatgen.refresh",
+        "title": "Maatgen: Refresh"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "maatgen.sessions",
+          "name": "Maatgen"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.10",
+    "@types/vscode": "^1.96.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.7"
+  }
+}
