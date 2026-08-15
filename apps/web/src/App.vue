@@ -33,6 +33,7 @@ const streamError = ref('');
 const streamState = ref<EventStreamState>('disconnected');
 const diagnostic = ref<{ kind: 'manager' | 'auth' | 'codex' | 'copilot'; title: string; message: string }>();
 const selectedChangeId = ref('');
+const selectedRunId = ref('');
 const activeSidePanel = ref<'usage' | 'changes'>(localStorage.getItem('maatgen.sidePanel') === 'usage' ? 'usage' : 'changes');
 const showSystemMessages = ref(localStorage.getItem('maatgen.showSystemMessages') === 'true');
 let sessionPollTimer: number | undefined;
@@ -45,6 +46,26 @@ const visibleEvents = computed(() => showSystemMessages.value
   : events.value.filter((event) => !['command_started', 'command_completed', 'file_change_reported'].includes(event.type)));
 const isActive = computed(() => selected.value?.status === 'active');
 const selectedChange = computed(() => changes.value.files.find((file) => file.id === selectedChangeId.value));
+const selectedRunEntry = computed(() => usage.value.runs.find((entry) => entry.run.id === selectedRunId.value));
+const selectedRunEvents = computed(() => events.value.filter((event) => event.runId === selectedRunId.value));
+const selectedRunCommands = computed(() => {
+  type Command = { id: string; command: string; status?: string; output?: string; error?: string; exitCode?: number };
+  const commands = new Map<string, Command>();
+  for (const event of selectedRunEvents.value) {
+    if (event.type !== 'command_started' && event.type !== 'command_completed') continue;
+    const data = event.data as Record<string, unknown> | undefined;
+    const id = typeof data?.itemId === 'string' ? data.itemId : event.id;
+    const current = commands.get(id) ?? { id, command: '' };
+    if (typeof data?.command === 'string') current.command = data.command;
+    if (typeof data?.status === 'string') current.status = data.status;
+    if (typeof data?.aggregatedOutput === 'string') current.output = data.aggregatedOutput;
+    if (data?.result !== undefined) current.output = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
+    if (data?.error !== undefined) current.error = typeof data.error === 'string' ? data.error : JSON.stringify(data.error, null, 2);
+    if (typeof data?.exitCode === 'number') current.exitCode = data.exitCode;
+    commands.set(id, current);
+  }
+  return [...commands.values()];
+});
 const activeProvider = computed(() => selected.value?.agent ?? newSessionProvider.value);
 const availableModels = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.models ?? []);
 const providerLabel = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.label ?? activeProvider.value);
@@ -100,6 +121,14 @@ function toggleSystemMessages() {
 function selectSidePanel(panel: 'usage' | 'changes') {
   activeSidePanel.value = panel;
   localStorage.setItem('maatgen.sidePanel', panel);
+}
+
+function selectRun(runId: string) {
+  selectedRunId.value = runId;
+}
+
+function closeRunDetail() {
+  selectedRunId.value = '';
 }
 
 function persistNewSessionProvider() {
@@ -170,6 +199,13 @@ function formatCost(value?: number): string {
   return value === undefined ? '—' : `$${value.toFixed(6)}`;
 }
 
+function formatDuration(startedAt?: string, finishedAt?: string): string {
+  if (!startedAt || !finishedAt) return '—';
+  const milliseconds = Math.max(0, new Date(finishedAt).getTime() - new Date(startedAt).getTime());
+  const seconds = Math.floor(milliseconds / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 type TokenUsageKey = 'inputTokens' | 'cachedInputTokens' | 'outputTokens' | 'reasoningOutputTokens' | 'totalTokens';
 
 function usageValue(usageData: TokenUsage | undefined, key: TokenUsageKey): string {
@@ -209,6 +245,7 @@ async function selectSession(session: AgentSession) {
   eventStream?.stop();
   eventStream = undefined;
   selected.value = session;
+  selectedRunId.value = '';
   const provider = providers.value.find((item) => item.id === session.agent);
   selectedModel.value = provider?.defaultModel && provider.models.includes(provider.defaultModel)
     ? provider.defaultModel
@@ -303,7 +340,7 @@ async function createSession() {
   if (!workspace.value.trim()) return;
   await act(async () => {
     const created = await api.createSession({ agent: newSessionProvider.value, workspace: workspace.value.trim() });
-    workspace.value = '';
+    // Keep the workspace input value so the Repository path remains after creating a session.
     await refreshSessions(true);
     await selectSession(created);
   });
@@ -522,7 +559,7 @@ onBeforeUnmount(() => {
       </section>
       <div v-else-if="error" class="error-banner" role="alert">{{ error }}</div>
 
-      <section v-if="selected" ref="timelineElement" class="timeline" aria-live="polite">
+       <section v-if="selected && !selectedRunId" ref="timelineElement" class="timeline" aria-live="polite">
         <div v-if="visibleEvents.length === 0" class="empty-state compact">
           <span class="empty-symbol">⌁</span>
           <h2>{{ providerLabel }}に最初の指示を送る</h2>
@@ -534,8 +571,60 @@ onBeforeUnmount(() => {
           <div v-else class="event-body">{{ eventText(event) }}</div>
           <time>{{ new Date(event.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>
         </article>
-        <div v-if="activeRun" class="thinking"><span /><span /><span /> {{ providerLabel }} is working</div>
-      </section>
+         <div v-if="activeRun" class="thinking"><span /><span /><span /> {{ providerLabel }} is working</div>
+       </section>
+
+       <section v-else-if="selectedRunEntry" class="run-detail" aria-live="polite">
+         <header class="run-detail-header">
+           <div>
+             <p class="eyebrow">RUN DETAIL</p>
+             <h2>{{ selectedRunEntry.run.status }} · {{ selectedRunEntry.run.id }}</h2>
+             <p>{{ new Date(selectedRunEntry.run.startedAt ?? '').toLocaleString('ja-JP') }} · {{ formatDuration(selectedRunEntry.run.startedAt, selectedRunEntry.run.finishedAt) }}</p>
+           </div>
+           <button type="button" class="quiet-button" @click="closeRunDetail">チャットに戻る</button>
+         </header>
+
+         <div class="run-detail-scroll">
+           <article class="run-detail-card run-prompt-card">
+             <span class="detail-label">Prompt</span>
+             <p>{{ selectedRunEntry.run.prompt }}</p>
+           </article>
+           <div class="run-detail-metrics">
+             <article><span>Actual model</span><strong>{{ selectedRunEntry.usage?.actualModel ?? '—' }}</strong></article>
+             <article><span>Exit code</span><strong>{{ selectedRunEntry.run.exitCode ?? '—' }}</strong></article>
+             <article><span>Cost</span><strong>{{ formatCost(selectedRunEntry.usage?.costUsd) }}</strong></article>
+           </div>
+           <article class="run-detail-card">
+             <h3>Usage</h3>
+             <div v-if="activeProvider === 'copilot'" class="detail-token-grid">
+               <div><span>AI credits</span><strong>{{ formatCredits(selectedRunEntry.usage?.aiCredits) }}</strong></div>
+             </div>
+             <div v-else class="detail-token-grid">
+               <div><span>Input</span><strong>{{ usageValue(selectedRunEntry.usage, 'inputTokens') }}</strong></div>
+               <div><span>Cached input</span><strong>{{ usageValue(selectedRunEntry.usage, 'cachedInputTokens') }}</strong></div>
+               <div><span>Output</span><strong>{{ usageValue(selectedRunEntry.usage, 'outputTokens') }}</strong></div>
+               <div><span>Reasoning output</span><strong>{{ usageValue(selectedRunEntry.usage, 'reasoningOutputTokens') }}</strong></div>
+               <div><span>Total</span><strong>{{ usageValue(selectedRunEntry.usage, 'totalTokens') }}</strong></div>
+             </div>
+           </article>
+           <article class="run-detail-card">
+             <h3>Commands <span>{{ selectedRunCommands.length }}</span></h3>
+             <div v-if="selectedRunCommands.length" class="command-list">
+               <div v-for="command in selectedRunCommands" :key="command.id" class="command-detail">
+                  <div class="command-detail-header"><code>{{ command.command || 'Tool execution' }}</code><span>{{ command.status ?? '—' }}{{ command.exitCode !== undefined ? ` · exit ${command.exitCode}` : '' }}</span></div>
+                 <pre v-if="command.output || command.error">{{ command.error || command.output }}</pre>
+               </div>
+             </div>
+             <p v-else class="detail-empty">このRunで実行されたコマンドはありません。</p>
+           </article>
+           <article v-if="selectedRunEvents.length" class="run-detail-card">
+             <h3>Events <span>{{ selectedRunEvents.length }}</span></h3>
+             <div class="run-event-list">
+               <div v-for="event in selectedRunEvents" :key="event.id"><time>{{ new Date(event.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</time><span>{{ event.type.replaceAll('_', ' ') }}</span></div>
+             </div>
+           </article>
+         </div>
+       </section>
 
       <section v-else class="empty-state hero">
         <span class="empty-symbol">⌘</span>
@@ -543,7 +632,7 @@ onBeforeUnmount(() => {
         <p>左側にGit repositoryのパスを入力して、新しいSessionを作成します。</p>
       </section>
 
-      <form v-if="selected && isActive" class="composer" @submit.prevent="sendPrompt">
+       <form v-if="selected && isActive && !selectedRunId" class="composer" @submit.prevent="sendPrompt">
         <textarea v-model="prompt" rows="1" :placeholder="`${providerLabel}に変更内容を伝える…`" :disabled="busy || !!activeRun" @keydown.ctrl.enter="sendPrompt" />
         <div class="composer-actions">
           <div class="run-options">
@@ -591,7 +680,7 @@ onBeforeUnmount(() => {
           </template>
         </div>
         <div v-if="usage.runs.length" class="usage-run-list">
-          <article v-for="entry in usage.runs" :key="entry.run.id" class="usage-run">
+             <button v-for="entry in usage.runs" :key="entry.run.id" type="button" class="usage-run" :class="{ selected: selectedRunId === entry.run.id }" @click="selectRun(entry.run.id)">
             <div class="usage-run-header">
               <span :class="['usage-status', entry.run.status]">{{ entry.run.status }}</span>
               <time>{{ new Date(entry.run.finishedAt ?? entry.run.startedAt ?? '').toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>
@@ -611,7 +700,7 @@ onBeforeUnmount(() => {
                 <span>Cost {{ formatCost(entry.usage?.costUsd) }}</span>
               </div>
             </div>
-          </article>
+             </button>
         </div>
         <div v-else class="usage-empty">RunごとのUsageはまだありません。</div>
       </div>
