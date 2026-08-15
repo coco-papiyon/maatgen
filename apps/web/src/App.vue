@@ -29,10 +29,14 @@ const streamError = ref('');
 const streamState = ref<EventStreamState>('disconnected');
 const diagnostic = ref<{ kind: 'manager' | 'auth' | 'codex'; title: string; message: string }>();
 const selectedChangeId = ref('');
+const showSystemMessages = ref(localStorage.getItem('maatgen.showSystemMessages') === 'true');
 let sessionPollTimer: number | undefined;
 let eventStream: EventStreamLike | undefined;
 
 const lastSequence = computed(() => events.value.at(-1)?.sequence ?? 0);
+const visibleEvents = computed(() => showSystemMessages.value
+  ? events.value
+  : events.value.filter((event) => !['command_started', 'command_completed', 'file_change_reported'].includes(event.type)));
 const isActive = computed(() => selected.value?.status === 'active');
 const selectedChange = computed(() => changes.value.files.find((file) => file.id === selectedChangeId.value));
 const activeProvider = computed(() => selected.value?.agent ?? newSessionProvider.value);
@@ -54,6 +58,10 @@ const streamLabel = computed(() => ({
   reconnecting: '再接続中',
   disconnected: 'Offline',
 })[streamState.value]);
+
+function toggleSystemMessages() {
+  localStorage.setItem('maatgen.showSystemMessages', String(showSystemMessages.value));
+}
 
 function eventText(event: SessionEvent): string {
   const data = event.data as Record<string, unknown> | undefined;
@@ -355,6 +363,10 @@ onBeforeUnmount(() => {
     <header class="topbar">
       <div class="brand"><span class="brand-mark">M</span><span>maatgen</span></div>
       <div class="topbar-status">
+        <label class="system-message-setting" title="コマンド実行やファイル編集のシステムメッセージを表示">
+          <input v-model="showSystemMessages" type="checkbox" @change="toggleSystemMessages" />
+          <span>System messages</span>
+        </label>
         <div class="stream-state" :class="streamState" :title="streamError || `Event stream: ${streamLabel}`"><span />{{ streamLabel }}</div>
         <div class="run-state"><span class="status-dot" :class="{ working: activeRun }" />{{ statusLabel }}</div>
       </div>
@@ -413,12 +425,12 @@ onBeforeUnmount(() => {
       <div v-else-if="error" class="error-banner" role="alert">{{ error }}</div>
 
       <section v-if="selected" class="timeline" aria-live="polite">
-        <div v-if="events.length === 0" class="empty-state compact">
+        <div v-if="visibleEvents.length === 0" class="empty-state compact">
           <span class="empty-symbol">⌁</span>
           <h2>{{ providerLabel }}に最初の指示を送る</h2>
           <p>このSession専用のworktreeで安全に作業します。</p>
         </div>
-        <article v-for="event in events" :key="event.id" class="event" :class="eventKind(event)">
+        <article v-for="event in visibleEvents" :key="event.id" class="event" :class="eventKind(event)">
           <div class="event-label">{{ eventKind(event) === 'assistant' ? providerLabel.toUpperCase() : eventKind(event).toUpperCase() }}</div>
           <div class="event-body">{{ eventText(event) }}</div>
           <time>{{ new Date(event.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>

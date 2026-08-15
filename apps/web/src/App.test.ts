@@ -10,6 +10,7 @@ let wrapper: VueWrapper | undefined;
 afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
+  localStorage.removeItem('maatgen.showSystemMessages');
   vi.restoreAllMocks();
 });
 
@@ -33,6 +34,16 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.text()).toContain('認証処理を確認し、テストを追加しました。');
     expect(mounted.wrapper.find('.stream-state').text()).toBe('Live');
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
+  });
+
+  it('hides command and file-change system messages by default and shows them when configured', async () => {
+    const mounted = await mountApp();
+    expect(mounted.wrapper.find('.timeline').text()).not.toContain('npm test');
+    expect(mounted.wrapper.find('.timeline').text()).not.toContain('file_change_reported');
+
+    await mounted.wrapper.find('.system-message-setting input').setValue(true);
+    expect(mounted.wrapper.find('.timeline').text()).toContain('npm test');
+    expect(mounted.wrapper.find('.timeline').text()).toContain('file_change_reported');
   });
 
   it('selects a configured model for the next run', async () => {

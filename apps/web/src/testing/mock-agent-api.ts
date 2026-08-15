@@ -242,8 +242,10 @@ function aggregateStatus(statuses: Array<'pending' | 'accepted' | 'rejected'>): 
 function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[]; changes: ChangeSet }> {
   return [
     scenario('mock-success', 'C:/demo/success', [
-      event('mock-success', 1, 'assistant_message', { text: '認証処理を確認し、テストを追加しました。' }),
-      event('mock-success', 2, 'usage_reported', { totalTokens: 2400 }),
+      event('mock-success', 1, 'command_started', { command: 'npm test' }),
+      event('mock-success', 2, 'file_change_reported', { text: 'file_change_reported' }),
+      event('mock-success', 3, 'assistant_message', { text: '認証処理を確認し、テストを追加しました。' }),
+      event('mock-success', 4, 'usage_reported', { totalTokens: 2400 }),
     ], oneHunk('mock-success')),
     scenario('mock-failure', 'C:/demo/failure', [event('mock-failure', 1, 'run_failed', { code: 'codex_unavailable', message: 'Mock: Codex CLI is unavailable' })], emptyChanges('mock-failure')),
     scenario('mock-cancelled', 'C:/demo/cancelled', [event('mock-cancelled', 1, 'run_cancelled', {})], emptyChanges('mock-cancelled')),
