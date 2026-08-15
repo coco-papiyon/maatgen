@@ -93,7 +93,7 @@ Session作成時はGitリポジトリのcleanなWorking Treeを指定します�
 
 CodexへPromptを送るとRunが非同期で開始されます。同じSessionで実行中のRunがある場合は`409 Conflict`になります。`model`と`timeoutSeconds`は省略可能です。
 
-Providerとモデル候補は`GET /api/v1/providers`で取得できます。現時点のProviderはCodexのみです。起動時にexperimentalな`codex debug models`を5秒の上限で実行し、利用できる場合はCodexが返したモデル一覧を使用します。コマンドが未対応、Codexが未導入、未認証、タイムアウト、または応答を解釈できない場合はManagerの設定ファイルへフォールバックします。既定の相対パスは`config/providers.json`で、カレントディレクトリではなくAgent Manager実行ファイルのあるディレクトリを基準に解決します。`--config`で別の相対パスへ変更できます。外部ファイルがない場合は組み込みの既定値を使用します。
+Providerとモデル候補は`GET /api/v1/providers`で取得できます。現時点のProviderはCodexのみです。起動時にexperimentalな`codex debug models`を5秒の上限で実行し、利用できる場合はCodexが返したモデル一覧を使用します。コマンドが未対応、Codexが未導入、未認証、タイムアウト、または応答を解釈できない場合はManagerの設定ファイルへフォールバックします。既定の相対パスは`config/providers.json`で、通常はAgent Manager実行ファイルのあるディレクトリを基準に解決します。`go run`で起動した場合はGoが作成する一時実行ファイルではなく、起動時のカレントディレクトリを基準にします。`--config`で別の相対パスへ変更できます。Web UIで変更したモデルは`defaultModel`として同じ設定ファイルへ保存され、次回起動時に引き継がれます。外部ファイルがない場合は組み込みの既定値を使用します。
 
 ```json
 {

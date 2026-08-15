@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -59,7 +60,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
-	toolConfig, resolvedConfigPath, err := toolconfig.Load(executablePath, *configFile)
+	toolConfig, resolvedConfigPath, err := toolconfig.LoadFrom(executablePath, *configFile, defaultWorkspace)
 	if err != nil {
 		return err
 	}
@@ -71,6 +72,7 @@ func run() error {
 	} else {
 		slog.Debug("using configured Codex models", "error", discoveryErr)
 	}
+	modelConfigMu := sync.Mutex{}
 	if *runtimeFile == "" {
 		*runtimeFile = filepath.Join(*dataDir, "runtime.json")
 	}
@@ -146,6 +148,11 @@ func run() error {
 			ChangeReader:      store,
 			RestoreController: restores,
 			Providers:         toolConfig.Providers,
+			ModelSetter: func(_ context.Context, provider protocol.AgentName, model string) error {
+				modelConfigMu.Lock()
+				defer modelConfigMu.Unlock()
+				return toolconfig.SaveDefaultModel(resolvedConfigPath, &toolConfig, provider, model)
+			},
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

@@ -13,7 +13,9 @@ const createEventStream = props.eventStreamFactory ?? ((options) => new SessionE
 
 const sessions = ref<AgentSession[]>([]);
 const providers = ref<Provider[]>([]);
-const newSessionProvider = ref<AgentSession['agent']>('codex');
+const providerStorageKey = 'maatgen.provider';
+const storedProvider = localStorage.getItem(providerStorageKey) as AgentSession['agent'] | null;
+const newSessionProvider = ref<AgentSession['agent']>(storedProvider || 'codex');
 const selectedModel = ref('');
 const nextSessionCursor = ref('');
 const loadingMoreSessions = ref(false);
@@ -82,6 +84,10 @@ function restoreActiveRun(items: SessionEvent[]) {
 
 function toggleSystemMessages() {
   localStorage.setItem('maatgen.showSystemMessages', String(showSystemMessages.value));
+}
+
+function persistNewSessionProvider() {
+  localStorage.setItem(providerStorageKey, newSessionProvider.value);
 }
 
 function eventText(event: SessionEvent): string {
@@ -156,7 +162,10 @@ async function selectSession(session: AgentSession) {
   eventStream?.stop();
   eventStream = undefined;
   selected.value = session;
-  if (selectedModel.value && !availableModels.value.includes(selectedModel.value)) selectedModel.value = '';
+  const provider = providers.value.find((item) => item.id === session.agent);
+  selectedModel.value = provider?.defaultModel && provider.models.includes(provider.defaultModel)
+    ? provider.defaultModel
+    : '';
   events.value = [];
   changes.value = emptyChangeSet(session.id);
   activeRun.value = undefined;
@@ -165,6 +174,16 @@ async function selectSession(session: AgentSession) {
   await refreshSelected(true);
   if (selected.value?.id === session.id && selected.value.status === 'active') {
     startEventStream(session.id);
+  }
+}
+
+async function persistSelectedModel() {
+  try {
+    await api.setProviderModel(activeProvider.value, selectedModel.value);
+    const provider = providers.value.find((item) => item.id === activeProvider.value);
+    if (provider) provider.defaultModel = selectedModel.value;
+  } catch (cause) {
+    handleFailure(cause);
   }
 }
 
@@ -363,6 +382,7 @@ onMounted(async () => {
     if (!providers.value.some((provider) => provider.id === newSessionProvider.value) && providers.value[0]) {
       newSessionProvider.value = providers.value[0].id;
     }
+    persistNewSessionProvider();
     const firstActive = sessions.value.find((session) => session.status === 'active') ?? sessions.value[0];
     if (firstActive) await selectSession(firstActive);
   });
@@ -396,7 +416,7 @@ onBeforeUnmount(() => {
       <form class="new-session" @submit.prevent="createSession">
         <div class="provider-fields">
           <label>Provider
-            <select v-model="newSessionProvider" :disabled="busy || providers.length < 2">
+            <select v-model="newSessionProvider" :disabled="busy || providers.length < 2" @change="persistNewSessionProvider">
               <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
             </select>
           </label>
@@ -461,11 +481,11 @@ onBeforeUnmount(() => {
       </section>
 
       <form v-if="selected && isActive" class="composer" @submit.prevent="sendPrompt">
-        <textarea v-model="prompt" rows="2" :placeholder="`${providerLabel}に変更内容を伝える…`" :disabled="busy || !!activeRun" @keydown.ctrl.enter="sendPrompt" />
+        <textarea v-model="prompt" rows="1" :placeholder="`${providerLabel}に変更内容を伝える…`" :disabled="busy || !!activeRun" @keydown.ctrl.enter="sendPrompt" />
         <div class="composer-actions">
           <div class="run-options">
             <span>{{ providerLabel }}</span>
-            <select v-model="selectedModel" :disabled="busy || !!activeRun" aria-label="Model">
+            <select v-model="selectedModel" :disabled="busy || !!activeRun" aria-label="Model" @change="persistSelectedModel">
               <option value="">Default model</option>
               <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
             </select>

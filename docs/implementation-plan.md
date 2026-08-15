@@ -626,7 +626,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-15 | Codex実行バイナリ検出 | PATHから検出し、shellを介さず`codex --version`で検証・絶対パスとversionを保存 | `exec.LookPath`で検出し、shellなしの`--version`成功後に絶対パスとversionをAdapterへ保持 | Phase 0開始前 | 検討済み |
 | D-16 | Codex sandbox policy | `workspace-write` | `workspace-write` | Codex Adapter着手前 | 検討済み |
 | D-17 | Codex approval policy | 初期版は明示的な固定値として設定 | `--ask-for-approval never`。承認待ちを発生させず、失敗をCodexへ返す | Codex Adapter着手前 | 検討済み |
-| D-18 | Codex model指定 | 未指定時はCodex設定に委譲し、要求値だけ保存 | 未指定時はCLI設定へ委譲し、指定時だけ`--model`を渡す | Codex Adapter着手前 | 検討済み |
+| D-18 | Codex model指定 | 未指定時はCodex設定に委譲し、要求値だけ保存 | 未指定時はCLI設定へ委譲し、指定時だけ`--model`を渡す。Web UIで選択した既定モデルは、Managerのツール設定（`config/providers.json`）へ保存し、次回起動時に復元する | Codex Adapter着手前 | 検討済み |
 | D-19 | Codex timeout | Run単位の上限時間を設定可能にする | 既定30分。Run要求で変更可能とし、timeout時はプロセスツリーを終了する | Codex Adapter着手前 | 検討済み |
 | D-20 | 認証方式 | HTTP Bearer token、WebSocket短命ticket | HTTP Bearer token、WebSocket短命ticket | Phase 2開始前 | 検討済み |
 | D-21 | 許可Origin | Vite開発URLとVS Code Webviewのみ | — | Phase 2開始前 | 検討中 |

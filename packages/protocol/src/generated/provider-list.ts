@@ -9,5 +9,6 @@ export interface ProviderListResponse {
     id: 'codex';
     label: string;
     models: string[];
+    defaultModel?: string;
   }[];
 }

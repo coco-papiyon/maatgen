@@ -12,6 +12,7 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
   localStorage.removeItem('maatgen.showSystemMessages');
+  localStorage.removeItem('maatgen.provider');
   vi.restoreAllMocks();
 });
 
@@ -66,6 +67,25 @@ describe('App with MockAgentApi', () => {
       message: 'モデル指定のテスト',
       model: 'gpt-5.6-sol',
     });
+  });
+
+  it('restores the previously selected provider for a new session', async () => {
+    localStorage.setItem('maatgen.provider', 'other');
+    class MultiProviderApi extends MockAgentApi {
+      override async listProviders() {
+        return {
+          providers: [
+            { id: 'codex' as const, label: 'Codex', models: ['gpt-5.6-sol'] },
+            { id: 'other' as const, label: 'Other', models: ['other-model'] },
+          ] as any,
+        };
+      }
+    }
+
+    wrapper = mount(App, { props: { agentApi: new MultiProviderApi(), eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+
+    expect((wrapper.find('.provider-fields select').element as HTMLSelectElement).value).toBe('other');
   });
 
   it('keeps the composer available and continues the same session after a run completes', async () => {

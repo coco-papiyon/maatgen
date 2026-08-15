@@ -801,6 +801,8 @@ started_at
 finished_at
 ```
 
+Providerのモデル選択はブラウザだけに保持せず、Managerのツール設定に`defaultModel`として保存する。通常の実行ファイルでは設定パスを実行ファイル基準で解決し、`go run`の一時実行ファイルでは起動時のカレントディレクトリ基準に切り替える。
+
 ### prompts
 
 ```text

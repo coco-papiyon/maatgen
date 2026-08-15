@@ -13,6 +13,7 @@ import type {
 export interface AgentApi {
   getDefaultWorkspace(): Promise<string>;
   listProviders(): Promise<ProviderListResponse>;
+  setProviderModel(provider: string, model: string): Promise<void>;
   listSessions(cursor?: string, limit?: number): Promise<SessionListResponse>;
   createSession(request: CreateSessionRequest): Promise<AgentSession>;
   getSession(id: string): Promise<AgentSession>;
@@ -71,6 +72,12 @@ export const httpAgentApi: AgentApi = {
   },
   listProviders() {
     return request('/api/v1/providers');
+  },
+  setProviderModel(provider, model) {
+    return request(`/api/v1/providers/${encodeURIComponent(provider)}/model`, {
+      method: 'PUT',
+      body: JSON.stringify({ model }),
+    });
   },
   listSessions(cursor, limit = 25) {
     const query = new URLSearchParams({ limit: String(limit) });

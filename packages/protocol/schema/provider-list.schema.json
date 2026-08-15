@@ -19,7 +19,8 @@
             "type": "array",
             "items": { "type": "string", "minLength": 1 },
             "uniqueItems": true
-          }
+          },
+          "defaultModel": { "type": "string", "minLength": 1 }
         }
       }
     }

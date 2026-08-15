@@ -31,6 +31,13 @@ type Config struct {
 	ChangeReader      ChangeReader
 	RestoreController RestoreController
 	Providers         []protocol.Provider
+	ModelSetter       ModelSetter
+}
+
+type ModelSetter func(ctx context.Context, provider protocol.AgentName, model string) error
+
+type setModelRequest struct {
+	Model string `json:"model"`
 }
 
 type HealthResponse struct {
@@ -118,6 +125,20 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 		}
 		writeJSON(w, http.StatusOK, protocol.ProviderListResponse{Providers: providers})
 	})))
+	if config.ModelSetter != nil {
+		mux.Handle("PUT /api/v1/providers/{id}/model", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request setModelRequest
+			if err := readJSON(w, r, &request); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
+				return
+			}
+			if err := config.ModelSetter(r.Context(), protocol.AgentName(r.PathValue("id")), request.Model); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "model_persistence_failed", "model preference could not be saved", nil)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})))
+	}
 	if config.SessionCreator != nil {
 		mux.Handle("POST /api/v1/sessions", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var request protocol.CreateSessionRequest

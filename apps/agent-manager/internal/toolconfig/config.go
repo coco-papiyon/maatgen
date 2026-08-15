@@ -23,6 +23,41 @@ type Config struct {
 	Providers []protocol.Provider `json:"providers"`
 }
 
+func SaveDefaultModel(path string, config *Config, providerID protocol.AgentName, model string) error {
+	model = strings.TrimSpace(model)
+	for index := range config.Providers {
+		provider := &config.Providers[index]
+		if provider.ID != providerID {
+			continue
+		}
+		provider.DefaultModel = model
+		if model != "" && !contains(provider.Models, model) {
+			provider.Models = append(provider.Models, model)
+		}
+		data, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode tool config: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return fmt.Errorf("create tool config directory: %w", err)
+		}
+		if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+			return fmt.Errorf("write tool config: %w", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("provider %q is not configured", providerID)
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 // DiscoverCodexModels asks recent Codex binaries for their account-aware model
 // catalog. The command is experimental, so callers must retain configured models
 // as a fallback when this returns an error.
@@ -96,12 +131,20 @@ func parseModelCatalog(data []byte) ([]string, error) {
 	return models, nil
 }
 
-// Load resolves relativePath from the manager executable, never from its working directory.
+// Load resolves relativePath from the manager executable.
 func Load(executablePath, relativePath string) (Config, string, error) {
+	return LoadFrom(executablePath, relativePath, "")
+}
+
+// LoadFrom uses the working directory when the executable is a temporary go run binary.
+func LoadFrom(executablePath, relativePath, workingDirectory string) (Config, string, error) {
 	if filepath.IsAbs(relativePath) {
 		return Config{}, "", errors.New("tool config path must be relative to the executable")
 	}
 	base := filepath.Dir(executablePath)
+	if workingDirectory != "" && isGoRunExecutable(executablePath) {
+		base = workingDirectory
+	}
 	path := filepath.Clean(filepath.Join(base, relativePath))
 	rel, err := filepath.Rel(base, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -118,6 +161,20 @@ func Load(executablePath, relativePath string) (Config, string, error) {
 		return Config{}, path, fmt.Errorf("load tool config %s: %w", path, err)
 	}
 	return config, path, nil
+}
+
+func isGoRunExecutable(executablePath string) bool {
+	executablePath = filepath.Clean(executablePath)
+	tempDir := filepath.Clean(os.TempDir())
+	if rel, err := filepath.Rel(tempDir, executablePath); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return true
+	}
+	for _, part := range strings.Split(filepath.ToSlash(executablePath), "/") {
+		if strings.HasPrefix(part, "go-build") {
+			return true
+		}
+	}
+	return false
 }
 
 func parse(data []byte) (Config, error) {
@@ -152,6 +209,10 @@ func parse(data []byte) (Config, error) {
 			}
 		}
 		provider.Models = models
+		provider.DefaultModel = strings.TrimSpace(provider.DefaultModel)
+		if provider.DefaultModel != "" && !contains(provider.Models, provider.DefaultModel) {
+			return Config{}, fmt.Errorf("provider %q default model is not configured", provider.ID)
+		}
 	}
 	if _, ok := seen[protocol.AgentCodex]; !ok {
 		return Config{}, errors.New("codex provider is required")
