@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,6 +113,32 @@ func TestRunServiceRejectsConcurrentRunAndCancels(t *testing.T) {
 	}
 }
 
+func TestRunServiceAcceptsFollowUpAsSoonAsTerminalEventIsPublished(t *testing.T) {
+	store, session := createRunTestStore(t)
+	blockingStore := &terminalBlockingStore{
+		Store: store, terminalEntered: make(chan struct{}), releaseTerminal: make(chan struct{}),
+	}
+	service := New(blockingStore, &fakeAdapter{}, WithCheckpointManager(&fakeCheckpointManager{}))
+	defer service.Close(context.Background())
+
+	first, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "First"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blockingStore.terminalEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("terminal event was not reached")
+	}
+	second, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Follow up"})
+	if err != nil {
+		t.Fatalf("follow-up run was rejected after completion: %v", err)
+	}
+	close(blockingStore.releaseTerminal)
+	waitForRunStatus(t, store, first.ID, protocol.RunCompleted)
+	waitForRunStatus(t, store, second.ID, protocol.RunCompleted)
+}
+
 func TestRunServiceRefreshesChangeSetAfterSuccessfulRun(t *testing.T) {
 	store, session := createRunTestStore(t)
 	path := "changed.txt"
@@ -186,6 +213,35 @@ type fakeAdapter struct {
 	block    bool
 	runErr   error
 	requests []agent.RunRequest
+}
+
+type terminalBlockingStore struct {
+	*storesqlite.Store
+	mu              sync.Mutex
+	blocked         bool
+	terminalEntered chan struct{}
+	releaseTerminal chan struct{}
+}
+
+func (s *terminalBlockingStore) AppendEvent(ctx context.Context, event protocol.SessionEvent) (protocol.SessionEvent, error) {
+	shouldBlock := false
+	if event.Type == protocol.EventTypeRunCompleted || event.Type == protocol.EventTypeRunFailed || event.Type == protocol.EventTypeRunCancelled {
+		s.mu.Lock()
+		if !s.blocked {
+			s.blocked = true
+			shouldBlock = true
+		}
+		s.mu.Unlock()
+	}
+	if shouldBlock {
+		close(s.terminalEntered)
+		select {
+		case <-s.releaseTerminal:
+		case <-ctx.Done():
+			return protocol.SessionEvent{}, ctx.Err()
+		}
+	}
+	return s.Store.AppendEvent(ctx, event)
 }
 
 type fakeChangeDetector struct {

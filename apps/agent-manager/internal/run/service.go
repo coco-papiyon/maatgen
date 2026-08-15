@@ -360,6 +360,11 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		terminalData = mustJSON(map[string]any{"message": "capture changes after Codex run", "code": "checkpoint_capture_failed"})
 	}
 	_ = s.store.UpdateRun(persistCtx, run)
+	// Release the per-session execution slot before publishing the terminal event.
+	// The Web UI enables the composer as soon as it receives that event, so keeping
+	// the slot until the goroutine returns creates a small window where a valid
+	// follow-up prompt is rejected as an overlapping Run.
+	s.release(run.ID, session.ID)
 	_, _ = s.appendRawEvent(persistCtx, session.ID, run.ID, terminalSource, terminalType, terminalData)
 }
 
