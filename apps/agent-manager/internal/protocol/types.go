@@ -87,6 +87,17 @@ type TokenUsage struct {
 	Source                string `json:"source"`
 }
 
+type SessionUsage struct {
+	SessionID string          `json:"sessionId"`
+	Summary   TokenUsage      `json:"summary"`
+	Runs      []RunUsageEntry `json:"runs"`
+}
+
+type RunUsageEntry struct {
+	Run   AgentRun    `json:"run"`
+	Usage *TokenUsage `json:"usage,omitempty"`
+}
+
 type EventSource string
 
 const (

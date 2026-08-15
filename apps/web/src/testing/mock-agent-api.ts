@@ -8,7 +8,7 @@ import type {
   SessionEvent,
   WsTicketResponse,
 } from '@maatgen/protocol';
-import type { AgentApi } from '../api';
+import type { AgentApi, SessionUsage } from '../api';
 import type { EventStreamFactory } from '../event-stream';
 
 type EventListener = (event: SessionEvent) => void;
@@ -130,6 +130,24 @@ export class MockAgentApi implements AgentApi {
     const changeSet = this.changes.get(id);
     if (!changeSet) throw new Error('change set was not found');
     return clone(changeSet);
+  }
+
+  async getUsage(id: string): Promise<SessionUsage> {
+    const events = this.events.get(id) ?? [];
+    const usageEvents = events.filter((event) => event.type === 'usage_reported');
+    const runs = usageEvents.map((event) => ({
+      run: { id: event.runId ?? `mock-usage-${event.sequence}`, sessionId: id, status: 'completed' as const, prompt: 'Mock usage run', finishedAt: event.timestamp },
+      usage: event.data as SessionUsage['summary'],
+    }));
+    const summary: SessionUsage['summary'] = { source: 'unknown' };
+    for (const entry of runs) {
+      for (const key of ['inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningOutputTokens', 'totalTokens'] as const) {
+        const value = entry.usage?.[key];
+        if (typeof value !== 'number') continue;
+        summary[key] = (summary[key] ?? 0) + value;
+      }
+    }
+    return clone({ sessionId: id, summary, runs });
   }
 
   restoreHunk(sessionId: string, _checkpointId: string, hunkId: string): Promise<ChangeSet> {

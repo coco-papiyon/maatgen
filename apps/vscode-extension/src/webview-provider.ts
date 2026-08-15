@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { createNonce } from './nonce.js';
 import { renderWebviewHtml } from './webview-html.js';
+import { AgentManagerClient, type SessionUsage } from './agent-manager-client.js';
+import type { AgentSession, ChangeSet, SessionEvent } from './agent-manager-client.js';
 
 interface WorkspaceState {
   name: string;
@@ -9,14 +11,32 @@ interface WorkspaceState {
 
 type WebviewMessage =
   | { type: 'webview.ready' }
-  | { type: 'workspace.refresh' };
+  | { type: 'workspace.refresh' }
+  | { type: 'run.prompt'; message: string }
+  | { type: 'run.cancel' }
+  | { type: 'session.select'; sessionId: string }
+  | { type: 'session.close' };
 
 export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'maatgen.sessions';
 
   private view: vscode.WebviewView | undefined;
+  private readonly manager: AgentManagerClient;
+  private session: AgentSession | undefined;
+  private sessions: AgentSession[] = [];
+  private selectedSessionId: string | undefined;
+  private events: SessionEvent[] = [];
+  private pollTimer: ReturnType<typeof setInterval> | undefined;
+  private syncBusy = false;
+  private activeRunId: string | undefined;
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(private readonly extensionUri: vscode.Uri) {
+    const config = vscode.workspace.getConfiguration('maatgen');
+    this.manager = new AgentManagerClient(
+      config.get('managerUrl', 'http://127.0.0.1:3100').replace(/\/$/, ''),
+      config.get('managerAuthToken', 'maatgen-local-development-token'),
+    );
+  }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -37,7 +57,23 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage(
       (message: WebviewMessage) => {
         if (message.type === 'webview.ready' || message.type === 'workspace.refresh') {
-          void this.postWorkspaceState();
+          void this.syncSession();
+        } else if (message.type === 'run.prompt') {
+          void this.startRun(message.message);
+        } else if (message.type === 'run.cancel' && this.activeRunId) {
+          void this.manager.cancelRun(this.activeRunId).then(() => this.syncSession());
+        } else if (message.type === 'session.select') {
+          this.selectedSessionId = message.sessionId;
+          void this.syncSession();
+        } else if (message.type === 'session.close' && this.session) {
+          void this.manager.closeSession(this.session.id).then(async () => {
+            this.stopPolling();
+            this.session = undefined;
+            this.selectedSessionId = undefined;
+            this.events = [];
+            this.activeRunId = undefined;
+            await this.postState(undefined, [], undefined, undefined);
+          });
         }
       },
       undefined,
@@ -46,16 +82,82 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   }
 
   refresh(): void {
-    void this.postWorkspaceState();
+    void this.syncSession();
   }
 
-  private async postWorkspaceState(): Promise<void> {
-    if (!this.view) return;
+  dispose(): void {
+    this.stopPolling();
+  }
 
-    await this.view.webview.postMessage({
-      type: 'workspace.state',
-      workspace: this.getWorkspaceState(),
+  private async syncSession(): Promise<void> {
+    if (!this.view || this.syncBusy) return;
+    this.syncBusy = true;
+    try {
+      const workspace = this.getWorkspaceState();
+      if (!workspace) {
+        this.session = undefined;
+        this.events = [];
+        this.activeRunId = undefined;
+        await this.postState(undefined, [], undefined, undefined);
+        return;
+      }
+      this.sessions = await this.manager.listSessions();
+      const selected = this.selectedSessionId
+        ? this.sessions.find((candidate) => candidate.id === this.selectedSessionId)
+        : undefined;
+      this.session = selected
+        ?? this.session
+        ?? this.sessions.find((candidate) => candidate.workspace === workspace.path && candidate.status === 'active')
+        ?? await this.manager.createSession({ agent: 'codex', workspace: workspace.path });
+      if (!this.sessions.some((candidate) => candidate.id === this.session?.id)) this.sessions = [this.session, ...this.sessions];
+      const [session, events, usage, changes] = await Promise.all([
+        this.manager.getSession(this.session.id),
+        this.manager.getEvents(this.session.id),
+        this.manager.getUsage(this.session.id),
+        this.manager.getChanges(this.session.id),
+      ]);
+      this.session = session;
+      this.events = events;
+      this.activeRunId = this.findActiveRunId(events);
+      await this.postState(session, events, usage, changes);
+      this.startPolling();
+    } catch (error) {
+      await this.view.webview.postMessage({ type: 'manager.error', message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      this.syncBusy = false;
+    }
+  }
+
+  private startPolling(): void {
+    if (this.pollTimer) return;
+    this.pollTimer = setInterval(() => { void this.syncSession(); }, 1_000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = undefined;
+  }
+
+  private async startRun(message: string): Promise<void> {
+    if (!this.session || this.session.status !== 'active' || !message.trim() || this.activeRunId) return;
+    try {
+      const run = await this.manager.sendMessage(this.session.id, { message: message.trim() });
+      this.activeRunId = run.id;
+      await this.syncSession();
+    } catch (error) {
+      await this.view?.webview.postMessage({ type: 'manager.error', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async postState(session: AgentSession | undefined, events: SessionEvent[], usage: SessionUsage | undefined, changes: ChangeSet | undefined): Promise<void> {
+    await this.view?.webview.postMessage({
+      type: 'session.state', workspace: this.getWorkspaceState(), sessions: this.sessions, session, events, usage, changes, activeRunId: this.activeRunId,
     });
+  }
+
+  private findActiveRunId(events: SessionEvent[]): string | undefined {
+    const terminal = new Set(events.filter((event) => ['run_completed', 'run_failed', 'run_cancelled'].includes(event.type)).map((event) => event.runId).filter(Boolean));
+    return [...events].reverse().find((event) => event.type === 'run_started' && event.runId && !terminal.has(event.runId))?.runId;
   }
 
   private getWorkspaceState(): WorkspaceState | undefined {

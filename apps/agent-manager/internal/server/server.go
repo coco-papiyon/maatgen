@@ -32,6 +32,7 @@ type Config struct {
 	RestoreController RestoreController
 	Providers         []protocol.Provider
 	ModelSetter       ModelSetter
+	UsageReader       UsageReader
 }
 
 type ModelSetter func(ctx context.Context, provider protocol.AgentName, model string) error
@@ -75,6 +76,10 @@ type EventReader interface {
 
 type ChangeReader interface {
 	GetChangeSet(ctx context.Context, sessionID string) (protocol.ChangeSet, error)
+}
+
+type UsageReader interface {
+	GetSessionUsage(ctx context.Context, sessionID string) (protocol.SessionUsage, error)
 }
 
 type RestoreController interface {
@@ -265,6 +270,23 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 		mux.HandleFunc("GET /ws", func(w http.ResponseWriter, r *http.Request) {
 			serveEventWebSocket(w, r, config, tickets, sessions, events, config.EventSubscriber)
 		})
+	}
+	if sessions != nil && config.UsageReader != nil {
+		mux.Handle("GET /api/v1/sessions/{id}/usage", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			usage, err := config.UsageReader.GetSessionUsage(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			if usage.Runs == nil {
+				usage.Runs = []protocol.RunUsageEntry{}
+			}
+			writeJSON(w, http.StatusOK, usage)
+		})))
 	}
 	if config.ChangeReader != nil {
 		mux.Handle("GET /api/v1/sessions/{id}/changes", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -381,6 +381,10 @@ Browser
 - Web UI packageの再利用
 - Agent Manager起動とhealth check
 - Workspace情報連携
+- Manager HTTP APIによるSession作成／再利用、Run送信／cancel、イベント／Usage／ChangeSet同期
+- VS Code WebviewでのRun操作、Session履歴選択、イベント／Usage／変更ファイル表示
+- Web版とVS Code版の共有Manager Session履歴、およびcursorページングの統合
+- Manager URL／Bearer tokenのExtension設定
 - `vscode.diff`
 - CodeLens／Decoration
 - Extension終了時のManager cleanup（checkpointは保持期限に従う）
@@ -829,6 +833,7 @@ docs/decisions/
 - [x] Extension workspaceとExtension Development Host起動設定
 - [x] Explorer内の`WebviewViewProvider`
 - [x] `default-src 'none'`とnonceによるWebview CSP
+- [x] AgentのMarkdown結果をWeb UI／VS Code Webviewの表示密度に応じてレンダリング
 - [x] Workspace名／pathのExtension-Webviewメッセージ連携
 - [x] VS Codeテーマ変数に対応した初期UI
 - [ ] Web UI componentと`AgentApi`契約の再利用

@@ -6,6 +6,9 @@ const authorization = 'Bearer maatgen-local-development-token';
 
 export default defineConfig({
   plugins: [vue()],
+  // Keep Vite/Vitest temporary files outside the dependency tree. This also
+  // makes tests work in read-only or managed node_modules installations.
+  cacheDir: '../../.vite-cache/web',
   test: {
     environment: 'happy-dom',
   },

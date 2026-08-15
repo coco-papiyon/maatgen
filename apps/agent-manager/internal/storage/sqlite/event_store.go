@@ -191,6 +191,82 @@ func (s *Store) GetRunUsage(ctx context.Context, runID string) (protocol.TokenUs
 	return usage, nil, nil
 }
 
+func (s *Store) GetSessionUsage(ctx context.Context, sessionID string) (protocol.SessionUsage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT r.id, r.session_id, r.status, r.prompt, r.started_at, r.finished_at, r.exit_code,
+			u.input_tokens, u.cached_input_tokens, u.output_tokens, u.reasoning_output_tokens,
+			u.total_tokens, u.source
+		FROM runs r
+		LEFT JOIN run_usage u ON u.run_id = r.id
+		WHERE r.session_id = ?
+		ORDER BY r.created_at DESC, r.id DESC`, sessionID)
+	if err != nil {
+		return protocol.SessionUsage{}, fmt.Errorf("list session usage: %w", err)
+	}
+	defer rows.Close()
+
+	result := protocol.SessionUsage{SessionID: sessionID, Summary: protocol.TokenUsage{Source: "unknown"}, Runs: []protocol.RunUsageEntry{}}
+	for rows.Next() {
+		var run protocol.AgentRun
+		var startedAt, finishedAt sql.NullString
+		var exitCode sql.NullInt64
+		var input, cached, output, reasoning, total sql.NullInt64
+		var source sql.NullString
+		if err := rows.Scan(&run.ID, &run.SessionID, &run.Status, &run.Prompt, &startedAt, &finishedAt, &exitCode,
+			&input, &cached, &output, &reasoning, &total, &source); err != nil {
+			return protocol.SessionUsage{}, fmt.Errorf("scan session usage: %w", err)
+		}
+		if run.StartedAt, err = parseNullableTime(startedAt); err != nil {
+			return protocol.SessionUsage{}, fmt.Errorf("scan usage started_at: %w", err)
+		}
+		if run.FinishedAt, err = parseNullableTime(finishedAt); err != nil {
+			return protocol.SessionUsage{}, fmt.Errorf("scan usage finished_at: %w", err)
+		}
+		if exitCode.Valid {
+			value := int(exitCode.Int64)
+			run.ExitCode = &value
+		}
+		var usage *protocol.TokenUsage
+		if source.Valid {
+			usage = &protocol.TokenUsage{Source: source.String}
+			usage.InputTokens = int64Pointer(input)
+			usage.CachedInputTokens = int64Pointer(cached)
+			usage.OutputTokens = int64Pointer(output)
+			usage.ReasoningOutputTokens = int64Pointer(reasoning)
+			usage.TotalTokens = int64Pointer(total)
+			addUsage(&result.Summary, usage)
+		}
+		result.Runs = append(result.Runs, protocol.RunUsageEntry{Run: run, Usage: usage})
+	}
+	if err := rows.Err(); err != nil {
+		return protocol.SessionUsage{}, fmt.Errorf("list session usage: %w", err)
+	}
+	return result, nil
+}
+
+func addUsage(summary *protocol.TokenUsage, usage *protocol.TokenUsage) {
+	if usage == nil {
+		return
+	}
+	values := map[**int64]*int64{
+		&summary.InputTokens: usage.InputTokens,
+		&summary.CachedInputTokens: usage.CachedInputTokens,
+		&summary.OutputTokens: usage.OutputTokens,
+		&summary.ReasoningOutputTokens: usage.ReasoningOutputTokens,
+		&summary.TotalTokens: usage.TotalTokens,
+	}
+	for target, value := range values {
+		if value == nil {
+			continue
+		}
+		if *target == nil {
+			zero := int64(0)
+			*target = &zero
+		}
+		**target += *value
+	}
+}
+
 func (s *Store) AppendRedactedRawEvent(ctx context.Context, event storage.RedactedRawEvent) (storage.RedactedRawEvent, error) {
 	if !json.Valid(event.RawJSON) {
 		return storage.RedactedRawEvent{}, fmt.Errorf("append redacted raw event: invalid JSON")

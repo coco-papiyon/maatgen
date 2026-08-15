@@ -153,6 +153,7 @@ func run() error {
 				defer modelConfigMu.Unlock()
 				return toolconfig.SaveDefaultModel(resolvedConfigPath, &toolConfig, provider, model)
 			},
+			UsageReader: store,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

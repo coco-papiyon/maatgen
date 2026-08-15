@@ -2,6 +2,9 @@ node_modules/
 .pnpm-store/
 dist/
 coverage/
+.vite-cache/
+artifacts/
+.npm-cache/
 *.log
 
 # Go

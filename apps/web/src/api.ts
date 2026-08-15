@@ -10,6 +10,12 @@ import type {
   WsTicketResponse,
 } from '@maatgen/protocol';
 
+export interface SessionUsage {
+  sessionId: string;
+  summary: import('@maatgen/protocol').TokenUsage;
+  runs: Array<{ run: AgentRun; usage?: import('@maatgen/protocol').TokenUsage }>;
+}
+
 export interface AgentApi {
   getDefaultWorkspace(): Promise<string>;
   listProviders(): Promise<ProviderListResponse>;
@@ -23,6 +29,7 @@ export interface AgentApi {
   getEvents(id: string, afterSequence?: number): Promise<SessionEvent[]>;
   issueWebSocketTicket(): Promise<WsTicketResponse>;
   getChanges(id: string): Promise<ChangeSet>;
+  getUsage(id: string): Promise<SessionUsage>;
   restoreHunk(sessionId: string, checkpointId: string, hunkId: string): Promise<ChangeSet>;
   restoreFile(sessionId: string, checkpointId: string, fileId: string): Promise<ChangeSet>;
   restoreAllChanges(sessionId: string, checkpointId: string): Promise<ChangeSet>;
@@ -113,6 +120,9 @@ export const httpAgentApi: AgentApi = {
   },
   getChanges(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/changes`);
+  },
+  getUsage(id) {
+    return request(`/api/v1/sessions/${encodeURIComponent(id)}/usage`);
   },
   restoreHunk(sessionId, checkpointId, hunkId) {
     return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/hunks/${encodeURIComponent(hunkId)}/restore`, { method: 'POST' });

@@ -28,6 +28,7 @@
 
 - Keep Codex-specific process and JSONL behavior inside the Codex adapter.
 - Keep the Extension thin; repository mutation and checkpoint logic belong in Agent Manager.
+- When modifying frontend behavior or presentation, update and verify both the Web version and the VS Code version. Keep their user-facing behavior and shared Session／Run／Usage／ChangeSet concepts aligned, adapting only the surface-specific layout or interaction as needed.
 - Update `docs/coding-agent-design.md` and `docs/implementation-plan.md` when implementation details change the design.
 - Prefer additive tests for checkpoint creation, direct repository execution, restore conflict detection, and same-Session resume.
 

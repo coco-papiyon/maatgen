@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AgentRun, AgentSession, ChangeSet, Provider, SessionEvent } from '@maatgen/protocol';
-import { AgentApiError, httpAgentApi, type AgentApi } from './api';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import type { AgentRun, AgentSession, ChangeSet, Provider, SessionEvent, TokenUsage } from '@maatgen/protocol';
+import { AgentApiError, httpAgentApi, type AgentApi, type SessionUsage } from './api';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
+import { renderMarkdown } from './markdown';
 
 const props = defineProps<{
   agentApi?: AgentApi;
@@ -22,6 +23,7 @@ const loadingMoreSessions = ref(false);
 const selected = ref<AgentSession>();
 const events = ref<SessionEvent[]>([]);
 const changes = ref<ChangeSet>(emptyChangeSet(''));
+const usage = ref<SessionUsage>(emptySessionUsage(''));
 const workspace = ref('');
 const prompt = ref('');
 const activeRun = ref<AgentRun>();
@@ -31,9 +33,11 @@ const streamError = ref('');
 const streamState = ref<EventStreamState>('disconnected');
 const diagnostic = ref<{ kind: 'manager' | 'auth' | 'codex'; title: string; message: string }>();
 const selectedChangeId = ref('');
+const activeSidePanel = ref<'usage' | 'changes'>(localStorage.getItem('maatgen.sidePanel') === 'usage' ? 'usage' : 'changes');
 const showSystemMessages = ref(localStorage.getItem('maatgen.showSystemMessages') === 'true');
 let sessionPollTimer: number | undefined;
 let eventStream: EventStreamLike | undefined;
+const timelineElement = ref<HTMLElement>();
 
 const lastSequence = computed(() => events.value.at(-1)?.sequence ?? 0);
 const visibleEvents = computed(() => showSystemMessages.value
@@ -60,6 +64,13 @@ const streamLabel = computed(() => ({
   disconnected: 'Offline',
 })[streamState.value]);
 
+function scrollTimelineToBottom() {
+  void nextTick(() => {
+    const element = timelineElement.value;
+    if (element) element.scrollTop = element.scrollHeight;
+  });
+}
+
 function restoreActiveRun(items: SessionEvent[]) {
   const terminalRunIDs = new Set(items
     .filter((event) => ['run_completed', 'run_failed', 'run_cancelled'].includes(event.type))
@@ -84,6 +95,11 @@ function restoreActiveRun(items: SessionEvent[]) {
 
 function toggleSystemMessages() {
   localStorage.setItem('maatgen.showSystemMessages', String(showSystemMessages.value));
+}
+
+function selectSidePanel(panel: 'usage' | 'changes') {
+  activeSidePanel.value = panel;
+  localStorage.setItem('maatgen.sidePanel', panel);
 }
 
 function persistNewSessionProvider() {
@@ -112,6 +128,14 @@ function eventKind(event: SessionEvent): string {
   return 'system';
 }
 
+function eventHtml(event: SessionEvent): string {
+  const data = event.data as Record<string, unknown> | undefined;
+  if (event.type === 'assistant_message' || event.type === 'reasoning_summary') {
+    return renderMarkdown(typeof data?.text === 'string' ? data.text : '');
+  }
+  return '';
+}
+
 function shortPath(path: string): string {
   const parts = path.replaceAll('\\', '/').split('/');
   return parts.slice(-2).join('/');
@@ -127,6 +151,18 @@ function restoreTargetStatus(target: { status: string }): string {
 
 function emptyChangeSet(sessionId: string): ChangeSet {
   return { sessionId, runId: '', checkpointId: '', beforeTree: '', afterTree: '', files: [] };
+}
+
+function emptySessionUsage(sessionId: string): SessionUsage {
+  return { sessionId, summary: { source: 'unknown' }, runs: [] };
+}
+
+function formatTokens(value?: number): string {
+  return value === undefined ? '—' : value.toLocaleString('en-US');
+}
+
+function usageValue(usageData: TokenUsage | undefined, key: keyof Omit<TokenUsage, 'source'>): string {
+  return formatTokens(usageData?.[key]);
 }
 
 async function refreshSessions(reset = false) {
@@ -168,6 +204,7 @@ async function selectSession(session: AgentSession) {
     : '';
   events.value = [];
   changes.value = emptyChangeSet(session.id);
+  usage.value = emptySessionUsage(session.id);
   activeRun.value = undefined;
   error.value = '';
   diagnostic.value = undefined;
@@ -190,27 +227,32 @@ async function persistSelectedModel() {
 async function refreshSelected(full = false) {
   if (!selected.value) return;
   const id = selected.value.id;
-  const [session, newEvents, changeSet] = await Promise.all([
+  const [session, newEvents, changeSet, sessionUsage] = await Promise.all([
     api.getSession(id),
     api.getEvents(id, full ? 0 : lastSequence.value),
     api.getChanges(id),
+    api.getUsage(id),
   ]);
   selected.value = session;
   if (full) events.value = newEvents;
   else events.value.push(...newEvents.filter((event) => event.sequence > lastSequence.value));
   restoreActiveRun(events.value);
   changes.value = changeSet;
+  usage.value = sessionUsage;
   updateDiagnosticFromEvents(newEvents);
+  scrollTimelineToBottom();
 }
 
 async function refreshSelectedState(sessionId: string) {
-  const [session, changeSet] = await Promise.all([
+  const [session, changeSet, sessionUsage] = await Promise.all([
     api.getSession(sessionId),
     api.getChanges(sessionId),
+    api.getUsage(sessionId),
   ]);
   if (selected.value?.id !== sessionId) return;
   selected.value = session;
   changes.value = changeSet;
+  usage.value = sessionUsage;
   if (session.status !== 'active') {
     eventStream?.stop();
     eventStream = undefined;
@@ -235,6 +277,7 @@ function startEventStream(sessionId: string) {
       streamError.value = '';
       restoreActiveRun(events.value);
       updateDiagnosticFromEvents([event]);
+      scrollTimelineToBottom();
       if (['change_detected', 'change_restored', 'run_completed', 'run_failed', 'run_cancelled'].includes(event.type)) {
         void refreshSelectedState(sessionId).catch((cause) => {
           handleFailure(cause);
@@ -265,6 +308,7 @@ async function sendPrompt() {
       ...(selectedModel.value ? { model: selectedModel.value } : {}),
     });
     await refreshSelected();
+    scrollTimelineToBottom();
   });
 }
 
@@ -460,7 +504,7 @@ onBeforeUnmount(() => {
       </section>
       <div v-else-if="error" class="error-banner" role="alert">{{ error }}</div>
 
-      <section v-if="selected" class="timeline" aria-live="polite">
+      <section v-if="selected" ref="timelineElement" class="timeline" aria-live="polite">
         <div v-if="visibleEvents.length === 0" class="empty-state compact">
           <span class="empty-symbol">⌁</span>
           <h2>{{ providerLabel }}に最初の指示を送る</h2>
@@ -468,7 +512,8 @@ onBeforeUnmount(() => {
         </div>
         <article v-for="event in visibleEvents" :key="event.id" class="event" :class="eventKind(event)">
           <div class="event-label">{{ eventKind(event) === 'assistant' ? providerLabel.toUpperCase() : eventKind(event).toUpperCase() }}</div>
-          <div class="event-body">{{ eventText(event) }}</div>
+          <div v-if="event.type === 'assistant_message' || event.type === 'reasoning_summary'" class="event-body markdown-body" v-html="eventHtml(event)" />
+          <div v-else class="event-body">{{ eventText(event) }}</div>
           <time>{{ new Date(event.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>
         </article>
         <div v-if="activeRun" class="thinking"><span /><span /><span /> {{ providerLabel }} is working</div>
@@ -497,6 +542,42 @@ onBeforeUnmount(() => {
     </main>
 
     <aside class="changes-panel">
+      <div class="side-panel-tabs" role="tablist" aria-label="詳細パネル">
+        <button id="usage-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'usage'" :class="{ selected: activeSidePanel === 'usage' }" @click="selectSidePanel('usage')">
+          Usage <span class="tab-count">{{ usage.runs.length }}</span>
+        </button>
+        <button id="changes-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'changes'" :class="{ selected: activeSidePanel === 'changes' }" @click="selectSidePanel('changes')">
+          Changes <span class="tab-count">{{ changes.files.length }}</span>
+        </button>
+      </div>
+      <div v-if="activeSidePanel === 'usage'" id="usage-panel" class="usage-section" role="tabpanel" aria-labelledby="usage-tab">
+        <div class="section-heading">
+          <span>Usage</span><span class="count accent">{{ usage.runs.length }}</span>
+        </div>
+        <div class="usage-summary">
+          <div><span>Input</span><strong>{{ formatTokens(usage.summary.inputTokens) }}</strong></div>
+          <div><span>Cached</span><strong>{{ formatTokens(usage.summary.cachedInputTokens) }}</strong></div>
+          <div><span>Output</span><strong>{{ formatTokens(usage.summary.outputTokens) }}</strong></div>
+          <div><span>Reasoning</span><strong>{{ formatTokens(usage.summary.reasoningOutputTokens) }}</strong></div>
+          <div class="usage-total"><span>Total</span><strong>{{ formatTokens(usage.summary.totalTokens) }}</strong></div>
+        </div>
+        <div v-if="usage.runs.length" class="usage-run-list">
+          <article v-for="entry in usage.runs" :key="entry.run.id" class="usage-run">
+            <div class="usage-run-header">
+              <span :class="['usage-status', entry.run.status]">{{ entry.run.status }}</span>
+              <time>{{ new Date(entry.run.finishedAt ?? entry.run.startedAt ?? '').toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>
+            </div>
+            <p>{{ entry.run.prompt }}</p>
+            <div class="usage-run-values">
+              <span>In {{ usageValue(entry.usage, 'inputTokens') }}</span>
+              <span>Out {{ usageValue(entry.usage, 'outputTokens') }}</span>
+              <span>Total {{ usageValue(entry.usage, 'totalTokens') }}</span>
+            </div>
+          </article>
+        </div>
+        <div v-else class="usage-empty">RunごとのUsageはまだありません。</div>
+      </div>
+      <div v-else id="changes-panel" class="changes-section" role="tabpanel" aria-labelledby="changes-tab">
       <div class="section-heading">
         <span>Changes</span><span class="count accent">{{ changes.files.length }}</span>
       </div>
@@ -516,6 +597,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div v-else class="no-changes"><span>◇</span><p>変更はまだありません</p><small>Run完了後にGit差分が表示されます。</small></div>
+      </div>
     </aside>
 
     <div v-if="selectedChange" class="diff-backdrop" @click.self="selectedChangeId = ''">

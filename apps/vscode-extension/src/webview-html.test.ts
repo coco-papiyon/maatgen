@@ -28,4 +28,12 @@ describe('renderWebviewHtml', () => {
       '<link rel="stylesheet" href="vscode-webview://unit-test/media/webview.css">',
     );
   });
+
+  it('includes session execution, history, usage, and change surfaces', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain('session-history-list');
+    expect(html).toContain("type: 'session.select'");
+    expect(html).toContain('changes-list');
+    expect(html).toContain("type: 'run.prompt'");
+  });
 });

@@ -28,6 +28,17 @@ export type RunStatus = AgentRun['status'];
 
 export type TokenUsage = GeneratedTokenUsage;
 
+export interface RunUsageEntry {
+  run: AgentRun;
+  usage?: TokenUsage;
+}
+
+export interface SessionUsage {
+  sessionId: string;
+  summary: TokenUsage;
+  runs: RunUsageEntry[];
+}
+
 export type EventSource = GeneratedSessionEvent['source'];
 export type SessionEventType = GeneratedSessionEvent['type'];
 export type SessionEvent<TData = unknown> = Omit<GeneratedSessionEvent, 'data'> & { data: TData };

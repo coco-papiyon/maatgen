@@ -116,6 +116,12 @@ VS Code 拡張機能自身は AI 推論を行わず、Coding Agent の実行・�
 | Git Integration | git CLI |
 | Log Format | 共通Event + Raw JSONL |
 
+### 4.4 Markdown出力の表示責務
+
+Agent ManagerはAgentが返したMarkdownをHTMLへ変換せず、`assistant_message`／`reasoning_summary`の本文として保存する。表示側はイベント種別に応じてMarkdown rendererを選択し、Web UIでは見出し・リスト・コードブロック等を含む全文を表示する。VS Code Webviewではサイドバーに適したコンパクトな最新結果を表示し、リンクは外部リンクとして扱う。
+
+Markdown rendererはHTMLタグ、`javascript:` URL、任意スクリプトを許可しない。Web UIとVS Code Webviewは同じ安全方針を使い、システムイベントやコマンド結果はMarkdown本文として扱わず、専用のログ表示とする。
+
 ---
 
 ## 5. リポジトリ構成
@@ -255,7 +261,9 @@ AgentApi
         └─ VS Code Webview用
 ```
 
-将来的には VS Code Webview から直接 Agent Manager の HTTP API を利用する構成も可能とする。
+VS Code Extension HostはAgent ManagerのHTTP APIを利用し、WebviewへSession状態、Runイベント、Usage、ChangeSetを通知する。WebviewからAgent Managerへ直接接続せず、認証TokenはExtension設定で管理する。
+
+Web版とVS Code版は同一Agent ManagerのSession／Run／Event／Usage／ChangeSet APIを共有する。VS Codeで作成したSessionは、同じManager URLとBearer tokenでWeb版を開くとSession履歴から選択して参照できる。VS Code側の履歴取得はAPIのcursorを辿って全ページを読み込む。
 
 ---
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { readFileSync } from 'node:fs';
 import App from './App.vue';
 import { AgentApiError } from './api';
 import type { EventStreamFactory } from './event-stream';
@@ -13,6 +14,7 @@ afterEach(() => {
   wrapper = undefined;
   localStorage.removeItem('maatgen.showSystemMessages');
   localStorage.removeItem('maatgen.provider');
+  localStorage.removeItem('maatgen.sidePanel');
   vi.restoreAllMocks();
 });
 
@@ -42,6 +44,48 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.text()).toContain('認証処理を確認し、テストを追加しました。');
     expect(mounted.wrapper.find('.stream-state').text()).toBe('Live');
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
+  });
+
+  it('switches the side panel between Usage and Changes tabs', async () => {
+    const mounted = await mountApp();
+    expect(mounted.wrapper.find('#changes-panel').exists()).toBe(true);
+    expect(mounted.wrapper.find('#usage-panel').exists()).toBe(false);
+    await mounted.wrapper.find('#usage-tab').trigger('click');
+    expect(mounted.wrapper.find('#usage-panel').exists()).toBe(true);
+    expect(mounted.wrapper.find('#changes-panel').exists()).toBe(false);
+    expect(mounted.wrapper.find('#usage-tab').attributes('aria-selected')).toBe('true');
+  });
+
+  it('keeps the composer visible while only the conversation timeline scrolls', async () => {
+    const mounted = await mountApp();
+    const styles = readFileSync('src/styles.css', 'utf8');
+    expect(styles).toMatch(/\.conversation\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/);
+    expect(styles).toMatch(/\.timeline\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
+    expect(mounted.wrapper.find('.composer').exists()).toBe(true);
+  });
+
+  it('scrolls the conversation to the newest event', async () => {
+    const api = new MockAgentApi();
+    let pushEvent: ((event: SessionEvent) => void) | undefined;
+    wrapper = mount(App, {
+      props: {
+        agentApi: api,
+        eventStreamFactory: (options) => {
+          pushEvent = options.onEvent;
+          return { start: () => options.onState('connected'), stop: () => options.onState('disconnected') };
+        },
+      },
+    });
+    await flushPromises();
+    const timeline = wrapper.find('.timeline').element as HTMLElement;
+    Object.defineProperty(timeline, 'scrollHeight', { configurable: true, value: 1234 });
+    pushEvent!({
+      id: 'latest-event', sessionId: 'mock-success', sequence: 5,
+      timestamp: new Date().toISOString(), schemaVersion: 1, source: 'manager',
+      type: 'assistant_message', data: { text: '追加の結果' },
+    });
+    await flushPromises();
+    expect(timeline.scrollTop).toBe(1234);
   });
 
   it('hides command and file-change system messages by default and shows them when configured', async () => {
