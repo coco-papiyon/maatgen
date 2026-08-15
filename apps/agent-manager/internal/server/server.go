@@ -9,28 +9,28 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitworktree"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
-	reviewservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/review"
+	restoreservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/restore"
 	runservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/run"
 	sessionservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/session"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 )
 
 type Config struct {
-	Version          string
-	SchemaVersion    int
-	DefaultWorkspace string
-	AuthToken        string
-	AllowedOrigins   []string
-	TicketTTL        time.Duration
-	EventSubscriber  EventSubscriber
-	SessionCreator   SessionCreator
-	SessionCloser    SessionCloser
-	RunController    RunController
-	ChangeReader     ChangeReader
-	ReviewController ReviewController
-	Providers        []protocol.Provider
+	Version           string
+	SchemaVersion     int
+	DefaultWorkspace  string
+	AuthToken         string
+	AllowedOrigins    []string
+	TicketTTL         time.Duration
+	EventSubscriber   EventSubscriber
+	SessionCreator    SessionCreator
+	SessionCloser     SessionCloser
+	RunController     RunController
+	ChangeReader      ChangeReader
+	RestoreController RestoreController
+	Providers         []protocol.Provider
 }
 
 type HealthResponse struct {
@@ -70,11 +70,10 @@ type ChangeReader interface {
 	GetChangeSet(ctx context.Context, sessionID string) (protocol.ChangeSet, error)
 }
 
-type ReviewController interface {
-	Accept(ctx context.Context, sessionID, changeID string) (protocol.ChangeSet, error)
-	Reject(ctx context.Context, sessionID, changeID string) (protocol.ChangeSet, error)
-	AcceptAll(ctx context.Context, sessionID string) (protocol.ChangeSet, error)
-	RejectAll(ctx context.Context, sessionID string) (protocol.ChangeSet, error)
+type RestoreController interface {
+	RestoreHunk(ctx context.Context, sessionID, checkpointID, hunkID string) (protocol.ChangeSet, error)
+	RestoreFile(ctx context.Context, sessionID, checkpointID, fileID string) (protocol.ChangeSet, error)
+	RestoreAll(ctx context.Context, sessionID, checkpointID string) (protocol.ChangeSet, error)
 }
 
 type EventSubscriber interface {
@@ -259,35 +258,27 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			writeJSON(w, http.StatusOK, changeSet)
 		})))
 	}
-	if config.ReviewController != nil {
-		mux.Handle("POST /api/v1/sessions/{id}/changes/accept-all", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			changeSet, err := config.ReviewController.AcceptAll(r.Context(), r.PathValue("id"))
+	if config.RestoreController != nil {
+		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/restore", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			changeSet, err := config.RestoreController.RestoreAll(r.Context(), r.PathValue("id"), r.PathValue("checkpointId"))
 			if err != nil {
-				writeReviewError(w, err)
+				writeRestoreError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, changeSet)
 		})))
-		mux.Handle("POST /api/v1/sessions/{id}/changes/reject-all", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			changeSet, err := config.ReviewController.RejectAll(r.Context(), r.PathValue("id"))
+		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/files/{fileId}/restore", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			changeSet, err := config.RestoreController.RestoreFile(r.Context(), r.PathValue("id"), r.PathValue("checkpointId"), r.PathValue("fileId"))
 			if err != nil {
-				writeReviewError(w, err)
+				writeRestoreError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, changeSet)
 		})))
-		mux.Handle("POST /api/v1/sessions/{id}/changes/{changeId}/accept", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			changeSet, err := config.ReviewController.Accept(r.Context(), r.PathValue("id"), r.PathValue("changeId"))
+		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/hunks/{hunkId}/restore", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			changeSet, err := config.RestoreController.RestoreHunk(r.Context(), r.PathValue("id"), r.PathValue("checkpointId"), r.PathValue("hunkId"))
 			if err != nil {
-				writeReviewError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, changeSet)
-		})))
-		mux.Handle("POST /api/v1/sessions/{id}/changes/{changeId}/reject", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			changeSet, err := config.ReviewController.Reject(r.Context(), r.PathValue("id"), r.PathValue("changeId"))
-			if err != nil {
-				writeReviewError(w, err)
+				writeRestoreError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, changeSet)
@@ -343,10 +334,8 @@ func writeSessionCreateError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, sessionservice.ErrInvalidRequest), errors.Is(err, sessionservice.ErrUnsupportedAgent):
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
-	case errors.Is(err, gitworktree.ErrNotRepository):
+	case errors.Is(err, checkpoint.ErrNotRepository):
 		writeAPIError(w, http.StatusUnprocessableEntity, "not_git_repository", "workspace is not a Git repository", nil)
-	case errors.Is(err, gitworktree.ErrDirty):
-		writeAPIError(w, http.StatusConflict, "workspace_not_clean", "workspace has uncommitted changes", nil)
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "session_creation_failed", "session could not be created", nil)
 	}
@@ -361,7 +350,7 @@ func writeSessionCloseError(w http.ResponseWriter, err error) {
 	case errors.Is(err, sessionservice.ErrRunActive):
 		writeAPIError(w, http.StatusConflict, "run_already_active", "session has an active run", nil)
 	case errors.Is(err, sessionservice.ErrCleanupFailed):
-		writeAPIError(w, http.StatusServiceUnavailable, "worktree_cleanup_failed", "worktree cleanup failed; retry the close request", nil)
+		writeAPIError(w, http.StatusServiceUnavailable, "checkpoint_cleanup_failed", "checkpoint cleanup failed; retry the close request", nil)
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "session_close_failed", "session could not be closed", nil)
 	}
@@ -386,24 +375,18 @@ func writeRunError(w http.ResponseWriter, err error) {
 	}
 }
 
-func writeReviewError(w http.ResponseWriter, err error) {
+func writeRestoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, storage.ErrNotFound):
-		writeAPIError(w, http.StatusNotFound, "not_found", "change was not found", nil)
-	case errors.Is(err, reviewservice.ErrConflict):
-		writeAPIError(w, http.StatusConflict, "working_tree_conflict", "working tree changed outside maatgen", nil)
-	case errors.Is(err, reviewservice.ErrAlreadyReviewed):
-		writeAPIError(w, http.StatusConflict, "already_reviewed", "change was already reviewed differently", nil)
-	case errors.Is(err, reviewservice.ErrSessionClosed):
+		writeAPIError(w, http.StatusNotFound, "not_found", "checkpoint change was not found", nil)
+	case errors.Is(err, restoreservice.ErrConflict):
+		writeAPIError(w, http.StatusConflict, "checkpoint_conflict", "current content changed after the checkpoint snapshot", nil)
+	case errors.Is(err, restoreservice.ErrSessionClosed):
 		writeAPIError(w, http.StatusConflict, "session_closed", "session is closed", nil)
-	case errors.Is(err, reviewservice.ErrUnsupported):
-		writeAPIError(w, http.StatusUnprocessableEntity, "unsupported_change", "change type cannot be applied", nil)
-	case errors.Is(err, sessionservice.ErrCleanupFailed):
-		writeAPIError(w, http.StatusServiceUnavailable, "worktree_cleanup_failed", "review completed but worktree cleanup failed; retry session close", nil)
-	case errors.Is(err, sessionservice.ErrRunActive):
-		writeAPIError(w, http.StatusConflict, "run_already_active", "session has an active run", nil)
+	case errors.Is(err, restoreservice.ErrNotRestorable):
+		writeAPIError(w, http.StatusUnprocessableEntity, "not_restorable", "change cannot be restored", nil)
 	default:
-		writeAPIError(w, http.StatusInternalServerError, "review_failed", "review operation failed", nil)
+		writeAPIError(w, http.StatusInternalServerError, "restore_failed", "restore operation failed", nil)
 	}
 }
 

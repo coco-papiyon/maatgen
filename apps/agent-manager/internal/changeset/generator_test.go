@@ -8,27 +8,37 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
 
 func TestGenerateTextChangesAndStableHunkIDs(t *testing.T) {
-	repository, base := createRepository(t)
+	repository, _ := createRepository(t)
+	manager, _ := checkpoint.New()
+	before, err := manager.Capture(context.Background(), repository, "session-1", "run-1", "before")
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, repository, "modified.txt", "first\nchanged\nthird\n")
 	writeFile(t, repository, "added.txt", "new file\n")
 	if err := os.Remove(filepath.Join(repository, "deleted.txt")); err != nil {
 		t.Fatal(err)
 	}
 
+	after, err := manager.Capture(context.Background(), repository, "session-1", "run-1", "after")
+	if err != nil {
+		t.Fatal(err)
+	}
 	generator, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := protocol.AgentSession{ID: "session-1", Worktree: repository, BaseCommit: base}
-	first, err := generator.Generate(context.Background(), session)
+	cp := protocol.Checkpoint{ID: "checkpoint-1", SessionID: "session-1", RunID: "run-1", BeforeTree: before.Tree, AfterTree: &after.Tree}
+	first, err := generator.Generate(context.Background(), repository, cp)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	second, err := generator.Generate(context.Background(), session)
+	second, err := generator.Generate(context.Background(), repository, cp)
 	if err != nil {
 		t.Fatalf("generate again: %v", err)
 	}
@@ -38,7 +48,7 @@ func TestGenerateTextChangesAndStableHunkIDs(t *testing.T) {
 
 	byPath := indexChanges(first)
 	modified := byPath["modified.txt"]
-	if modified.Kind != protocol.FileModify || modified.ReviewMode != "hunk" || len(modified.Hunks) != 1 {
+	if modified.Kind != protocol.FileModify || modified.RestoreMode != "hunk" || len(modified.Hunks) != 1 {
 		t.Fatalf("modified = %#v", modified)
 	}
 	if modified.Hunks[0].OriginalText != "first\nsecond\nthird\n" || modified.Hunks[0].ModifiedText != "first\nchanged\nthird\n" {
@@ -56,7 +66,12 @@ func TestGenerateTextChangesAndStableHunkIDs(t *testing.T) {
 }
 
 func TestGenerateRenameBinaryAndModeChange(t *testing.T) {
-	repository, base := createRepository(t)
+	repository, _ := createRepository(t)
+	manager, _ := checkpoint.New()
+	before, err := manager.Capture(context.Background(), repository, "session-1", "run-1", "before")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Rename(filepath.Join(repository, "rename.txt"), filepath.Join(repository, "renamed.txt")); err != nil {
 		t.Fatal(err)
 	}
@@ -67,20 +82,25 @@ func TestGenerateRenameBinaryAndModeChange(t *testing.T) {
 		}
 	}
 
+	after, err := manager.Capture(context.Background(), repository, "session-1", "run-1", "after")
+	if err != nil {
+		t.Fatal(err)
+	}
 	generator, _ := New()
-	result, err := generator.Generate(context.Background(), protocol.AgentSession{ID: "session-1", Worktree: repository, BaseCommit: base})
+	cp := protocol.Checkpoint{ID: "checkpoint-1", SessionID: "session-1", RunID: "run-1", BeforeTree: before.Tree, AfterTree: &after.Tree}
+	result, err := generator.Generate(context.Background(), repository, cp)
 	if err != nil {
 		t.Fatal(err)
 	}
 	byPath := indexChanges(result)
-	if rename := byPath["renamed.txt"]; rename.Kind != protocol.FileRename || rename.ReviewMode != "file" || rename.OldPath == nil || *rename.OldPath != "rename.txt" {
+	if rename := byPath["renamed.txt"]; rename.Kind != protocol.FileRename || rename.RestoreMode != "file" || rename.OldPath == nil || *rename.OldPath != "rename.txt" {
 		t.Fatalf("rename = %#v", rename)
 	}
 	if binary := byPath["binary.bin"]; binary.Kind != protocol.FileBinary || binary.Original != nil || binary.Modified != nil {
 		t.Fatalf("binary = %#v", binary)
 	}
 	if os.PathSeparator != '\\' {
-		if mode := byPath["mode.sh"]; mode.Kind != protocol.FileModeChange || mode.ReviewMode != "file" {
+		if mode := byPath["mode.sh"]; mode.Kind != protocol.FileModeChange || mode.RestoreMode != "file" {
 			t.Fatalf("mode = %#v", mode)
 		}
 	}

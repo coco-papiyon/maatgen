@@ -28,15 +28,6 @@ const (
 	SessionClosed SessionStatus = "closed"
 )
 
-type CleanupStatus string
-
-const (
-	CleanupNotStarted CleanupStatus = "not_started"
-	CleanupPending    CleanupStatus = "pending"
-	CleanupCompleted  CleanupStatus = "completed"
-	CleanupFailed     CleanupStatus = "failed"
-)
-
 type RunStatus string
 
 const (
@@ -49,19 +40,13 @@ const (
 )
 
 type AgentSession struct {
-	ID               string        `json:"id"`
-	Agent            AgentName     `json:"agent"`
-	Workspace        string        `json:"workspace"`
-	Worktree         string        `json:"worktree"`
-	BaseCommit       string        `json:"baseCommit"`
-	CodexThreadID    *string       `json:"codexThreadId,omitempty"`
-	Status           SessionStatus `json:"status"`
-	CreatedAt        time.Time     `json:"createdAt"`
-	ClosedAt         *time.Time    `json:"closedAt,omitempty"`
-	CleanupStatus    CleanupStatus `json:"cleanupStatus,omitempty"`
-	CleanupError     *string       `json:"cleanupError,omitempty"`
-	CleanupAttempts  int           `json:"cleanupAttempts,omitempty"`
-	CleanupUpdatedAt *time.Time    `json:"cleanupUpdatedAt,omitempty"`
+	ID            string        `json:"id"`
+	Agent         AgentName     `json:"agent"`
+	Workspace     string        `json:"workspace"`
+	CodexThreadID *string       `json:"codexThreadId,omitempty"`
+	Status        SessionStatus `json:"status"`
+	CreatedAt     time.Time     `json:"createdAt"`
+	ClosedAt      *time.Time    `json:"closedAt,omitempty"`
 }
 
 // SessionCursor is the decoded keyset position used for session pagination.
@@ -128,7 +113,8 @@ const (
 	EventTypeCommandStarted     = "command_started"
 	EventTypeCommandCompleted   = "command_completed"
 	EventTypeFileChangeReported = "file_change_reported"
-	EventTypeChangeReviewed     = "change_reviewed"
+	EventTypeCheckpointCreated  = "checkpoint_created"
+	EventTypeChangeRestored     = "change_restored"
 	EventTypeUsageReported      = "usage_reported"
 	EventTypeRunStarted         = "run_started"
 	EventTypeRunCompleted       = "run_completed"
@@ -148,41 +134,59 @@ const (
 	FileModeChange FileChangeKind = "mode_change"
 )
 
-type ReviewStatus string
+type RestoreStatus string
 
 const (
-	ReviewPending           ReviewStatus = "pending"
-	ReviewPartiallyAccepted ReviewStatus = "partially_accepted"
-	ReviewAccepted          ReviewStatus = "accepted"
-	ReviewRejected          ReviewStatus = "rejected"
+	RestoreChanged           RestoreStatus = "changed"
+	RestorePartiallyRestored RestoreStatus = "partially_restored"
+	RestoreRestored          RestoreStatus = "restored"
+	RestoreConflict          RestoreStatus = "conflict"
 )
 
 type ChangeHunk struct {
-	ID           string       `json:"id"`
-	OldStart     int          `json:"oldStart"`
-	OldLines     int          `json:"oldLines"`
-	NewStart     int          `json:"newStart"`
-	NewLines     int          `json:"newLines"`
-	OriginalText string       `json:"originalText"`
-	ModifiedText string       `json:"modifiedText"`
-	Status       ReviewStatus `json:"status"`
+	ID           string        `json:"id"`
+	OldStart     int           `json:"oldStart"`
+	OldLines     int           `json:"oldLines"`
+	NewStart     int           `json:"newStart"`
+	NewLines     int           `json:"newLines"`
+	OriginalText string        `json:"originalText"`
+	ModifiedText string        `json:"modifiedText"`
+	Status       RestoreStatus `json:"status"`
 }
 
 type FileChange struct {
-	ID         string         `json:"id"`
-	OldPath    *string        `json:"oldPath,omitempty"`
-	NewPath    *string        `json:"newPath,omitempty"`
-	Kind       FileChangeKind `json:"kind"`
-	Original   *string        `json:"original,omitempty"`
-	Modified   *string        `json:"modified,omitempty"`
-	ReviewMode string         `json:"reviewMode"`
-	Status     ReviewStatus   `json:"status"`
-	Hunks      []ChangeHunk   `json:"hunks"`
+	ID          string         `json:"id"`
+	OldPath     *string        `json:"oldPath,omitempty"`
+	NewPath     *string        `json:"newPath,omitempty"`
+	Kind        FileChangeKind `json:"kind"`
+	Original    *string        `json:"original,omitempty"`
+	Modified    *string        `json:"modified,omitempty"`
+	RestoreMode string         `json:"restoreMode"`
+	Status      RestoreStatus  `json:"status"`
+	Hunks       []ChangeHunk   `json:"hunks"`
 }
 
 type ChangeSet struct {
-	SessionID string       `json:"sessionId"`
-	Files     []FileChange `json:"files"`
+	SessionID    string       `json:"sessionId"`
+	RunID        string       `json:"runId"`
+	CheckpointID string       `json:"checkpointId"`
+	BeforeTree   string       `json:"beforeTree"`
+	AfterTree    string       `json:"afterTree"`
+	Files        []FileChange `json:"files"`
+}
+
+type Checkpoint struct {
+	ID          string     `json:"id"`
+	SessionID   string     `json:"sessionId"`
+	RunID       string     `json:"runId"`
+	HeadCommit  string     `json:"headCommit"`
+	IndexTree   string     `json:"indexTree"`
+	BeforeTree  string     `json:"beforeTree"`
+	AfterTree   *string    `json:"afterTree,omitempty"`
+	BeforeRef   string     `json:"beforeRef"`
+	AfterRef    *string    `json:"afterRef,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
 }
 
 type APIErrorBody struct {

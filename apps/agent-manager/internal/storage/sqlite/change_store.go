@@ -10,71 +10,78 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 )
 
+func (s *Store) CreateCheckpoint(ctx context.Context, checkpoint protocol.Checkpoint) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO checkpoints(
+		id, session_id, run_id, head_commit, index_tree, before_tree, before_ref, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, checkpoint.ID, checkpoint.SessionID, checkpoint.RunID,
+		checkpoint.HeadCommit, checkpoint.IndexTree, checkpoint.BeforeTree, checkpoint.BeforeRef,
+		formatTime(checkpoint.CreatedAt))
+	if err != nil {
+		return fmt.Errorf("create checkpoint: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) CompleteCheckpoint(ctx context.Context, id, afterTree, afterRef string, completedAt time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE checkpoints SET after_tree = ?, after_ref = ?, completed_at = ? WHERE id = ?`,
+		afterTree, afterRef, formatTime(completedAt), id)
+	return updateResult("complete checkpoint", result, err)
+}
+
+func (s *Store) GetCheckpoint(ctx context.Context, sessionID, checkpointID string) (protocol.Checkpoint, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, session_id, run_id, head_commit, index_tree,
+		before_tree, after_tree, before_ref, after_ref, created_at, completed_at
+		FROM checkpoints WHERE session_id = ? AND id = ?`, sessionID, checkpointID)
+	return scanCheckpoint(row)
+}
+
+func scanCheckpoint(row scanner) (protocol.Checkpoint, error) {
+	var result protocol.Checkpoint
+	var afterTree, afterRef, completedAt sql.NullString
+	var createdAt string
+	if err := row.Scan(&result.ID, &result.SessionID, &result.RunID, &result.HeadCommit,
+		&result.IndexTree, &result.BeforeTree, &afterTree, &result.BeforeRef, &afterRef,
+		&createdAt, &completedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return protocol.Checkpoint{}, storage.ErrNotFound
+		}
+		return protocol.Checkpoint{}, fmt.Errorf("scan checkpoint: %w", err)
+	}
+	var err error
+	if result.CreatedAt, err = parseTime(createdAt); err != nil {
+		return protocol.Checkpoint{}, err
+	}
+	if afterTree.Valid {
+		result.AfterTree = &afterTree.String
+	}
+	if afterRef.Valid {
+		result.AfterRef = &afterRef.String
+	}
+	if result.CompletedAt, err = parseNullableTime(completedAt); err != nil {
+		return protocol.Checkpoint{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) ReplaceChangeSet(ctx context.Context, changeSet protocol.ChangeSet) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin replace change set: %w", err)
 	}
 	defer tx.Rollback()
-
-	var sessionExists int
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE id = ?", changeSet.SessionID).Scan(&sessionExists); err != nil {
-		return fmt.Errorf("check change set session: %w", err)
-	}
-	if sessionExists == 0 {
-		return storage.ErrNotFound
-	}
-	preservedHunks := make(map[string]protocol.ReviewStatus)
-	preservedFiles := make(map[string]protocol.ReviewStatus)
-	rows, err := tx.QueryContext(ctx, `
-		SELECT file_id, hunk_id, file_status, hunk_status
-		FROM changes WHERE session_id = ? AND file_id IS NOT NULL`, changeSet.SessionID)
-	if err != nil {
-		return fmt.Errorf("read existing review state: %w", err)
-	}
-	for rows.Next() {
-		var fileID string
-		var hunkID, hunkStatus sql.NullString
-		var fileStatus protocol.ReviewStatus
-		if err := rows.Scan(&fileID, &hunkID, &fileStatus, &hunkStatus); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan existing review state: %w", err)
-		}
-		preservedFiles[fileID] = fileStatus
-		if hunkID.Valid && hunkStatus.Valid {
-			preservedHunks[hunkID.String] = protocol.ReviewStatus(hunkStatus.String)
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close existing review state: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM changes WHERE session_id = ?", changeSet.SessionID); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM changes WHERE checkpoint_id = ?", changeSet.CheckpointID); err != nil {
 		return fmt.Errorf("clear change set: %w", err)
 	}
-
 	createdAt := formatTime(time.Now().UTC())
 	for fileOrder, file := range changeSet.Files {
 		if len(file.Hunks) == 0 {
-			if preserved, exists := preservedFiles[file.ID]; exists {
-				file.Status = preserved
-			}
-		} else {
-			for index := range file.Hunks {
-				if preserved, exists := preservedHunks[file.Hunks[index].ID]; exists {
-					file.Hunks[index].Status = preserved
-				}
-			}
-			file.Status = summarizeReview(file.Hunks)
-		}
-		if len(file.Hunks) == 0 {
-			if err := insertChangeRow(ctx, tx, changeSet.SessionID, file, nil, fileOrder, 0, createdAt); err != nil {
+			if err := insertChangeRow(ctx, tx, changeSet, file, nil, fileOrder, 0, createdAt); err != nil {
 				return err
 			}
 			continue
 		}
 		for hunkOrder := range file.Hunks {
-			hunk := &file.Hunks[hunkOrder]
-			if err := insertChangeRow(ctx, tx, changeSet.SessionID, file, hunk, fileOrder, hunkOrder, createdAt); err != nil {
+			if err := insertChangeRow(ctx, tx, changeSet, file, &file.Hunks[hunkOrder], fileOrder, hunkOrder, createdAt); err != nil {
 				return err
 			}
 		}
@@ -85,222 +92,139 @@ func (s *Store) ReplaceChangeSet(ctx context.Context, changeSet protocol.ChangeS
 	return nil
 }
 
-func summarizeReview(hunks []protocol.ChangeHunk) protocol.ReviewStatus {
-	accepted, rejected, pending := 0, 0, 0
-	for _, hunk := range hunks {
-		switch hunk.Status {
-		case protocol.ReviewAccepted:
-			accepted++
-		case protocol.ReviewRejected:
-			rejected++
-		default:
-			pending++
-		}
-	}
-	switch {
-	case accepted == len(hunks):
-		return protocol.ReviewAccepted
-	case rejected == len(hunks):
-		return protocol.ReviewRejected
-	case accepted > 0:
-		return protocol.ReviewPartiallyAccepted
-	case pending == 0:
-		return protocol.ReviewRejected
-	default:
-		return protocol.ReviewPending
-	}
-}
-
-func insertChangeRow(ctx context.Context, tx *sql.Tx, sessionID string, file protocol.FileChange, hunk *protocol.ChangeHunk, fileOrder, hunkOrder int, createdAt string) error {
-	rowID := file.ID
-	var hunkID any
-	var oldStart, oldLines, newStart, newLines any
-	var originalText, modifiedText any
-	var hunkStatus any
+func insertChangeRow(ctx context.Context, tx *sql.Tx, set protocol.ChangeSet, file protocol.FileChange, hunk *protocol.ChangeHunk, fileOrder, hunkOrder int, createdAt string) error {
+	var hunkID, oldStart, oldLines, newStart, newLines, originalText, modifiedText, hunkStatus any
 	if hunk != nil {
-		rowID = hunk.ID
 		hunkID = hunk.ID
-		oldStart, oldLines = hunk.OldStart, hunk.OldLines
-		newStart, newLines = hunk.NewStart, hunk.NewLines
-		originalText, modifiedText = hunk.OriginalText, hunk.ModifiedText
+		oldStart = hunk.OldStart
+		oldLines = hunk.OldLines
+		newStart = hunk.NewStart
+		newLines = hunk.NewLines
+		originalText = hunk.OriginalText
+		modifiedText = hunk.ModifiedText
 		hunkStatus = hunk.Status
 	}
-	filePath := pointerValue(file.NewPath)
-	if filePath == "" {
-		filePath = pointerValue(file.OldPath)
-	}
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO changes(
-			id, session_id, file_path, old_path, change_kind, review_mode,
-			old_start, old_lines, new_start, new_lines, original_text, modified_text,
-			status, created_at, file_id, hunk_id, new_path, original_file,
-			modified_file, file_status, hunk_status, file_order, hunk_order
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		rowID, sessionID, filePath, nullablePointer(file.OldPath), file.Kind, file.ReviewMode,
+	_, err := tx.ExecContext(ctx, `INSERT INTO changes(
+		session_id, run_id, checkpoint_id, file_id, hunk_id, old_path, new_path,
+		change_kind, restore_mode, old_start, old_lines, new_start, new_lines,
+		original_text, modified_text, original_file, modified_file, file_status,
+		hunk_status, file_order, hunk_order, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		set.SessionID, set.RunID, set.CheckpointID, file.ID, hunkID,
+		nullablePointer(file.OldPath), nullablePointer(file.NewPath), file.Kind, file.RestoreMode,
 		oldStart, oldLines, newStart, newLines, originalText, modifiedText,
-		file.Status, createdAt, file.ID, hunkID, nullablePointer(file.NewPath),
 		nullablePointer(file.Original), nullablePointer(file.Modified), file.Status, hunkStatus,
-		fileOrder, hunkOrder,
-	)
+		fileOrder, hunkOrder, createdAt)
 	if err != nil {
-		return fmt.Errorf("insert change %q: %w", rowID, err)
+		return fmt.Errorf("insert change %q: %w", file.ID, err)
 	}
 	return nil
 }
 
 func (s *Store) GetChangeSet(ctx context.Context, sessionID string) (protocol.ChangeSet, error) {
-	if _, err := s.GetSession(ctx, sessionID); err != nil {
+	var checkpointID string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM checkpoints WHERE session_id = ? AND after_tree IS NOT NULL ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(&checkpointID)
+	if err == sql.ErrNoRows {
+		if _, getErr := s.GetSession(ctx, sessionID); getErr != nil {
+			return protocol.ChangeSet{}, getErr
+		}
+		return protocol.ChangeSet{SessionID: sessionID, Files: []protocol.FileChange{}}, nil
+	}
+	if err != nil {
+		return protocol.ChangeSet{}, fmt.Errorf("find latest checkpoint: %w", err)
+	}
+	return s.GetChangeSetForCheckpoint(ctx, sessionID, checkpointID)
+}
+
+func (s *Store) GetChangeSetForCheckpoint(ctx context.Context, sessionID, checkpointID string) (protocol.ChangeSet, error) {
+	cp, err := s.GetCheckpoint(ctx, sessionID, checkpointID)
+	if err != nil {
 		return protocol.ChangeSet{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT file_id, hunk_id, old_path, new_path, change_kind, review_mode,
-		       original_file, modified_file, file_status,
-		       old_start, old_lines, new_start, new_lines,
-		       original_text, modified_text, hunk_status
-		FROM changes
-		WHERE session_id = ? AND file_id IS NOT NULL
-		ORDER BY file_order, hunk_order`, sessionID)
+	if cp.AfterTree == nil {
+		return protocol.ChangeSet{}, storage.ErrNotFound
+	}
+	result := protocol.ChangeSet{SessionID: sessionID, RunID: cp.RunID, CheckpointID: cp.ID,
+		BeforeTree: cp.BeforeTree, AfterTree: *cp.AfterTree, Files: []protocol.FileChange{}}
+	rows, err := s.db.QueryContext(ctx, `SELECT file_id, hunk_id, old_path, new_path, change_kind,
+		restore_mode, original_file, modified_file, file_status, old_start, old_lines,
+		new_start, new_lines, original_text, modified_text, hunk_status
+		FROM changes WHERE checkpoint_id = ? ORDER BY file_order, hunk_order`, checkpointID)
 	if err != nil {
 		return protocol.ChangeSet{}, fmt.Errorf("query change set: %w", err)
 	}
 	defer rows.Close()
-
-	result := protocol.ChangeSet{SessionID: sessionID, Files: []protocol.FileChange{}}
-	fileIndexes := make(map[string]int)
+	indexes := map[string]int{}
 	for rows.Next() {
 		var fileID string
 		var hunkID, oldPath, newPath, originalFile, modifiedFile sql.NullString
 		var kind protocol.FileChangeKind
-		var reviewMode string
-		var fileStatus protocol.ReviewStatus
+		var restoreMode string
+		var fileStatus protocol.RestoreStatus
 		var oldStart, oldLines, newStart, newLines sql.NullInt64
 		var originalText, modifiedText, hunkStatus sql.NullString
-		if err := rows.Scan(
-			&fileID, &hunkID, &oldPath, &newPath, &kind, &reviewMode,
-			&originalFile, &modifiedFile, &fileStatus,
-			&oldStart, &oldLines, &newStart, &newLines,
-			&originalText, &modifiedText, &hunkStatus,
-		); err != nil {
-			return protocol.ChangeSet{}, fmt.Errorf("scan change: %w", err)
+		if err := rows.Scan(&fileID, &hunkID, &oldPath, &newPath, &kind, &restoreMode,
+			&originalFile, &modifiedFile, &fileStatus, &oldStart, &oldLines, &newStart,
+			&newLines, &originalText, &modifiedText, &hunkStatus); err != nil {
+			return protocol.ChangeSet{}, err
 		}
-		fileIndex, exists := fileIndexes[fileID]
-		if !exists {
-			fileIndex = len(result.Files)
-			fileIndexes[fileID] = fileIndex
-			result.Files = append(result.Files, protocol.FileChange{
-				ID: fileID, OldPath: nullStringPointer(oldPath), NewPath: nullStringPointer(newPath),
-				Kind: kind, Original: nullStringPointer(originalFile), Modified: nullStringPointer(modifiedFile),
-				ReviewMode: reviewMode, Status: fileStatus, Hunks: []protocol.ChangeHunk{},
-			})
+		idx, ok := indexes[fileID]
+		if !ok {
+			idx = len(result.Files)
+			indexes[fileID] = idx
+			result.Files = append(result.Files, protocol.FileChange{ID: fileID, OldPath: nullStringPointer(oldPath), NewPath: nullStringPointer(newPath), Kind: kind,
+				Original: nullStringPointer(originalFile), Modified: nullStringPointer(modifiedFile), RestoreMode: restoreMode, Status: fileStatus, Hunks: []protocol.ChangeHunk{}})
 		}
 		if hunkID.Valid {
-			status := protocol.ReviewPending
+			status := protocol.RestoreChanged
 			if hunkStatus.Valid {
-				status = protocol.ReviewStatus(hunkStatus.String)
+				status = protocol.RestoreStatus(hunkStatus.String)
 			}
-			result.Files[fileIndex].Hunks = append(result.Files[fileIndex].Hunks, protocol.ChangeHunk{
-				ID: hunkID.String, OldStart: int(oldStart.Int64), OldLines: int(oldLines.Int64),
-				NewStart: int(newStart.Int64), NewLines: int(newLines.Int64),
-				OriginalText: originalText.String, ModifiedText: modifiedText.String, Status: status,
-			})
+			result.Files[idx].Hunks = append(result.Files[idx].Hunks, protocol.ChangeHunk{ID: hunkID.String,
+				OldStart: int(oldStart.Int64), OldLines: int(oldLines.Int64), NewStart: int(newStart.Int64), NewLines: int(newLines.Int64),
+				OriginalText: originalText.String, ModifiedText: modifiedText.String, Status: status})
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return protocol.ChangeSet{}, fmt.Errorf("iterate changes: %w", err)
-	}
-	return result, nil
+	return result, rows.Err()
 }
 
-func (s *Store) UpdateHunkReview(ctx context.Context, sessionID, hunkID string, status protocol.ReviewStatus, reviewedAt time.Time) error {
+func (s *Store) UpdateHunkRestore(ctx context.Context, checkpointID, hunkID string, status protocol.RestoreStatus, at time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin hunk review: %w", err)
+		return err
 	}
 	defer tx.Rollback()
 	var fileID string
-	var current protocol.ReviewStatus
-	if err := tx.QueryRowContext(ctx, `
-		SELECT file_id, hunk_status FROM changes
-		WHERE session_id = ? AND hunk_id = ?`, sessionID, hunkID,
-	).Scan(&fileID, &current); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT file_id FROM changes WHERE checkpoint_id = ? AND hunk_id = ?`, checkpointID, hunkID).Scan(&fileID); err != nil {
 		if err == sql.ErrNoRows {
 			return storage.ErrNotFound
 		}
-		return fmt.Errorf("read hunk review: %w", err)
+		return err
 	}
-	if current != protocol.ReviewPending {
-		if current == status {
-			return nil
-		}
-		return storage.ErrConflict
+	if _, err := tx.ExecContext(ctx, `UPDATE changes SET hunk_status = ?, restored_at = ? WHERE checkpoint_id = ? AND hunk_id = ?`, status, formatTime(at), checkpointID, hunkID); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE changes SET hunk_status = ?, reviewed_at = ?
-		WHERE session_id = ? AND hunk_id = ?`,
-		status, formatTime(reviewedAt), sessionID, hunkID,
-	); err != nil {
-		return fmt.Errorf("update hunk review: %w", err)
+	var total, restored, conflicts int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), SUM(hunk_status='restored'), SUM(hunk_status='conflict') FROM changes WHERE checkpoint_id = ? AND file_id = ? AND hunk_id IS NOT NULL`, checkpointID, fileID).Scan(&total, &restored, &conflicts); err != nil {
+		return err
 	}
-	var total, accepted, rejected, pending int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*),
-		       SUM(CASE WHEN hunk_status = 'accepted' THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN hunk_status = 'rejected' THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN hunk_status = 'pending' THEN 1 ELSE 0 END)
-		FROM changes WHERE session_id = ? AND file_id = ? AND hunk_id IS NOT NULL`,
-		sessionID, fileID,
-	).Scan(&total, &accepted, &rejected, &pending); err != nil {
-		return fmt.Errorf("summarize hunk review: %w", err)
+	fileStatus := protocol.RestoreChanged
+	if restored == total {
+		fileStatus = protocol.RestoreRestored
+	} else if restored > 0 {
+		fileStatus = protocol.RestorePartiallyRestored
+	} else if conflicts > 0 {
+		fileStatus = protocol.RestoreConflict
 	}
-	fileStatus := protocol.ReviewPending
-	switch {
-	case accepted == total:
-		fileStatus = protocol.ReviewAccepted
-	case rejected == total:
-		fileStatus = protocol.ReviewRejected
-	case accepted > 0:
-		fileStatus = protocol.ReviewPartiallyAccepted
-	case pending == 0:
-		fileStatus = protocol.ReviewRejected
+	if _, err := tx.ExecContext(ctx, `UPDATE changes SET file_status = ? WHERE checkpoint_id = ? AND file_id = ?`, fileStatus, checkpointID, fileID); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE changes SET file_status = ?, status = ?
-		WHERE session_id = ? AND file_id = ?`,
-		fileStatus, fileStatus, sessionID, fileID,
-	); err != nil {
-		return fmt.Errorf("update file review summary: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit hunk review: %w", err)
-	}
-	return nil
+	return tx.Commit()
 }
 
-func (s *Store) UpdateFileReview(ctx context.Context, sessionID, fileID string, status protocol.ReviewStatus, reviewedAt time.Time) error {
-	var current protocol.ReviewStatus
-	err := s.db.QueryRowContext(ctx, `
-		SELECT file_status FROM changes
-		WHERE session_id = ? AND file_id = ? LIMIT 1`, sessionID, fileID,
-	).Scan(&current)
-	if err == sql.ErrNoRows {
-		return storage.ErrNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("read file review: %w", err)
-	}
-	if current != protocol.ReviewPending {
-		if current == status {
-			return nil
-		}
-		return storage.ErrConflict
-	}
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE changes
-		SET file_status = ?, status = ?, reviewed_at = ?
-		WHERE session_id = ? AND file_id = ?`,
-		status, status, formatTime(reviewedAt), sessionID, fileID,
-	)
-	return updateResult("update file review", result, err)
+func (s *Store) UpdateFileRestore(ctx context.Context, checkpointID, fileID string, status protocol.RestoreStatus, at time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE changes SET file_status = ?, hunk_status = CASE WHEN hunk_id IS NULL THEN NULL ELSE ? END, restored_at = ? WHERE checkpoint_id = ? AND file_id = ?`, status, status, formatTime(at), checkpointID, fileID)
+	return updateResult("update file restore", result, err)
 }
 
 func nullablePointer(value *string) any {
@@ -309,14 +233,6 @@ func nullablePointer(value *string) any {
 	}
 	return *value
 }
-
-func pointerValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
 func nullStringPointer(value sql.NullString) *string {
 	if !value.Valid {
 		return nil

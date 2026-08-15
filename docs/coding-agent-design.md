@@ -1,5 +1,7 @@
 # Coding Agent VS Code Extension 設計書
 
+> 2026-08-15更新: Agentは対象リポジトリを直接変更する。変更の承認操作は設けず、Run前後のcheckpoint差分を確認し、必要なFile／HunkだけをRun前の状態へ戻す。
+
 ## 1. 概要
 
 本システムは、VS Code 上から複数の Coding Agent を利用できる拡張機能を提供する。
@@ -28,7 +30,7 @@ VS Code 拡張機能自身は AI 推論を行わず、Coding Agent の実行・�
 4. Agent が行った操作を記録する。
 5. Agent のトークン使用量を可能な範囲で記録する。
 6. Agent によるソースコード変更を差分として表示する。
-7. 修正ブロック（Hunk）単位で Accept / Reject を行えるようにする。
+7. Agentの変更を承認操作なしで利用可能にし、必要なFile／HunkだけをRun開始時のチェックポイントへ戻せるようにする。
 8. Agent ごとの実行履歴、成功率、トークン使用量等を後から確認できるようにする。
 9. UI を Web アプリとして単独起動し、VS Code を起動せずに開発・確認できるようにする。
 10. VS Code Marketplace を利用せず、VSIX により限定配布できるようにする。
@@ -190,7 +192,8 @@ Web UI は通常のブラウザアプリケーションとして動作する。
 - Token 使用量表示
 - Changed Files 表示
 - Diff 表示
-- Hunk 単位の Accept / Reject
+- Runごとの差分表示
+- File／Hunk単位のチェックポイント復元
 - Session 履歴表示
 - ログ閲覧
 
@@ -223,14 +226,20 @@ export interface AgentApi {
     sessionId: string
   ): Promise<FileChange[]>;
 
-  acceptHunk(
+  getCheckpoints(
+    sessionId: string
+  ): Promise<Checkpoint[]>;
+
+  restoreHunk(
     sessionId: string,
+    checkpointId: string,
     hunkId: string
   ): Promise<void>;
 
-  rejectHunk(
+  restoreFile(
     sessionId: string,
-    hunkId: string
+    checkpointId: string,
+    fileId: string
   ): Promise<void>;
 }
 ```
@@ -266,6 +275,7 @@ Agent Manager
 ├─ CLI JSON / JSONL 解析
 ├─ 共通Event形式への変換
 ├─ Token usage 収集
+├─ Run前後のCheckpoint管理
 ├─ Git差分取得
 ├─ ChangeSet生成
 ├─ ログ保存
@@ -476,34 +486,43 @@ Agent 実行前：
 
 ```bash
 git rev-parse HEAD
-git status --porcelain
+git write-tree                                      # 現在のindex tree
+GIT_INDEX_FILE=<temp> git read-tree HEAD
+GIT_INDEX_FILE=<temp> git add -A -- .
+GIT_INDEX_FILE=<temp> git write-tree                # before Working Tree tree
+git update-ref refs/maatgen/checkpoints/<session>/<run>/before <before-tree>
 ```
 
 Agent 実行後：
 
 ```bash
-git status --porcelain
-git diff --stat
-git diff
+# 同じ一時index方式でafter Working Tree treeを作成
+git update-ref refs/maatgen/checkpoints/<session>/<run>/after <after-tree>
+git diff --stat <before-tree> <after-tree>
+git diff <before-tree> <after-tree>
 ```
+
+実際の実装では`GIT_INDEX_FILE`にManager管理の一時indexを指定し、ユーザーのindex用`git write-tree`とWorking Tree snapshot用`git write-tree`を分離する。
 
 ---
 
-## 14. Source Change Review
+## 14. Source Change Tracking
 
-Agent が変更したソースコードをそのまま確定せず、ChangeSet として管理する。
+Agent はユーザーが開いているリポジトリを直接変更する。変更は承認待ちにせず即座にWorking Treeへ現れ、利用者はそのままコードを編集・実行できる。
+
+Managerは各Runの開始直前と終了直後にGit checkpointを作成し、その差分をChangeSetとして管理する。ChangeSetは承認対象ではなく、変更内容の確認と復元範囲の選択に使う。
 
 ```text
 Agent
   │
   ▼
-Source Modification
+Before Checkpoint
   │
   ▼
-Change Detector
+Working Treeを直接変更
   │
   ▼
-ChangeSet
+After Snapshot / ChangeSet
   │
   ├─ File A
   │   ├─ Hunk 1
@@ -520,6 +539,10 @@ ChangeSet
 ```ts
 export interface ChangeSet {
   sessionId: string;
+  runId: string;
+  checkpointId: string;
+  beforeTree: string;
+  afterTree: string;
 
   files: FileChange[];
 }
@@ -548,17 +571,17 @@ export interface ChangeHunk {
   modifiedText: string;
 
   status:
-    | 'pending'
-    | 'accepted'
-    | 'rejected';
+    | 'changed'
+    | 'restored'
+    | 'conflict';
 }
 ```
 
 ---
 
-## 16. Accept / Reject
+## 16. Checkpoint / Restore
 
-ユーザーは Hunk 単位で変更を承認できる。
+承認操作は設けない。AgentがRunを完了した時点で変更は対象リポジトリに反映済みとする。利用者が不要と判断した変更だけを、FileまたはHunk単位でRun開始時のチェックポイントへ戻す。
 
 ```text
 foo.ts
@@ -568,7 +591,7 @@ Hunk 1
 - return a - b;
 + return a + b;
 
-[Accept] [Reject]
+[Restore to checkpoint]
 
 
 Hunk 2
@@ -576,29 +599,55 @@ Hunk 2
 - const x = 1;
 + const x = 2;
 
-[Accept] [Reject]
+[Restore to checkpoint]
 ```
 
 以下も提供する。
 
-- Accept
-- Reject
-- Accept All
-- Reject All
+- Restore Hunk
+- Restore File
+- Restore All Changes from Run
 - Next Change
 - Previous Change
 
-Review 操作も Event として記録する。
+復元操作もEventとして記録する。
 
 ```json
 {
-  "type": "change_review",
+  "type": "change_restored",
   "sessionId": "session-123",
+  "runId": "run-456",
+  "checkpointId": "checkpoint-456-before",
   "file": "src/foo.ts",
   "hunkId": "hunk-2",
-  "action": "accept"
+  "action": "restore_hunk"
 }
 ```
+
+### 16.1 Checkpoint作成
+
+Run開始直前に、次の状態を記録する。
+
+- `HEAD` commit
+- index tree
+- tracked fileとuntrackedかつnon-ignored fileを含むWorking Tree tree
+- file mode、symlink、binary blob
+
+Working Tree treeは一時indexとGit plumbing commandで作成し、ユーザーのindex、Working Tree、branch、HEADを変更しない。作成したtreeは`refs/maatgen/checkpoints/<sessionId>/<runId>/{before,after}`から直接参照し、Git GCで失われないようにする。ignored fileはSecretや生成物を含む可能性があるためcheckpoint対象外とする。
+
+before checkpointを作成できなければAgentは起動しない。after snapshotはRunがcompleted、failed、cancelled、timeoutのいずれで終了しても作成し、途中までの変更も確認・復元できるようにする。after snapshotを保存できない場合は次のRunを開始しない。
+
+### 16.2 安全な復元
+
+復元は記録済みのafter→before逆差分として適用する。対象File／Hunkの現在内容がafter snapshotから変わっていない場合だけatomicに反映する。
+
+Run完了後に利用者または後続Runが同じ箇所を変更していた場合は、上書きせず`409 checkpoint_conflict`を返す。競合していない別のHunkは個別に復元できる。復元はWorking Treeだけを変更し、ユーザーのindexを暗黙に更新しない。
+
+### 16.3 継続指示
+
+Sessionは複数Runを保持する。Run完了後、利用者はAgentの変更を直接編集し、その状態から同じSessionへ次の指示を送れる。次のRun開始時に新しいbefore checkpointを作成し、保存済みAgent Thread IDを使って会話をresumeする。
+
+実行中の同一Sessionへの追加指示はqueueせず`409 Conflict`とする。利用者によるファイル編集は妨げないが、実行中にAgentと同じ箇所を編集した場合、そのRunの差分には双方の変更が含まれ、Agent変更との厳密な帰属は保証しない。
 
 ---
 
@@ -621,7 +670,6 @@ Monaco Editor の Diff Editor を利用する。
 - VS Code Diff Editor
 - TextEditor Decoration
 - CodeLens
-- WorkspaceEdit
 
 VS Code 固有 UI は Extension 側に実装し、差分データ自体は Web 版と共通化する。
 
@@ -629,46 +677,37 @@ VS Code 固有 UI は Extension 側に実装し、差分データ自体は Web �
 
 ## 18. Agent Workspace
 
-Agent にユーザーの Working Tree を直接変更させない運用を選択可能とする。
-
-推奨方式は Git Worktree である。
+Agentの作業ディレクトリは、Session作成時に利用者が指定したリポジトリのWorking Treeそのものとする。専用Git Worktreeは作成しない。
 
 ```text
 Repository
 │
-├─ Main Working Tree
-│    └─ User / VS Code
-│
-└─ Agent Worktree
-     └─ .agent/worktrees/{sessionId}
-          └─ Codex / Claude / Copilot
+└─ Working Tree
+     ├─ User / VS Code
+     └─ Codex / Claude / Copilot
 ```
 
 処理フロー：
 
 ```text
-Agent実行
+Run前Checkpoint
    │
    ▼
-Agent Worktree変更
+AgentがWorking Treeを直接変更
    │
    ▼
-git diff
+Run後Snapshot
    │
    ▼
-ChangeSet生成
+Checkpoint差分を表示
    │
    ▼
-User Review
-   │
-   ├─ Accept
-   └─ Reject
-   │
-   ▼
-Main Working Treeへ反映
+必要なFile／HunkだけRestore
 ```
 
-これにより、Agent の変更をレビュー前に隔離できる。
+Session開始時にcleanであることは要求しない。既存の未コミット変更は最初のRunのbefore checkpointへ含め、Agent変更前の状態として保護する。Agent実行中はbranch／HEAD／indexを変更しないことを実行ポリシーとして指示し、Run後にHEADまたはindexの予期しない変化を検出した場合はRepository state conflictとして通知する。
+
+旧Worktree方式、Accept／Reject API、旧ChangeSet schemaとの後方互換性は維持しない。新設計を正規実装とし、既存ローカルデータは必要に応じて再作成する。
 
 ---
 
@@ -694,9 +733,11 @@ POST   /api/sessions/{id}/cancel
 
 GET    /api/sessions/{id}/events
 GET    /api/sessions/{id}/changes
+GET    /api/sessions/{id}/checkpoints
 
-POST   /api/sessions/{id}/changes/{hunkId}/accept
-POST   /api/sessions/{id}/changes/{hunkId}/reject
+POST   /api/sessions/{id}/checkpoints/{checkpointId}/restore
+POST   /api/sessions/{id}/checkpoints/{checkpointId}/files/{fileId}/restore
+POST   /api/sessions/{id}/checkpoints/{checkpointId}/hunks/{hunkId}/restore
 ```
 
 Agent Manager は原則として loopback interface のみに bind する。
@@ -755,8 +796,6 @@ model
 workspace
 repository
 branch
-commit_before
-commit_after
 status
 started_at
 finished_at
@@ -809,6 +848,8 @@ created_at
 ```text
 id
 session_id
+run_id
+checkpoint_id
 file_path
 hunk_id
 old_start
@@ -819,7 +860,24 @@ original_text
 modified_text
 status
 created_at
-reviewed_at
+restored_at
+```
+
+### checkpoints
+
+```text
+id
+session_id
+run_id
+head_commit
+index_tree
+before_tree
+after_tree
+before_ref
+after_ref
+status
+created_at
+completed_at
 ```
 
 ---
@@ -978,7 +1036,7 @@ Mock Event例：
 - Cancel
 - Error
 - Diff
-- Accept / Reject
+- Checkpoint restore
 - Token 表示
 - Session History
 
@@ -999,7 +1057,7 @@ Mock Agent
 - UI テスト
 - Component テスト
 - Diff UI
-- Accept / Reject
+- File／Hunk restore
 - Streaming UI
 
 ---
@@ -1045,7 +1103,6 @@ Coding Agent
 - Decoration
 - CodeLens
 - vscode.diff
-- WorkspaceEdit
 
 ---
 
@@ -1062,7 +1119,6 @@ Extension
 ├─ VS Code Command登録
 ├─ Diff Editor表示
 ├─ CodeLens / Decoration
-├─ WorkspaceEdit
 └─ Agent Manager起動・接続
 ```
 
@@ -1160,6 +1216,14 @@ ANTHROPIC_API_KEY=****
 GITHUB_TOKEN=****
 ```
 
+### Direct Working Tree
+
+- Session開始時に、Agentが対象repositoryを直接変更することをUIへ明示する。
+- checkpointの対象はtracked fileとuntracked non-ignored fileであり、ignored fileは復元保証の対象外と表示する。
+- Restore前にafter snapshotと現在内容を比較し、利用者の後続編集を上書きしない。
+- Agentによるbranch、HEAD、indexの変更を禁止する実行指示を加え、Run後にも状態変化を検査する。
+- CheckpointはCommitや外部バックアップの代替ではない。
+
 ---
 
 ## 30. 実装フェーズ
@@ -1207,13 +1271,13 @@ Codex
 
 ### Phase 4
 
-Diff Review を実装する。
+直接編集、Checkpoint、Diff、Restoreを実装する。
 
 - Git Diff
+- Run前後Checkpoint
 - ChangeSet
 - Monaco Diff
-- Accept
-- Reject
+- Restore Hunk／File
 
 ### Phase 5
 
@@ -1246,8 +1310,8 @@ Agent別
 ├─ 成功率
 ├─ 平均Token数
 ├─ 平均実行時間
-├─ Accept率
-├─ Reject率
+├─ Restore率
+├─ 競合率
 └─ 変更行数 / 1000 tokens
 ```
 
@@ -1272,7 +1336,7 @@ Agent Session
  ↓
 Implementation
  ↓
-Review
+Diff確認／必要箇所のRestore
  ↓
 Commit / Pull Request
 ```
@@ -1300,7 +1364,7 @@ Session
 4. **Agent の生ログを保存する。**
 5. **共通 Event に正規化する。**
 6. **Agent の申告ではなく Git の実差分も記録する。**
-7. **Agent が変更した内容とユーザーが承認した内容を分離する。**
+7. **Agentは対象Working Treeを直接変更し、Run前後のCheckpointで確認と安全な復元を可能にする。**
 8. **Web UI と VS Code Webview で UI を共通化する。**
 9. **Web アプリ単体で大部分の開発・テストを可能にする。**
 10. **VS Code Extension は VS Code 固有処理だけを担当する。**
@@ -1327,7 +1391,7 @@ Session
 │   └─ Webview ───────┼───▶│ Agent Adapter            │
 │                     │    │ Event Logger             │
 │ Diff / CodeLens     │    │ Token Collector          │
-│ WorkspaceEdit       │    │ Git / ChangeSet          │
+│ Checkpoint UI       │    │ Git / Checkpoint         │
 └─────────────────────┘    │ SQLite                   │
                            └─────────────┬────────────┘
                                          │

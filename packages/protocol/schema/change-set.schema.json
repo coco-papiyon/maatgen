@@ -4,20 +4,24 @@
   "title": "ChangeSet",
   "type": "object",
   "additionalProperties": false,
-  "required": ["sessionId", "files"],
+  "required": ["sessionId", "runId", "checkpointId", "beforeTree", "afterTree", "files"],
   "properties": {
     "sessionId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "checkpointId": { "type": "string", "minLength": 1 },
+    "beforeTree": { "type": "string", "minLength": 1 },
+    "afterTree": { "type": "string", "minLength": 1 },
     "files": {
       "type": "array",
       "items": { "$ref": "#/$defs/fileChange" }
     }
   },
   "$defs": {
-    "reviewStatus": {
-      "enum": ["pending", "partially_accepted", "accepted", "rejected"]
+    "restoreStatus": {
+      "enum": ["changed", "partially_restored", "restored", "conflict"]
     },
     "hunkStatus": {
-      "enum": ["pending", "accepted", "rejected"]
+      "enum": ["changed", "restored", "conflict"]
     },
     "changeHunk": {
       "type": "object",
@@ -37,7 +41,7 @@
     "fileChange": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "reviewMode", "status", "hunks"],
+      "required": ["id", "kind", "restoreMode", "status", "hunks"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "oldPath": { "type": "string", "minLength": 1 },
@@ -45,8 +49,8 @@
         "kind": { "enum": ["modify", "add", "delete", "rename", "binary", "mode_change"] },
         "original": { "type": "string" },
         "modified": { "type": "string" },
-        "reviewMode": { "enum": ["hunk", "file"] },
-        "status": { "$ref": "#/$defs/reviewStatus" },
+        "restoreMode": { "enum": ["hunk", "file"] },
+        "status": { "$ref": "#/$defs/restoreStatus" },
         "hunks": {
           "type": "array",
           "items": { "$ref": "#/$defs/changeHunk" }

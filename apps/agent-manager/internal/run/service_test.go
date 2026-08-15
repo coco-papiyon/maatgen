@@ -11,6 +11,7 @@ import (
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	storesqlite "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage/sqlite"
@@ -25,7 +26,7 @@ func TestRunServicePersistsCodexOutput(t *testing.T) {
 		{Stream: agent.OutputStdout, Line: `{"type":"item.completed","item":{"id":"item-1","type":"agent_message","text":"Done"}}`},
 		{Stream: agent.OutputStdout, Line: `{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":3,"reasoning_output_tokens":1}}`},
 	}}
-	service := New(store, adapter)
+	service := New(store, adapter, WithCheckpointManager(&fakeCheckpointManager{}))
 	defer service.Close(context.Background())
 
 	run, err := service.StartRun(ctx, session.ID, protocol.SendMessageRequest{Message: "Implement it"})
@@ -51,6 +52,7 @@ func TestRunServicePersistsCodexOutput(t *testing.T) {
 	}
 	wantTypes := []string{
 		protocol.EventTypeUserPrompt,
+		protocol.EventTypeCheckpointCreated,
 		protocol.EventTypeRunStarted,
 		protocol.EventTypeAssistantMessage,
 		protocol.EventTypeUsageReported,
@@ -77,12 +79,20 @@ func TestRunServicePersistsCodexOutput(t *testing.T) {
 			t.Fatalf("secret %q remains in raw events: %s", secret, joined)
 		}
 	}
+	second, err := service.StartRun(ctx, session.ID, protocol.SendMessageRequest{Message: "Continue"})
+	if err != nil {
+		t.Fatalf("start continued run: %v", err)
+	}
+	waitForRunStatus(t, store, second.ID, protocol.RunCompleted)
+	if len(adapter.requests) != 2 || adapter.requests[0].Directory != session.Workspace || adapter.requests[1].ThreadID != "thread-123" {
+		t.Fatalf("adapter requests = %#v", adapter.requests)
+	}
 }
 
 func TestRunServiceRejectsConcurrentRunAndCancels(t *testing.T) {
 	store, session := createRunTestStore(t)
 	adapter := &fakeAdapter{block: true}
-	service := New(store, adapter)
+	service := New(store, adapter, WithCheckpointManager(&fakeCheckpointManager{}))
 	defer service.Close(context.Background())
 
 	first, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "First"})
@@ -108,10 +118,10 @@ func TestRunServiceRefreshesChangeSetAfterSuccessfulRun(t *testing.T) {
 	detector := &fakeChangeDetector{changeSet: protocol.ChangeSet{
 		SessionID: session.ID,
 		Files: []protocol.FileChange{
-			{ID: "file-1", NewPath: &path, Kind: protocol.FileAdd, ReviewMode: "hunk", Status: protocol.ReviewPending, Hunks: []protocol.ChangeHunk{}},
+			{ID: "file-1", NewPath: &path, Kind: protocol.FileAdd, RestoreMode: "file", Status: protocol.RestoreChanged, Hunks: []protocol.ChangeHunk{}},
 		},
 	}}
-	service := New(store, &fakeAdapter{}, WithChangeDetector(detector))
+	service := New(store, &fakeAdapter{}, WithCheckpointManager(&fakeCheckpointManager{}), WithChangeDetector(detector))
 	defer service.Close(context.Background())
 
 	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Change a file"})
@@ -123,15 +133,15 @@ func TestRunServiceRefreshesChangeSetAfterSuccessfulRun(t *testing.T) {
 	if err != nil || len(got.Files) != 1 || got.Files[0].ID != "file-1" {
 		t.Fatalf("change set = %#v, err = %v", got, err)
 	}
-	if detector.session.ID != session.ID {
-		t.Fatalf("detector session = %#v", detector.session)
+	if detector.repository != session.Workspace || detector.checkpoint.SessionID != session.ID {
+		t.Fatalf("detector arguments = %q, %#v", detector.repository, detector.checkpoint)
 	}
 }
 
 func TestRunServiceFailsRunWhenChangeSetRefreshFails(t *testing.T) {
 	store, session := createRunTestStore(t)
 	detector := &fakeChangeDetector{err: errors.New("git diff failed")}
-	service := New(store, &fakeAdapter{}, WithChangeDetector(detector))
+	service := New(store, &fakeAdapter{}, WithCheckpointManager(&fakeCheckpointManager{}), WithChangeDetector(detector))
 	defer service.Close(context.Background())
 
 	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Change a file"})
@@ -150,7 +160,7 @@ func TestRunServiceFailsRunWhenChangeSetRefreshFails(t *testing.T) {
 
 func TestRunServiceReportsUnavailableCodex(t *testing.T) {
 	store, session := createRunTestStore(t)
-	service := New(store, &fakeAdapter{runErr: codex.ErrUnavailable})
+	service := New(store, &fakeAdapter{runErr: codex.ErrUnavailable}, WithCheckpointManager(&fakeCheckpointManager{}))
 	defer service.Close(context.Background())
 
 	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Do work"})
@@ -172,20 +182,39 @@ func TestRunServiceReportsUnavailableCodex(t *testing.T) {
 }
 
 type fakeAdapter struct {
-	lines  []agent.Output
-	block  bool
-	runErr error
+	lines    []agent.Output
+	block    bool
+	runErr   error
+	requests []agent.RunRequest
 }
 
 type fakeChangeDetector struct {
-	session   protocol.AgentSession
-	changeSet protocol.ChangeSet
-	err       error
+	repository string
+	checkpoint protocol.Checkpoint
+	changeSet  protocol.ChangeSet
+	err        error
 }
 
-func (f *fakeChangeDetector) Generate(_ context.Context, session protocol.AgentSession) (protocol.ChangeSet, error) {
-	f.session = session
+func (f *fakeChangeDetector) Generate(_ context.Context, repository string, checkpoint protocol.Checkpoint) (protocol.ChangeSet, error) {
+	f.repository = repository
+	f.checkpoint = checkpoint
+	f.changeSet.SessionID = checkpoint.SessionID
+	f.changeSet.RunID = checkpoint.RunID
+	f.changeSet.CheckpointID = checkpoint.ID
+	f.changeSet.BeforeTree = checkpoint.BeforeTree
+	if checkpoint.AfterTree != nil {
+		f.changeSet.AfterTree = *checkpoint.AfterTree
+	}
 	return f.changeSet, f.err
+}
+
+type fakeCheckpointManager struct{}
+
+func (*fakeCheckpointManager) Capture(_ context.Context, _ string, sessionID, runID, phase string) (checkpoint.Snapshot, error) {
+	return checkpoint.Snapshot{
+		HeadCommit: "head-tree", IndexTree: "index-tree", Tree: phase + "-tree",
+		Ref: "refs/maatgen/checkpoints/" + sessionID + "/" + runID + "/" + phase,
+	}, nil
 }
 
 var _ ChangeDetector = (*fakeChangeDetector)(nil)
@@ -196,7 +225,8 @@ func (*fakeAdapter) Check(context.Context) (agent.Info, error) {
 	return agent.Info{Name: protocol.AgentCodex, Path: "fake-codex", Version: "test"}, nil
 }
 
-func (f *fakeAdapter) Run(ctx context.Context, _ agent.RunRequest, emit agent.Emitter) (agent.RunResult, error) {
+func (f *fakeAdapter) Run(ctx context.Context, request agent.RunRequest, emit agent.Emitter) (agent.RunResult, error) {
+	f.requests = append(f.requests, request)
 	startedAt := time.Now().UTC()
 	for _, output := range f.lines {
 		if err := emit(output); err != nil {
@@ -223,8 +253,8 @@ func createRunTestStore(t *testing.T) (*storesqlite.Store, protocol.AgentSession
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	session := protocol.AgentSession{
-		ID: "session-1", Agent: protocol.AgentCodex, Workspace: t.TempDir(), Worktree: t.TempDir(),
-		BaseCommit: "abcdef", Status: protocol.SessionActive, CreatedAt: time.Now().UTC(),
+		ID: "session-1", Agent: protocol.AgentCodex, Workspace: t.TempDir(),
+		Status: protocol.SessionActive, CreatedAt: time.Now().UTC(),
 	}
 	if err := store.CreateSession(context.Background(), session); err != nil {
 		t.Fatalf("create session: %v", err)

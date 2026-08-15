@@ -4,8 +4,6 @@
       "id": "session-1",
       "agent": "codex",
       "workspace": "C:/workspace/project",
-      "worktree": "C:/data/maatgen/worktrees/session-1",
-      "baseCommit": "0123456789abcdef",
       "status": "active",
       "createdAt": "2026-08-15T00:00:00Z"
     }

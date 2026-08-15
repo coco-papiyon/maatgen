@@ -4,20 +4,14 @@
   "title": "AgentSession",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "agent", "workspace", "worktree", "baseCommit", "status", "createdAt"],
+  "required": ["id", "agent", "workspace", "status", "createdAt"],
   "properties": {
     "id": { "type": "string", "minLength": 1 },
     "agent": { "const": "codex" },
     "workspace": { "type": "string", "minLength": 1 },
-    "worktree": { "type": "string", "minLength": 1 },
-    "baseCommit": { "type": "string", "minLength": 1 },
     "codexThreadId": { "type": "string", "minLength": 1 },
     "status": { "enum": ["active", "closed"] },
     "createdAt": { "type": "string", "format": "date-time" },
-    "closedAt": { "type": "string", "format": "date-time" },
-    "cleanupStatus": { "enum": ["not_started", "pending", "completed", "failed"] },
-    "cleanupError": { "type": "string" },
-    "cleanupAttempts": { "type": "integer", "minimum": 0 },
-    "cleanupUpdatedAt": { "type": "string", "format": "date-time" }
+    "closedAt": { "type": "string", "format": "date-time" }
   }
 }

@@ -49,10 +49,10 @@ button { color: inherit; }
 .section-heading { height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); color: #b8c4ba; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .count { min-width: 22px; padding: 2px 6px; border-radius: 10px; background: #222c24; color: var(--muted); text-align: center; font: 11px ui-monospace, monospace; }
 .count.accent { color: var(--green); }
-.bulk-review { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--line); color: #77847a; font: 9px ui-monospace, monospace; }
-.bulk-review > div { display: flex; gap: 6px; }
-.bulk-review button { padding: 6px 8px; border-radius: 5px; font-size: 9px; font-weight: 700; cursor: pointer; }
-.bulk-accept { border: 0; color: #0d150f; background: var(--green); }.bulk-reject { border: 1px solid #553530; color: #e69a92; background: transparent; }
+.bulk-restore { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--line); color: #77847a; font: 9px ui-monospace, monospace; }
+.bulk-restore > div { display: flex; gap: 6px; }
+.bulk-restore button { padding: 6px 8px; border-radius: 5px; font-size: 9px; font-weight: 700; cursor: pointer; }
+.restore-all-button { border: 1px solid #553530; color: #e69a92; background: transparent; }
 
 .new-session { padding: 15px; border-bottom: 1px solid var(--line); }
 .new-session label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 11px; }
@@ -140,11 +140,11 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .diff-header p:last-child { margin: 6px 0 0; color: var(--muted); font-size: 10px; }
 .close-dialog { width: 32px; height: 32px; border: 1px solid #344137; border-radius: 6px; color: #9da89f; background: transparent; font-size: 20px; cursor: pointer; }
 .diff-body { overflow: auto; padding: 16px; }
-.diff-hunk, .file-review { overflow: hidden; margin-bottom: 14px; border: 1px solid #2b372e; border-radius: 8px; background: #0c120d; }
+.diff-hunk, .file-restore { overflow: hidden; margin-bottom: 14px; border: 1px solid #2b372e; border-radius: 8px; background: #0c120d; }
 .hunk-header { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-bottom: 1px solid #28332a; background: #151d17; }
 .hunk-header code { color: #829087; font-size: 10px; }
-.review-badge { padding: 3px 7px; border-radius: 10px; color: #9ca79f; background: #263028; font-size: 9px; text-transform: uppercase; }
-.review-badge.accepted { color: var(--green); background: #1b3823; }.review-badge.rejected { color: #ff9d93; background: #3d2522; }
+.restore-badge { padding: 3px 7px; border-radius: 10px; color: #9ca79f; background: #263028; font-size: 9px; text-transform: uppercase; }
+.restore-badge.restored { color: var(--green); background: #1b3823; }.restore-badge.conflict { color: #ff9d93; background: #3d2522; }
 .diff-columns { display: grid; grid-template-columns: 1fr 1fr; min-width: 0; }
 .diff-side { min-width: 0; }
 .diff-side + .diff-side { border-left: 1px solid #2b372e; }
@@ -152,9 +152,8 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .diff-side.removed > span { color: #df8e86; background: rgba(135, 57, 48, .09); }.diff-side.added > span { color: var(--green); background: rgba(58, 135, 78, .09); }
 .diff-side pre { min-height: 80px; max-height: 340px; margin: 0; overflow: auto; padding: 12px; color: #b9c3bb; font: 11px/1.65 ui-monospace, monospace; white-space: pre; tab-size: 4; }
 .removed pre { background: rgba(73, 27, 24, .1); }.added pre { background: rgba(25, 70, 36, .1); }
-.review-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; border-top: 1px solid #28332a; }
-.accept-button, .reject-button { padding: 8px 12px; border-radius: 6px; font-size: 10px; font-weight: 700; cursor: pointer; }
-.accept-button { border: 0; color: #0d150f; background: var(--green); }.reject-button { border: 1px solid #5d3732; color: #f3a198; background: #271815; }
+.restore-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; border-top: 1px solid #28332a; }
+.restore-button { padding: 8px 12px; border: 1px solid #5d3732; border-radius: 6px; color: #f3a198; background: #271815; font-size: 10px; font-weight: 700; cursor: pointer; }
 .binary-notice { padding: 45px 24px; color: #89958c; text-align: center; font-size: 12px; }
 
 @media (max-width: 1050px) {

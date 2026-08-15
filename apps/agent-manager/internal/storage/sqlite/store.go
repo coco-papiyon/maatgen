@@ -138,28 +138,17 @@ func (s *Store) migrate(ctx context.Context) error {
 }
 
 func (s *Store) CreateSession(ctx context.Context, session protocol.AgentSession) error {
-	if session.CleanupStatus == "" {
-		session.CleanupStatus = protocol.CleanupNotStarted
-	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions(
-			id, agent, workspace, worktree, base_commit, codex_thread_id,
-			status, created_at, closed_at, cleanup_status, cleanup_error,
-			cleanup_attempts, cleanup_updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, agent, workspace, codex_thread_id, status, created_at, closed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Agent,
 		session.Workspace,
-		session.Worktree,
-		session.BaseCommit,
 		nullableString(session.CodexThreadID),
 		session.Status,
 		formatTime(session.CreatedAt),
 		nullableTime(session.ClosedAt),
-		session.CleanupStatus,
-		nullableString(session.CleanupError),
-		session.CleanupAttempts,
-		nullableTime(session.CleanupUpdatedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
@@ -169,9 +158,7 @@ func (s *Store) CreateSession(ctx context.Context, session protocol.AgentSession
 
 func (s *Store) GetSession(ctx context.Context, id string) (protocol.AgentSession, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, agent, workspace, worktree, base_commit, codex_thread_id,
-		       status, created_at, closed_at, cleanup_status, cleanup_error,
-		       cleanup_attempts, cleanup_updated_at
+		SELECT id, agent, workspace, codex_thread_id, status, created_at, closed_at
 		FROM sessions WHERE id = ?`, id)
 	return scanSession(row)
 }
@@ -181,9 +168,7 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 		limit = 100
 	}
 	query := `
-		SELECT id, agent, workspace, worktree, base_commit, codex_thread_id,
-		       status, created_at, closed_at, cleanup_status, cleanup_error,
-		       cleanup_attempts, cleanup_updated_at
+		SELECT id, agent, workspace, codex_thread_id, status, created_at, closed_at
 		FROM sessions`
 	args := []any{}
 	if before != nil {
@@ -223,71 +208,35 @@ func (s *Store) UpdateSessionThreadID(ctx context.Context, id, threadID string) 
 
 func (s *Store) CloseSession(ctx context.Context, id string, closedAt time.Time) error {
 	result, err := s.db.ExecContext(ctx,
-		"UPDATE sessions SET status = ?, closed_at = ? WHERE id = ?",
-		protocol.SessionClosed, formatTime(closedAt), id,
+		`UPDATE sessions SET status = ?, closed_at = COALESCE(closed_at, ?)
+		 WHERE id = ? AND NOT EXISTS (
+		   SELECT 1 FROM runs WHERE session_id = ? AND status IN ('queued', 'starting', 'running')
+		 )`,
+		protocol.SessionClosed, formatTime(closedAt), id, id,
 	)
-	return updateResult("close session", result, err)
-}
-
-func (s *Store) PrepareSessionCleanup(ctx context.Context, id string, closedAt time.Time) (protocol.AgentSession, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return protocol.AgentSession{}, fmt.Errorf("begin session cleanup: %w", err)
+		return fmt.Errorf("close session: %w", err)
 	}
-	defer tx.Rollback()
-
-	query := `
-		SELECT id, agent, workspace, worktree, base_commit, codex_thread_id,
-		       status, created_at, closed_at, cleanup_status, cleanup_error,
-		       cleanup_attempts, cleanup_updated_at
-		FROM sessions WHERE id = ?`
-	session, err := scanSession(tx.QueryRowContext(ctx, query, id))
+	affected, err := result.RowsAffected()
 	if err != nil {
-		return protocol.AgentSession{}, err
+		return err
 	}
-	if session.CleanupStatus == protocol.CleanupCompleted {
-		return session, nil
+	if affected == 0 {
+		var exists, active int
+		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE id = ?", id).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return storage.ErrNotFound
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE session_id = ? AND status IN ('queued','starting','running')`, id).Scan(&active); err != nil {
+			return err
+		}
+		if active > 0 {
+			return storage.ErrRunActive
+		}
 	}
-	var activeRuns int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM runs
-		WHERE session_id = ? AND status IN ('queued', 'starting', 'running')`, id,
-	).Scan(&activeRuns); err != nil {
-		return protocol.AgentSession{}, fmt.Errorf("check active runs: %w", err)
-	}
-	if activeRuns > 0 {
-		return protocol.AgentSession{}, storage.ErrRunActive
-	}
-	updatedAt := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE sessions
-		SET status = ?, closed_at = COALESCE(closed_at, ?), cleanup_status = ?,
-		    cleanup_error = NULL, cleanup_attempts = cleanup_attempts + 1,
-		    cleanup_updated_at = ?
-		WHERE id = ?`,
-		protocol.SessionClosed, formatTime(closedAt), protocol.CleanupPending,
-		formatTime(updatedAt), id,
-	); err != nil {
-		return protocol.AgentSession{}, fmt.Errorf("prepare session cleanup: %w", err)
-	}
-	session, err = scanSession(tx.QueryRowContext(ctx, query, id))
-	if err != nil {
-		return protocol.AgentSession{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return protocol.AgentSession{}, fmt.Errorf("commit session cleanup: %w", err)
-	}
-	return session, nil
-}
-
-func (s *Store) FinishSessionCleanup(ctx context.Context, id string, status protocol.CleanupStatus, cleanupError *string, updatedAt time.Time) error {
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE sessions
-		SET cleanup_status = ?, cleanup_error = ?, cleanup_updated_at = ?
-		WHERE id = ?`,
-		status, nullableString(cleanupError), formatTime(updatedAt), id,
-	)
-	return updateResult("finish session cleanup", result, err)
+	return nil
 }
 
 func (s *Store) CreateRun(ctx context.Context, run protocol.AgentRun) error {
@@ -356,22 +305,16 @@ type scanner interface {
 
 func scanSession(row scanner) (protocol.AgentSession, error) {
 	var session protocol.AgentSession
-	var threadID, closedAt, cleanupError, cleanupUpdatedAt sql.NullString
+	var threadID, closedAt sql.NullString
 	var createdAt string
 	if err := row.Scan(
 		&session.ID,
 		&session.Agent,
 		&session.Workspace,
-		&session.Worktree,
-		&session.BaseCommit,
 		&threadID,
 		&session.Status,
 		&createdAt,
 		&closedAt,
-		&session.CleanupStatus,
-		&cleanupError,
-		&session.CleanupAttempts,
-		&cleanupUpdatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return protocol.AgentSession{}, storage.ErrNotFound
@@ -392,16 +335,6 @@ func scanSession(row scanner) (protocol.AgentSession, error) {
 			return protocol.AgentSession{}, fmt.Errorf("scan session closed_at: %w", err)
 		}
 		session.ClosedAt = &parsed
-	}
-	if cleanupError.Valid {
-		session.CleanupError = &cleanupError.String
-	}
-	if cleanupUpdatedAt.Valid {
-		parsed, err := parseTime(cleanupUpdatedAt.String)
-		if err != nil {
-			return protocol.AgentSession{}, fmt.Errorf("scan session cleanup_updated_at: %w", err)
-		}
-		session.CleanupUpdatedAt = &parsed
 	}
 	return session, nil
 }

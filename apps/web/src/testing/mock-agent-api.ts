@@ -3,7 +3,7 @@ import type {
   AgentSession,
   ChangeSet,
   CreateSessionRequest,
-  ReviewStatus,
+  RestoreStatus,
   SendMessageRequest,
   SessionEvent,
   WsTicketResponse,
@@ -56,15 +56,12 @@ export class MockAgentApi implements AgentApi {
       id,
       agent: request.agent,
       workspace: request.workspace,
-      worktree: `C:/maatgen/mock/worktrees/${id}`,
-      baseCommit: '0123456789abcdef',
       status: 'active',
       createdAt: new Date().toISOString(),
-      cleanupStatus: 'not_started',
     };
     this.sessions.set(id, session);
     this.events.set(id, []);
-    this.changes.set(id, { sessionId: id, files: [] });
+    this.changes.set(id, emptyChanges(id));
     return clone(session);
   }
 
@@ -76,7 +73,6 @@ export class MockAgentApi implements AgentApi {
     const session = this.requireSession(id);
     session.status = 'closed';
     session.closedAt = new Date().toISOString();
-    session.cleanupStatus = 'completed';
     return clone(session);
   }
 
@@ -132,20 +128,16 @@ export class MockAgentApi implements AgentApi {
     return clone(changeSet);
   }
 
-  acceptChange(sessionId: string, changeId: string): Promise<ChangeSet> {
-    return this.reviewChange(sessionId, changeId, 'accepted');
+  restoreHunk(sessionId: string, _checkpointId: string, hunkId: string): Promise<ChangeSet> {
+    return this.restoreChange(sessionId, hunkId);
   }
 
-  rejectChange(sessionId: string, changeId: string): Promise<ChangeSet> {
-    return this.reviewChange(sessionId, changeId, 'rejected');
+  restoreFile(sessionId: string, _checkpointId: string, fileId: string): Promise<ChangeSet> {
+    return this.restoreChange(sessionId, fileId);
   }
 
-  acceptAllChanges(sessionId: string): Promise<ChangeSet> {
-    return this.reviewAll(sessionId, 'accepted');
-  }
-
-  rejectAllChanges(sessionId: string): Promise<ChangeSet> {
-    return this.reviewAll(sessionId, 'rejected');
+  restoreAllChanges(sessionId: string, _checkpointId: string): Promise<ChangeSet> {
+    return this.restoreAll(sessionId);
   }
 
   subscribe(sessionId: string, listener: EventListener): () => void {
@@ -155,26 +147,25 @@ export class MockAgentApi implements AgentApi {
     return () => listeners.delete(listener);
   }
 
-  private async reviewChange(sessionId: string, changeId: string, status: 'accepted' | 'rejected'): Promise<ChangeSet> {
+  private async restoreChange(sessionId: string, changeId: string): Promise<ChangeSet> {
     const changeSet = this.requireChangeSet(sessionId);
     const file = changeSet.files.find((candidate) => candidate.id === changeId || candidate.hunks.some((hunk) => hunk.id === changeId));
     if (!file) throw new Error('change was not found');
     const hunk = file.hunks.find((candidate) => candidate.id === changeId);
-    if (hunk) hunk.status = status;
-    else file.status = status;
-    if (file.reviewMode === 'hunk') file.status = aggregateStatus(file.hunks.map((item) => item.status));
-    this.appendEvent(sessionId, 'change_reviewed', 'manager', { changeId, decision: status });
+    if (hunk) hunk.status = 'restored';
+    else file.status = 'restored';
+    if (file.restoreMode === 'hunk') file.status = aggregateStatus(file.hunks.map((item) => item.status));
+    this.appendEvent(sessionId, 'change_restored', 'manager', { changeId });
     return clone(changeSet);
   }
 
-  private async reviewAll(sessionId: string, status: 'accepted' | 'rejected'): Promise<ChangeSet> {
+  private async restoreAll(sessionId: string): Promise<ChangeSet> {
     const changeSet = this.requireChangeSet(sessionId);
     for (const file of changeSet.files) {
-      if (file.reviewMode === 'file' && file.status === 'pending') file.status = status;
-      for (const hunk of file.hunks) if (hunk.status === 'pending') hunk.status = status;
-      if (file.reviewMode === 'hunk') file.status = aggregateStatus(file.hunks.map((item) => item.status));
+      file.status = 'restored';
+      for (const hunk of file.hunks) hunk.status = 'restored';
     }
-    this.appendEvent(sessionId, 'change_reviewed', 'manager', { decision: status, all: true });
+    this.appendEvent(sessionId, 'change_restored', 'manager', { all: true });
     return clone(changeSet);
   }
 
@@ -229,11 +220,11 @@ export function createMockEnvironment(): { agentApi: AgentApi; eventStreamFactor
   };
 }
 
-function aggregateStatus(statuses: Array<'pending' | 'accepted' | 'rejected'>): ReviewStatus {
-  if (statuses.every((status) => status === 'accepted')) return 'accepted';
-  if (statuses.every((status) => status === 'rejected')) return 'rejected';
-  if (statuses.every((status) => status === 'pending')) return 'pending';
-  return 'partially_accepted';
+function aggregateStatus(statuses: Array<'changed' | 'restored' | 'conflict'>): RestoreStatus {
+  if (statuses.every((status) => status === 'restored')) return 'restored';
+  if (statuses.some((status) => status === 'restored')) return 'partially_restored';
+  if (statuses.some((status) => status === 'conflict')) return 'conflict';
+  return 'changed';
 }
 
 function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[]; changes: ChangeSet }> {
@@ -246,7 +237,7 @@ function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[];
     ], oneHunk('mock-success')),
     scenario('mock-failure', 'C:/demo/failure', [event('mock-failure', 1, 'run_failed', { code: 'codex_unavailable', message: 'Mock: Codex CLI is unavailable' })], emptyChanges('mock-failure')),
     scenario('mock-cancelled', 'C:/demo/cancelled', [event('mock-cancelled', 1, 'run_cancelled', {})], emptyChanges('mock-cancelled')),
-    scenario('mock-multi-hunk', 'C:/demo/multi-hunk', [event('mock-multi-hunk', 1, 'assistant_message', { text: '2つのHunkをReviewできます。' })], multiHunk('mock-multi-hunk')),
+    scenario('mock-multi-hunk', 'C:/demo/multi-hunk', [event('mock-multi-hunk', 1, 'assistant_message', { text: '2つのHunkを個別に戻せます。' })], multiHunk('mock-multi-hunk')),
   ];
 }
 
@@ -256,11 +247,8 @@ function scenario(id: string, workspace: string, events: SessionEvent[], changes
       id,
       agent: 'codex' as const,
       workspace,
-      worktree: `C:/maatgen/mock/worktrees/${id}`,
-      baseCommit: '0123456789abcdef',
       status: 'active' as const,
       createdAt: now,
-      cleanupStatus: 'not_started' as const,
     },
     events,
     changes,
@@ -272,16 +260,16 @@ function event(sessionId: string, sequence: number, type: SessionEvent['type'], 
 }
 
 function emptyChanges(sessionId: string): ChangeSet {
-  return { sessionId, files: [] };
+  return { sessionId, runId: `${sessionId}-run`, checkpointId: `${sessionId}-checkpoint`, beforeTree: 'before', afterTree: 'after', files: [] };
 }
 
 function oneHunk(sessionId: string): ChangeSet {
   return {
-    sessionId,
+    sessionId, runId: `${sessionId}-run`, checkpointId: `${sessionId}-checkpoint`, beforeTree: 'before', afterTree: 'after',
     files: [{
-      id: `${sessionId}-file`, oldPath: 'src/auth.ts', newPath: 'src/auth.ts', kind: 'modify', reviewMode: 'hunk', status: 'pending',
+      id: `${sessionId}-file`, oldPath: 'src/auth.ts', newPath: 'src/auth.ts', kind: 'modify', restoreMode: 'hunk', status: 'changed',
       original: 'export const enabled = false;\n', modified: 'export const enabled = true;\n',
-      hunks: [{ id: `${sessionId}-hunk`, oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, originalText: 'export const enabled = false;\n', modifiedText: 'export const enabled = true;\n', status: 'pending' }],
+      hunks: [{ id: `${sessionId}-hunk`, oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, originalText: 'export const enabled = false;\n', modifiedText: 'export const enabled = true;\n', status: 'changed' }],
     }],
   };
 }
@@ -291,7 +279,7 @@ function multiHunk(sessionId: string): ChangeSet {
   const file = changeSet.files[0]!;
   file.newPath = 'src/config.ts';
   file.oldPath = 'src/config.ts';
-  file.hunks.push({ id: `${sessionId}-hunk-2`, oldStart: 8, oldLines: 1, newStart: 8, newLines: 2, originalText: 'timeout: 10\n', modifiedText: 'timeout: 30\nretries: 2\n', status: 'pending' });
+  file.hunks.push({ id: `${sessionId}-hunk-2`, oldStart: 8, oldLines: 1, newStart: 8, newLines: 2, originalText: 'timeout: 10\n', modifiedText: 'timeout: 30\nretries: 2\n', status: 'changed' });
   return changeSet;
 }
 

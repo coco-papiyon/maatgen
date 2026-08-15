@@ -28,13 +28,13 @@ func TestCheckAndRunCodex(t *testing.T) {
 		t.Fatalf("info = %#v", info)
 	}
 
-	worktree := t.TempDir()
+	repository := t.TempDir()
 	var outputs []agent.Output
 	result, err := adapter.Run(context.Background(), agent.RunRequest{
-		Worktree: worktree,
-		Prompt:   "implement the task",
-		Model:    "test-model",
-		Timeout:  time.Second,
+		Directory: repository,
+		Prompt:    "implement the task",
+		Model:     "test-model",
+		Timeout:   time.Second,
 	}, func(output agent.Output) error {
 		outputs = append(outputs, output)
 		return nil
@@ -44,7 +44,7 @@ func TestCheckAndRunCodex(t *testing.T) {
 	}
 	arguments := emittedArguments(t, outputs)
 	want := []string{
-		"--ask-for-approval", "never", "--sandbox", "workspace-write", "--cd", worktree,
+		"--ask-for-approval", "never", "--sandbox", "workspace-write", "--cd", repository,
 		"--model", "test-model", "exec", "--json", "-",
 	}
 	if strings.Join(arguments, "\x00") != strings.Join(want, "\x00") {
@@ -60,10 +60,10 @@ func TestRunCodexResumeArguments(t *testing.T) {
 	t.Setenv("MAATGEN_CODEX_HELPER", "1")
 	adapter := New(os.Args[0])
 	adapter.prefixArgs = []string{"-test.run=TestCodexHelper", "--"}
-	worktree := t.TempDir()
+	repository := t.TempDir()
 	var outputs []agent.Output
 	_, err := adapter.Run(context.Background(), agent.RunRequest{
-		Worktree: worktree, Prompt: "continue", ThreadID: "thread-123", Timeout: time.Second,
+		Directory: repository, Prompt: "continue", ThreadID: "thread-123", Timeout: time.Second,
 	}, func(output agent.Output) error {
 		outputs = append(outputs, output)
 		return nil

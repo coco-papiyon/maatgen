@@ -85,12 +85,12 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 	if strings.TrimSpace(request.Prompt) == "" {
 		return agent.RunResult{}, errors.New("Codex prompt is required")
 	}
-	worktree, err := filepath.Abs(request.Worktree)
+	directory, err := filepath.Abs(request.Directory)
 	if err != nil {
-		return agent.RunResult{}, fmt.Errorf("resolve Codex worktree: %w", err)
+		return agent.RunResult{}, fmt.Errorf("resolve Codex repository: %w", err)
 	}
-	if file, err := os.Stat(worktree); err != nil || !file.IsDir() {
-		return agent.RunResult{}, errors.New("Codex worktree must be an existing directory")
+	if file, err := os.Stat(directory); err != nil || !file.IsDir() {
+		return agent.RunResult{}, errors.New("Codex repository must be an existing directory")
 	}
 
 	a.mu.RLock()
@@ -106,7 +106,7 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 	args = append(args,
 		"--ask-for-approval", "never",
 		"--sandbox", "workspace-write",
-		"--cd", worktree,
+		"--cd", directory,
 	)
 	if request.Model != "" {
 		args = append(args, "--model", request.Model)
@@ -124,7 +124,7 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 	result, err := a.runner.Run(ctx, process.Spec{
 		Path:    info.Path,
 		Args:    args,
-		Dir:     worktree,
+		Dir:     directory,
 		Stdin:   request.Prompt,
 		Timeout: timeout,
 	}, func(output process.Output) error {

@@ -7,9 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,15 +15,8 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
 
-type Generator struct {
-	gitPath string
-}
-
-type detectedFile struct {
-	status  string
-	oldPath string
-	newPath string
-}
+type Generator struct{ gitPath string }
+type detectedFile struct{ status, oldPath, newPath string }
 
 var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 
@@ -37,28 +28,18 @@ func New() (*Generator, error) {
 	return &Generator{gitPath: gitPath}, nil
 }
 
-func (g *Generator) Generate(ctx context.Context, session protocol.AgentSession) (protocol.ChangeSet, error) {
-	if strings.TrimSpace(session.Worktree) == "" || strings.TrimSpace(session.BaseCommit) == "" {
-		return protocol.ChangeSet{}, errors.New("worktree and base commit are required")
+func (g *Generator) Generate(ctx context.Context, repository string, checkpoint protocol.Checkpoint) (protocol.ChangeSet, error) {
+	if checkpoint.AfterTree == nil {
+		return protocol.ChangeSet{}, errors.New("checkpoint after tree is required")
 	}
-	tracked, err := g.changedFiles(ctx, session.Worktree, session.BaseCommit)
+	files, err := g.changedFiles(ctx, repository, checkpoint.BeforeTree, *checkpoint.AfterTree)
 	if err != nil {
 		return protocol.ChangeSet{}, err
 	}
-	untracked, err := g.untrackedFiles(ctx, session.Worktree)
-	if err != nil {
-		return protocol.ChangeSet{}, err
-	}
-	files := make([]detectedFile, 0, len(tracked)+len(untracked))
-	files = append(files, tracked...)
-	for _, path := range untracked {
-		files = append(files, detectedFile{status: "A", newPath: path})
-	}
-	files = g.detectExactRenames(ctx, session, files)
-
-	result := protocol.ChangeSet{SessionID: session.ID, Files: make([]protocol.FileChange, 0, len(files))}
+	result := protocol.ChangeSet{SessionID: checkpoint.SessionID, RunID: checkpoint.RunID, CheckpointID: checkpoint.ID,
+		BeforeTree: checkpoint.BeforeTree, AfterTree: *checkpoint.AfterTree, Files: make([]protocol.FileChange, 0, len(files))}
 	for _, detected := range files {
-		change, err := g.buildFileChange(ctx, session, detected)
+		change, err := g.buildFileChange(ctx, repository, checkpoint.BeforeTree, *checkpoint.AfterTree, detected)
 		if err != nil {
 			return protocol.ChangeSet{}, err
 		}
@@ -67,8 +48,8 @@ func (g *Generator) Generate(ctx context.Context, session protocol.AgentSession)
 	return result, nil
 }
 
-func (g *Generator) changedFiles(ctx context.Context, worktree, base string) ([]detectedFile, error) {
-	output, err := g.run(ctx, worktree, "diff", "--name-status", "-z", "--find-renames", base, "--")
+func (g *Generator) changedFiles(ctx context.Context, repository, before, after string) ([]detectedFile, error) {
+	output, err := g.run(ctx, repository, "diff", "--name-status", "-z", "--find-renames", before, after, "--")
 	if err != nil {
 		return nil, fmt.Errorf("list changed files: %w", err)
 	}
@@ -102,76 +83,23 @@ func (g *Generator) changedFiles(ctx context.Context, worktree, base string) ([]
 	return result, nil
 }
 
-func (g *Generator) untrackedFiles(ctx context.Context, worktree string) ([]string, error) {
-	output, err := g.run(ctx, worktree, "ls-files", "--others", "--exclude-standard", "-z")
-	if err != nil {
-		return nil, fmt.Errorf("list untracked files: %w", err)
-	}
-	return splitNUL(output), nil
-}
-
-func (g *Generator) detectExactRenames(ctx context.Context, session protocol.AgentSession, files []detectedFile) []detectedFile {
-	deletedByHash := make(map[string][]int)
-	addedByHash := make(map[string][]int)
-	for index, file := range files {
-		var content []byte
-		var err error
-		switch file.status {
-		case "D":
-			content, err = g.readBase(ctx, session.Worktree, session.BaseCommit, file.oldPath)
-		case "A":
-			content, err = readWorktreeFile(session.Worktree, file.newPath)
-		default:
-			continue
-		}
-		if err != nil {
-			continue
-		}
-		hash := sha256.Sum256(content)
-		key := hex.EncodeToString(hash[:])
-		if file.status == "D" {
-			deletedByHash[key] = append(deletedByHash[key], index)
-		} else {
-			addedByHash[key] = append(addedByHash[key], index)
-		}
-	}
-	removed := make(map[int]bool)
-	for hash, deleted := range deletedByHash {
-		added := addedByHash[hash]
-		for pair := 0; pair < len(deleted) && pair < len(added); pair++ {
-			files[deleted[pair]] = detectedFile{
-				status: "R", oldPath: files[deleted[pair]].oldPath, newPath: files[added[pair]].newPath,
-			}
-			removed[added[pair]] = true
-		}
-	}
-	result := make([]detectedFile, 0, len(files)-len(removed))
-	for index, file := range files {
-		if !removed[index] {
-			result = append(result, file)
-		}
-	}
-	return result
-}
-
-func (g *Generator) buildFileChange(ctx context.Context, session protocol.AgentSession, file detectedFile) (protocol.FileChange, error) {
+func (g *Generator) buildFileChange(ctx context.Context, repository, before, after string, file detectedFile) (protocol.FileChange, error) {
 	var originalBytes, modifiedBytes []byte
 	var err error
 	if file.oldPath != "" {
-		originalBytes, err = g.readBase(ctx, session.Worktree, session.BaseCommit, file.oldPath)
+		originalBytes, err = g.readTree(ctx, repository, before, file.oldPath)
 		if err != nil {
-			return protocol.FileChange{}, fmt.Errorf("read base file %q: %w", file.oldPath, err)
+			return protocol.FileChange{}, fmt.Errorf("read before file %q: %w", file.oldPath, err)
 		}
 	}
 	if file.newPath != "" {
-		modifiedBytes, err = readWorktreeFile(session.Worktree, file.newPath)
+		modifiedBytes, err = g.readTree(ctx, repository, after, file.newPath)
 		if err != nil {
-			return protocol.FileChange{}, fmt.Errorf("read changed file %q: %w", file.newPath, err)
+			return protocol.FileChange{}, fmt.Errorf("read after file %q: %w", file.newPath, err)
 		}
 	}
-
 	kind := protocol.FileModify
-	reviewMode := "hunk"
+	restoreMode := "hunk"
 	switch file.status {
 	case "A":
 		kind = protocol.FileAdd
@@ -179,46 +107,42 @@ func (g *Generator) buildFileChange(ctx context.Context, session protocol.AgentS
 		kind = protocol.FileDelete
 	case "R":
 		kind = protocol.FileRename
-		reviewMode = "file"
+		restoreMode = "file"
 	}
 	if bytes.IndexByte(originalBytes, 0) >= 0 || bytes.IndexByte(modifiedBytes, 0) >= 0 {
 		kind = protocol.FileBinary
-		reviewMode = "file"
+		restoreMode = "file"
 	} else if file.status == "M" && bytes.Equal(originalBytes, modifiedBytes) {
 		kind = protocol.FileModeChange
-		reviewMode = "file"
+		restoreMode = "file"
 	}
-
-	change := protocol.FileChange{
-		OldPath: stringPointer(file.oldPath), NewPath: stringPointer(file.newPath), Kind: kind,
-		ReviewMode: reviewMode, Status: protocol.ReviewPending, Hunks: []protocol.ChangeHunk{},
-	}
+	change := protocol.FileChange{OldPath: stringPointer(file.oldPath), NewPath: stringPointer(file.newPath), Kind: kind, RestoreMode: restoreMode, Status: protocol.RestoreChanged, Hunks: []protocol.ChangeHunk{}}
 	if kind != protocol.FileBinary {
 		if file.oldPath != "" {
-			value := string(originalBytes)
-			change.Original = &value
+			v := string(originalBytes)
+			change.Original = &v
 		}
 		if file.newPath != "" {
-			value := string(modifiedBytes)
-			change.Modified = &value
+			v := string(modifiedBytes)
+			change.Modified = &v
 		}
 	}
 	change.ID = stableID("file", file.oldPath, file.newPath, string(kind), string(originalBytes), string(modifiedBytes))
-
-	if reviewMode == "hunk" {
-		patch, err := g.run(ctx, session.Worktree, "diff", "--no-color", "--no-ext-diff", "--unified=3", session.BaseCommit, "--", firstNonEmpty(file.newPath, file.oldPath))
+	if restoreMode == "hunk" {
+		path := firstNonEmpty(file.newPath, file.oldPath)
+		patch, err := g.run(ctx, repository, "diff", "--no-color", "--no-ext-diff", "--unified=3", before, after, "--", path)
 		if err != nil {
-			return protocol.FileChange{}, fmt.Errorf("generate diff for %q: %w", firstNonEmpty(file.newPath, file.oldPath), err)
+			return protocol.FileChange{}, err
 		}
 		change.Hunks, err = parseHunks(patch, file.oldPath, file.newPath)
 		if err != nil {
-			return protocol.FileChange{}, fmt.Errorf("parse diff for %q: %w", firstNonEmpty(file.newPath, file.oldPath), err)
+			return protocol.FileChange{}, err
 		}
 		if file.status == "A" && len(change.Hunks) == 0 && len(modifiedBytes) > 0 {
 			change.Hunks = []protocol.ChangeHunk{wholeFileHunk(file.oldPath, file.newPath, nil, modifiedBytes)}
 		}
 		if len(change.Hunks) == 0 {
-			change.ReviewMode = "file"
+			change.RestoreMode = "file"
 		}
 	}
 	return change, nil
@@ -272,134 +196,89 @@ func parseHunks(patch, oldPath, newPath string) ([]protocol.ChangeHunk, error) {
 			}
 			index++
 		}
-		hunk := protocol.ChangeHunk{
-			OldStart: oldStart, OldLines: oldLines, NewStart: newStart, NewLines: newLines,
-			OriginalText: original.String(), ModifiedText: modified.String(), Status: protocol.ReviewPending,
-		}
-		hunk.ID = stableID("hunk", oldPath, newPath, strconv.Itoa(oldStart), strconv.Itoa(oldLines), strconv.Itoa(newStart), strconv.Itoa(newLines), hunk.OriginalText, hunk.ModifiedText)
-		result = append(result, hunk)
+		h := protocol.ChangeHunk{OldStart: oldStart, OldLines: oldLines, NewStart: newStart, NewLines: newLines, OriginalText: original.String(), ModifiedText: modified.String(), Status: protocol.RestoreChanged}
+		h.ID = stableID("hunk", oldPath, newPath, strconv.Itoa(oldStart), strconv.Itoa(oldLines), strconv.Itoa(newStart), strconv.Itoa(newLines), h.OriginalText, h.ModifiedText)
+		result = append(result, h)
 	}
 	return result, nil
 }
 
 func wholeFileHunk(oldPath, newPath string, original, modified []byte) protocol.ChangeHunk {
-	hunk := protocol.ChangeHunk{
-		OldStart: 0, OldLines: lineCount(original), NewStart: 1, NewLines: lineCount(modified),
-		OriginalText: string(original), ModifiedText: string(modified), Status: protocol.ReviewPending,
-	}
-	hunk.ID = stableID("hunk", oldPath, newPath, "0", strconv.Itoa(hunk.OldLines), "1", strconv.Itoa(hunk.NewLines), hunk.OriginalText, hunk.ModifiedText)
-	return hunk
+	h := protocol.ChangeHunk{OldStart: 0, OldLines: lineCount(original), NewStart: 1, NewLines: lineCount(modified), OriginalText: string(original), ModifiedText: string(modified), Status: protocol.RestoreChanged}
+	h.ID = stableID("hunk", oldPath, newPath, "0", strconv.Itoa(h.OldLines), "1", strconv.Itoa(h.NewLines), h.OriginalText, h.ModifiedText)
+	return h
 }
-
-func (g *Generator) readBase(ctx context.Context, worktree, base, path string) ([]byte, error) {
-	return g.runBytes(ctx, worktree, "show", base+":"+path)
+func (g *Generator) readTree(ctx context.Context, repository, tree, path string) ([]byte, error) {
+	return g.runBytes(ctx, repository, "show", tree+":"+path)
 }
-
-func readWorktreeFile(worktree, path string) ([]byte, error) {
-	root, err := filepath.Abs(worktree)
-	if err != nil {
-		return nil, err
-	}
-	target, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(path)))
-	if err != nil {
-		return nil, err
-	}
-	if target != root && !strings.HasPrefix(target, root+string(filepath.Separator)) {
-		return nil, errors.New("changed path escapes worktree")
-	}
-	info, err := os.Lstat(target)
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		link, err := os.Readlink(target)
-		if err != nil {
-			return nil, err
-		}
-		return []byte(filepath.ToSlash(link)), nil
-	}
-	return os.ReadFile(target)
-}
-
 func (g *Generator) run(ctx context.Context, directory string, args ...string) (string, error) {
-	output, err := g.runBytes(ctx, directory, args...)
-	return string(output), err
+	b, e := g.runBytes(ctx, directory, args...)
+	return string(b), e
 }
-
 func (g *Generator) runBytes(ctx context.Context, directory string, args ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, g.gitPath, append([]string{"-C", directory}, args...)...)
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	if err := command.Run(); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
+	c := exec.CommandContext(ctx, g.gitPath, append([]string{"-C", directory}, args...)...)
+	var out, stderr bytes.Buffer
+	c.Stdout = &out
+	c.Stderr = &stderr
+	if err := c.Run(); err != nil {
+		m := strings.TrimSpace(stderr.String())
+		if m == "" {
+			m = err.Error()
 		}
-		return nil, errors.New(message)
+		return nil, errors.New(m)
 	}
-	return stdout.Bytes(), nil
+	return out.Bytes(), nil
 }
-
-func splitNUL(value string) []string {
-	parts := strings.Split(value, "\x00")
-	if len(parts) > 0 && parts[len(parts)-1] == "" {
-		parts = parts[:len(parts)-1]
+func splitNUL(v string) []string {
+	p := strings.Split(v, "\x00")
+	if len(p) > 0 && p[len(p)-1] == "" {
+		p = p[:len(p)-1]
 	}
-	return parts
+	return p
 }
-
-func parseCount(value string) int {
-	if value == "" {
+func parseCount(v string) int {
+	if v == "" {
 		return 1
 	}
-	count, _ := strconv.Atoi(value)
-	return count
+	n, _ := strconv.Atoi(v)
+	return n
 }
-
-func trimTrailingNewline(builder *strings.Builder) {
-	value := builder.String()
-	value = strings.TrimSuffix(value, "\n")
-	value = strings.TrimSuffix(value, "\r")
-	builder.Reset()
-	builder.WriteString(value)
+func trimTrailingNewline(b *strings.Builder) {
+	v := strings.TrimSuffix(strings.TrimSuffix(b.String(), "\n"), "\r")
+	b.Reset()
+	b.WriteString(v)
 }
-
 func stableID(prefix string, values ...string) string {
-	hash := sha256.New()
-	for _, value := range values {
-		_, _ = hash.Write([]byte(strconv.Itoa(len(value))))
-		_, _ = hash.Write([]byte{':'})
-		_, _ = hash.Write([]byte(value))
+	h := sha256.New()
+	for _, v := range values {
+		_, _ = h.Write([]byte(strconv.Itoa(len(v))))
+		_, _ = h.Write([]byte{':'})
+		_, _ = h.Write([]byte(v))
 	}
-	return prefix + "_" + hex.EncodeToString(hash.Sum(nil))
+	return prefix + "_" + hex.EncodeToString(h.Sum(nil))
 }
-
-func stringPointer(value string) *string {
-	if value == "" {
+func stringPointer(v string) *string {
+	if v == "" {
 		return nil
 	}
-	return &value
+	return &v
 }
-
 func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
+	for _, v := range values {
+		if v != "" {
+			return v
 		}
 	}
 	return ""
 }
-
-func lineCount(value []byte) int {
-	if len(value) == 0 {
+func lineCount(v []byte) int {
+	if len(v) == 0 {
 		return 0
 	}
-	return bytes.Count(value, []byte{'\n'}) + 1 - boolInt(value[len(value)-1] == '\n')
+	return bytes.Count(v, []byte{'\n'}) + 1 - boolInt(v[len(v)-1] == '\n')
 }
-
-func boolInt(value bool) int {
-	if value {
+func boolInt(v bool) int {
+	if v {
 		return 1
 	}
 	return 0

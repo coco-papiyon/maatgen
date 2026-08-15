@@ -17,10 +17,10 @@ import (
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/changeset"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/eventbroker"
-	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitworktree"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
-	reviewservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/review"
+	restoreservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/restore"
 	runservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/run"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/runtimeinfo"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/server"
@@ -94,17 +94,20 @@ func run() error {
 		return fmt.Errorf("open storage: %w", err)
 	}
 	defer store.Close()
-	worktreeManager, err := gitworktree.New()
+	checkpointManager, err := checkpoint.New()
 	if err != nil {
 		return err
 	}
-	sessions := sessionservice.New(store, worktreeManager, filepath.Join(*dataDir, "worktrees"))
+	sessions := sessionservice.New(store, checkpointManager)
 	changeDetector, err := changeset.New()
 	if err != nil {
 		return err
 	}
-	runs := runservice.New(store, codex.New("codex"), runservice.WithChangeDetector(changeDetector))
-	reviews := reviewservice.New(store, reviewservice.WithSessionCloser(sessions))
+	runs := runservice.New(store, codex.New("codex"), runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector))
+	restores, err := restoreservice.New(store, checkpointManager)
+	if err != nil {
+		return err
+	}
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -131,18 +134,18 @@ func run() error {
 
 	httpServer := &http.Server{
 		Handler: server.New(server.Config{
-			Version:          version,
-			SchemaVersion:    protocol.SchemaVersion,
-			DefaultWorkspace: defaultWorkspace,
-			AuthToken:        *authToken,
-			AllowedOrigins:   splitNonEmpty(*allowedOrigins),
-			EventSubscriber:  broker,
-			SessionCreator:   sessions,
-			SessionCloser:    sessions,
-			RunController:    runs,
-			ChangeReader:     store,
-			ReviewController: reviews,
-			Providers:        toolConfig.Providers,
+			Version:           version,
+			SchemaVersion:     protocol.SchemaVersion,
+			DefaultWorkspace:  defaultWorkspace,
+			AuthToken:         *authToken,
+			AllowedOrigins:    splitNonEmpty(*allowedOrigins),
+			EventSubscriber:   broker,
+			SessionCreator:    sessions,
+			SessionCloser:     sessions,
+			RunController:     runs,
+			ChangeReader:      store,
+			RestoreController: restores,
+			Providers:         toolConfig.Providers,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

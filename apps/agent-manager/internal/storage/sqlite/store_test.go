@@ -21,13 +21,11 @@ func TestSessionAndRunLifecycle(t *testing.T) {
 
 	createdAt := time.Date(2026, 8, 15, 1, 2, 3, 4, time.UTC)
 	session := protocol.AgentSession{
-		ID:         "session-1",
-		Agent:      protocol.AgentCodex,
-		Workspace:  "C:/workspace/project",
-		Worktree:   "C:/data/maatgen/worktrees/session-1",
-		BaseCommit: "0123456789abcdef",
-		Status:     protocol.SessionActive,
-		CreatedAt:  createdAt,
+		ID:        "session-1",
+		Agent:     protocol.AgentCodex,
+		Workspace: "C:/workspace/project",
+		Status:    protocol.SessionActive,
+		CreatedAt: createdAt,
 	}
 	if err := store.CreateSession(ctx, session); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -117,6 +115,25 @@ func TestNotFoundAndForeignKey(t *testing.T) {
 	}
 }
 
+func TestCloseSessionRejectsActiveRun(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session := protocol.AgentSession{ID: "session-active", Agent: protocol.AgentCodex, Workspace: "C:/workspace", Status: protocol.SessionActive, CreatedAt: time.Now().UTC()}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateRun(ctx, protocol.AgentRun{ID: "run-active", SessionID: session.ID, Status: protocol.RunRunning, Prompt: "work"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CloseSession(ctx, session.ID, time.Now().UTC()); !errors.Is(err, storage.ErrRunActive) {
+		t.Fatalf("close error = %v", err)
+	}
+}
+
 func TestListSessionsWithKeysetCursor(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
@@ -129,8 +146,8 @@ func TestListSessionsWithKeysetCursor(t *testing.T) {
 	for index := 1; index <= 3; index++ {
 		session := protocol.AgentSession{
 			ID: "session-" + string(rune('0'+index)), Agent: protocol.AgentCodex,
-			Workspace: "C:/workspace", Worktree: "C:/worktree", BaseCommit: "abcdef",
-			Status: protocol.SessionActive, CreatedAt: base.Add(time.Duration(index) * time.Minute),
+			Workspace: "C:/workspace",
+			Status:    protocol.SessionActive, CreatedAt: base.Add(time.Duration(index) * time.Minute),
 		}
 		if err := store.CreateSession(ctx, session); err != nil {
 			t.Fatalf("create session %d: %v", index, err)

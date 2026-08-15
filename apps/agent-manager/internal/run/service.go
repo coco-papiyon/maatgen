@@ -13,6 +13,7 @@ import (
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/security"
@@ -36,11 +37,17 @@ type Store interface {
 	AppendEvent(ctx context.Context, event protocol.SessionEvent) (protocol.SessionEvent, error)
 	UpsertRunUsage(ctx context.Context, runID string, usage protocol.TokenUsage, rawJSON json.RawMessage) error
 	AppendRedactedRawEvent(ctx context.Context, event storage.RedactedRawEvent) (storage.RedactedRawEvent, error)
+	CreateCheckpoint(ctx context.Context, checkpoint protocol.Checkpoint) error
+	CompleteCheckpoint(ctx context.Context, id, afterTree, afterRef string, completedAt time.Time) error
 	ReplaceChangeSet(ctx context.Context, changeSet protocol.ChangeSet) error
 }
 
 type ChangeDetector interface {
-	Generate(ctx context.Context, session protocol.AgentSession) (protocol.ChangeSet, error)
+	Generate(ctx context.Context, repository string, checkpoint protocol.Checkpoint) (protocol.ChangeSet, error)
+}
+
+type CheckpointManager interface {
+	Capture(ctx context.Context, repository, sessionID, runID, phase string) (checkpoint.Snapshot, error)
 }
 
 type activeRun struct {
@@ -61,6 +68,7 @@ type Service struct {
 	now             func() time.Time
 	newID           func(string) (string, error)
 	changeDetector  ChangeDetector
+	checkpoints     CheckpointManager
 }
 
 type Option func(*Service)
@@ -69,6 +77,10 @@ func WithChangeDetector(detector ChangeDetector) Option {
 	return func(service *Service) {
 		service.changeDetector = detector
 	}
+}
+
+func WithCheckpointManager(manager CheckpointManager) Option {
+	return func(service *Service) { service.checkpoints = manager }
 }
 
 func New(store Store, adapter agent.Adapter, options ...Option) *Service {
@@ -184,6 +196,28 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	defer s.wg.Done()
 	defer s.release(run.ID, session.ID)
 
+	checkpointID := "checkpoint_" + run.ID
+	if s.checkpoints == nil {
+		s.finishPersistenceFailure(run, errors.New("checkpoint manager is not configured"))
+		return
+	}
+	before, err := s.checkpoints.Capture(context.WithoutCancel(ctx), session.Workspace, session.ID, run.ID, "before")
+	if err != nil {
+		s.finishPersistenceFailure(run, err)
+		return
+	}
+	checkpointRecord := protocol.Checkpoint{
+		ID: checkpointID, SessionID: session.ID, RunID: run.ID, HeadCommit: before.HeadCommit,
+		IndexTree: before.IndexTree, BeforeTree: before.Tree, BeforeRef: before.Ref, CreatedAt: s.now().UTC(),
+	}
+	if err := s.store.CreateCheckpoint(context.WithoutCancel(ctx), checkpointRecord); err != nil {
+		s.finishPersistenceFailure(run, err)
+		return
+	}
+	_, _ = s.appendEvent(context.WithoutCancel(ctx), session.ID, run.ID, protocol.EventSourceManager, protocol.EventTypeCheckpointCreated, map[string]any{
+		"checkpointId": checkpointID, "beforeTree": before.Tree,
+	})
+
 	startedAt := s.now().UTC()
 	run.Status = protocol.RunRunning
 	run.StartedAt = &startedAt
@@ -206,7 +240,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		timeout = time.Duration(*request.TimeoutSeconds) * time.Second
 	}
 	result, runErr := s.adapter.Run(ctx, agent.RunRequest{
-		Worktree: session.Worktree, Prompt: run.Prompt, ThreadID: stringValue(session.CodexThreadID),
+		Directory: session.Workspace, Prompt: run.Prompt, ThreadID: stringValue(session.CodexThreadID),
 		Model: model, Timeout: timeout,
 	}, func(output agent.Output) error {
 		if output.Stream == agent.OutputStderr {
@@ -306,17 +340,24 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 
 	persistCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if run.Status == protocol.RunCompleted && s.changeDetector != nil {
-		changeSet, err := s.changeDetector.Generate(persistCtx, session)
+	after, snapshotErr := s.checkpoints.Capture(persistCtx, session.Workspace, session.ID, run.ID, "after")
+	if snapshotErr == nil {
+		snapshotErr = s.store.CompleteCheckpoint(persistCtx, checkpointID, after.Tree, after.Ref, s.now().UTC())
+		checkpointRecord.AfterTree = &after.Tree
+		checkpointRecord.AfterRef = &after.Ref
+	}
+	if snapshotErr == nil && s.changeDetector != nil {
+		changeSet, err := s.changeDetector.Generate(persistCtx, session.Workspace, checkpointRecord)
 		if err == nil {
 			err = s.store.ReplaceChangeSet(persistCtx, changeSet)
 		}
-		if err != nil {
-			run.Status = protocol.RunFailed
-			terminalType = protocol.EventTypeRunFailed
-			terminalSource = protocol.EventSourceManager
-			terminalData = mustJSON(map[string]any{"message": "generate ChangeSet after Codex run", "code": "changeset_generation_failed"})
-		}
+		snapshotErr = err
+	}
+	if snapshotErr != nil {
+		run.Status = protocol.RunFailed
+		terminalType = protocol.EventTypeRunFailed
+		terminalSource = protocol.EventSourceManager
+		terminalData = mustJSON(map[string]any{"message": "capture changes after Codex run", "code": "checkpoint_capture_failed"})
 	}
 	_ = s.store.UpdateRun(persistCtx, run)
 	_, _ = s.appendRawEvent(persistCtx, session.ID, run.ID, terminalSource, terminalType, terminalData)

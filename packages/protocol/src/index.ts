@@ -6,7 +6,7 @@ import type {
   ChangeSet as GeneratedChangeSet,
   FileChange as GeneratedFileChange,
   HunkStatus as GeneratedHunkStatus,
-  ReviewStatus as GeneratedReviewStatus,
+  RestoreStatus as GeneratedRestoreStatus,
 } from './generated/change-set.js';
 import type { CreateSessionRequest as GeneratedCreateSessionRequest } from './generated/create-session-request.js';
 import type { EventListResponse as GeneratedEventListResponse } from './generated/event-list.js';
@@ -22,7 +22,6 @@ export const SCHEMA_VERSION = 1 as const;
 export type AgentSession = GeneratedAgentSession;
 export type AgentName = AgentSession['agent'];
 export type SessionStatus = AgentSession['status'];
-export type CleanupStatus = NonNullable<AgentSession['cleanupStatus']>;
 
 export type AgentRun = GeneratedAgentRun;
 export type RunStatus = AgentRun['status'];
@@ -37,7 +36,7 @@ export type ChangeSet = GeneratedChangeSet;
 export type FileChange = GeneratedFileChange;
 export type ChangeHunk = GeneratedChangeHunk;
 export type FileChangeKind = FileChange['kind'];
-export type ReviewStatus = GeneratedReviewStatus;
+export type RestoreStatus = GeneratedRestoreStatus;
 export type HunkStatus = GeneratedHunkStatus;
 
 export type CreateSessionRequest = GeneratedCreateSessionRequest;

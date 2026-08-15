@@ -121,7 +121,7 @@ describe('App with MockAgentApi', () => {
     expect(cancel).toHaveBeenCalledWith('run-restored');
   });
 
-  it('opens a multi-hunk diff and applies a hunk review', async () => {
+  it('opens a multi-hunk diff and restores one hunk', async () => {
     const mounted = await mountApp();
     const session = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('multi-hunk'));
     expect(session).toBeDefined();
@@ -130,11 +130,11 @@ describe('App with MockAgentApi', () => {
 
     await mounted.wrapper.find('.change-card').trigger('click');
     expect(mounted.wrapper.findAll('.diff-hunk')).toHaveLength(2);
-    expect(mounted.wrapper.findAll('.review-badge').map((badge) => badge.text())).toEqual(['pending', 'pending']);
+    expect(mounted.wrapper.findAll('.restore-badge').map((badge) => badge.text())).toEqual(['changed', 'changed']);
 
-    await mounted.wrapper.find('.accept-button').trigger('click');
+    await mounted.wrapper.find('.restore-button').trigger('click');
     await flushPromises();
-    expect(mounted.wrapper.findAll('.review-badge').map((badge) => badge.text())).toEqual(['accepted', 'pending']);
+    expect(mounted.wrapper.findAll('.restore-badge').map((badge) => badge.text())).toEqual(['restored', 'changed']);
   });
 
   it('provides failure and cancellation scenarios', async () => {

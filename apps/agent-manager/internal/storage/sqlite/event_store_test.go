@@ -163,13 +163,11 @@ func (p *recordingEventPublisher) Publish(sessionID string) {
 func createSessionAndRun(t *testing.T, ctx context.Context, store *Store, createdAt time.Time) {
 	t.Helper()
 	if err := store.CreateSession(ctx, protocol.AgentSession{
-		ID:         "session-1",
-		Agent:      protocol.AgentCodex,
-		Workspace:  "C:/workspace/project",
-		Worktree:   "C:/data/maatgen/worktrees/session-1",
-		BaseCommit: "0123456789abcdef",
-		Status:     protocol.SessionActive,
-		CreatedAt:  createdAt,
+		ID:        "session-1",
+		Agent:     protocol.AgentCodex,
+		Workspace: "C:/workspace/project",
+		Status:    protocol.SessionActive,
+		CreatedAt: createdAt,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}

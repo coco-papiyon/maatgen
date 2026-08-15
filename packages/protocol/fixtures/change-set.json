@@ -1,5 +1,9 @@
 {
   "sessionId": "session-1",
+  "runId": "run-1",
+  "checkpointId": "checkpoint-1",
+  "beforeTree": "1111111111111111111111111111111111111111",
+  "afterTree": "2222222222222222222222222222222222222222",
   "files": [
     {
       "id": "file-1",
@@ -8,8 +12,8 @@
       "kind": "modify",
       "original": "return 1;\n",
       "modified": "return 2;\n",
-      "reviewMode": "hunk",
-      "status": "pending",
+      "restoreMode": "hunk",
+      "status": "changed",
       "hunks": [
         {
           "id": "hunk-1",
@@ -19,7 +23,7 @@
           "newLines": 1,
           "originalText": "return 1;\n",
           "modifiedText": "return 2;\n",
-          "status": "pending"
+          "status": "changed"
         }
       ]
     }

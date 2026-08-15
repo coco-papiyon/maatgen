@@ -6,17 +6,21 @@
 
 /**
  * This interface was referenced by `ChangeSet`'s JSON-Schema
- * via the `definition` "reviewStatus".
+ * via the `definition` "restoreStatus".
  */
-export type ReviewStatus = 'pending' | 'partially_accepted' | 'accepted' | 'rejected';
+export type RestoreStatus = 'changed' | 'partially_restored' | 'restored' | 'conflict';
 /**
  * This interface was referenced by `ChangeSet`'s JSON-Schema
  * via the `definition` "hunkStatus".
  */
-export type HunkStatus = 'pending' | 'accepted' | 'rejected';
+export type HunkStatus = 'changed' | 'restored' | 'conflict';
 
 export interface ChangeSet {
   sessionId: string;
+  runId: string;
+  checkpointId: string;
+  beforeTree: string;
+  afterTree: string;
   files: FileChange[];
 }
 /**
@@ -30,8 +34,8 @@ export interface FileChange {
   kind: 'modify' | 'add' | 'delete' | 'rename' | 'binary' | 'mode_change';
   original?: string;
   modified?: string;
-  reviewMode: 'hunk' | 'file';
-  status: ReviewStatus;
+  restoreMode: 'hunk' | 'file';
+  status: RestoreStatus;
   hunks: ChangeHunk[];
 }
 /**

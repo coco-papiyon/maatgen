@@ -8,14 +8,8 @@ export interface AgentSession {
   id: string;
   agent: 'codex';
   workspace: string;
-  worktree: string;
-  baseCommit: string;
   codexThreadId?: string;
   status: 'active' | 'closed';
   createdAt: string;
   closedAt?: string;
-  cleanupStatus?: 'not_started' | 'pending' | 'completed' | 'failed';
-  cleanupError?: string;
-  cleanupAttempts?: number;
-  cleanupUpdatedAt?: string;
 }

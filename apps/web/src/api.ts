@@ -22,10 +22,9 @@ export interface AgentApi {
   getEvents(id: string, afterSequence?: number): Promise<SessionEvent[]>;
   issueWebSocketTicket(): Promise<WsTicketResponse>;
   getChanges(id: string): Promise<ChangeSet>;
-  acceptChange(sessionId: string, changeId: string): Promise<ChangeSet>;
-  rejectChange(sessionId: string, changeId: string): Promise<ChangeSet>;
-  acceptAllChanges(sessionId: string): Promise<ChangeSet>;
-  rejectAllChanges(sessionId: string): Promise<ChangeSet>;
+  restoreHunk(sessionId: string, checkpointId: string, hunkId: string): Promise<ChangeSet>;
+  restoreFile(sessionId: string, checkpointId: string, fileId: string): Promise<ChangeSet>;
+  restoreAllChanges(sessionId: string, checkpointId: string): Promise<ChangeSet>;
 }
 
 interface ApiErrorEnvelope {
@@ -108,16 +107,13 @@ export const httpAgentApi: AgentApi = {
   getChanges(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/changes`);
   },
-  acceptChange(sessionId, changeId) {
-    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/changes/${encodeURIComponent(changeId)}/accept`, { method: 'POST' });
+  restoreHunk(sessionId, checkpointId, hunkId) {
+    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/hunks/${encodeURIComponent(hunkId)}/restore`, { method: 'POST' });
   },
-  rejectChange(sessionId, changeId) {
-    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/changes/${encodeURIComponent(changeId)}/reject`, { method: 'POST' });
+  restoreFile(sessionId, checkpointId, fileId) {
+    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/files/${encodeURIComponent(fileId)}/restore`, { method: 'POST' });
   },
-  acceptAllChanges(sessionId) {
-    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/changes/accept-all`, { method: 'POST' });
-  },
-  rejectAllChanges(sessionId) {
-    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/changes/reject-all`, { method: 'POST' });
+  restoreAllChanges(sessionId, checkpointId) {
+    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: 'POST' });
   },
 };

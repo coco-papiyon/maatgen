@@ -4,7 +4,9 @@
 
 本計画は、[coding-agent-design.md](./coding-agent-design.md) を実装可能な単位へ分解したものである。
 
-初期リリースでは Codex CLI のみを対象とする。Claude Code と GitHub Copilot CLI は、Codex対応版で共通Protocol、Session管理、Diff Review、Extension連携が安定した後に追加する。
+> 2026-08-15設計変更: Agent専用worktreeとAccept／Reject方式を廃止し、対象Working Treeの直接編集、Run単位checkpoint、必要箇所のRestore方式へ置換する。既存のWorktree／Review実装は後方互換性を維持せず置換対象とする。
+
+初期リリースでは Codex CLI のみを対象とする。Claude Code と GitHub Copilot CLI は、Codex対応版で共通Protocol、Session管理、Checkpoint／Diff／Restore、Extension連携が安定した後に追加する。
 
 初期のCodex連携には、安定扱いの `codex exec --json` を使用する。Codex App Serverはexperimentalであるため、初期実装では採用しない。
 
@@ -13,22 +15,23 @@
 以下の一連のフローがブラウザから実行できることをMVPの完成条件とする。
 
 1. Agent Managerをlocalhostで起動する
-2. cleanなGitリポジトリからSessionを作成する
-3. Agent専用worktree上でCodexを実行する
-4. CodexのJSONL出力をリアルタイム表示する
-5. Prompt、Assistant message、Command、File change、Usage、Raw Eventを保存する
-6. Agent worktreeの実Git差分からChangeSetを作成する
-7. Diffを表示し、Hunk単位でAccept／Rejectする
-8. Acceptした変更だけをメインWorking Treeへ反映する
-9. Session履歴を再起動後も表示できる
-10. WebSocket切断後にEventを再取得して表示を復元する
+2. GitリポジトリからSessionを作成する。既存の未コミット変更は許可する
+3. Run開始直前のWorking Treeをcheckpointとして保存する
+4. 対象リポジトリをcwdとしてCodexを実行し、Working Treeを直接変更する
+5. CodexのJSONL出力をリアルタイム表示する
+6. Prompt、Assistant message、Command、File change、Usage、Raw Eventを保存する
+7. Run前後の実Git差分からChangeSetを作成して表示する
+8. 承認操作なしで変更を利用でき、不要なFile／HunkだけをRun前checkpointへ戻せる
+9. 利用者が直接編集した現在のコードから、同じSessionで次のCodex指示を継続できる
+10. Session履歴を再起動後も表示できる
+11. WebSocket切断後にEventを再取得して表示を復元する
 
 ## 3. 先に固定する設計判断
 
 ### 3.1 Codexの実行方式
 
 ```text
-codex exec --json --sandbox workspace-write --cd <worktree> -
+codex exec --json --sandbox workspace-write --cd <repository> -
 ```
 
 Promptはstdinから渡す。stdoutはJSONL、stderrは診断ログとして扱う。
@@ -36,7 +39,7 @@ Promptはstdinから渡す。stdoutはJSONL、stderrは診断ログとして扱�
 追加メッセージは次の形でCodex Threadを再開する。
 
 ```text
-codex exec resume <codexThreadId> --json --cd <worktree> -
+codex exec resume <codexThreadId> --json --cd <repository> -
 ```
 
 App Server、TUIのPTY制御、Codex内部データベースの直接参照は初期対象外とする。
@@ -57,8 +60,6 @@ interface AgentSession {
   id: string;
   agent: 'codex';
   workspace: string;
-  worktree: string;
-  baseCommit: string;
   codexThreadId?: string;
   status: 'active' | 'closed';
   createdAt: string;
@@ -129,7 +130,8 @@ interface SessionEvent {
     | 'file_change_reported'
     | 'usage_reported'
     | 'change_detected'
-    | 'change_reviewed'
+    | 'checkpoint_created'
+    | 'change_restored'
     | 'run_started'
     | 'run_completed'
     | 'run_failed'
@@ -143,28 +145,37 @@ Codexの`thread.started`から得られるThread IDは、ManagerのSession IDと
 
 `reasoning`はCodexが出力した要約だけを保存し、内部推論を再構成・推測しない。
 
-### 3.5 Worktree
+### 3.5 Direct Working TreeとCheckpoint
 
-初期版では、メインWorking TreeがcleanであることをSession開始条件とする。
+AgentのcwdはSessionに指定されたリポジトリとし、専用worktreeは作成しない。Session開始時にcleanであることも要求しない。
 
 ```text
 ユーザーのリポジトリ
-└─ メインWorking Tree
-
-ユーザーデータディレクトリ
-└─ maatgen/worktrees/<sessionId>
-   └─ Agent Worktree
+└─ Working Tree
+   ├─ 利用者／Editor
+   └─ Agent
 ```
 
-Agent worktreeはリポジトリ外に `git worktree add --detach` で作成する。Session作成時のHEADを`baseCommit`として固定する。
+各Runの開始直前にbefore checkpoint、終了直後にafter snapshotを作成する。checkpointは一時indexからGit treeを生成し、`refs/maatgen/checkpoints/<sessionId>/<runId>/{before,after}`からtreeを直接参照して保持する。ユーザーのindex、Working Tree、branch、HEADはcheckpoint作成によって変更しない。
 
-dirty treeのスナップショット、submodule、非GitディレクトリはMVP後に対応する。
+before checkpointの作成に失敗した場合はAgentを起動しない。after snapshotはRunのcompleted／failed／cancelled／timeoutを問わず作成し、途中までの変更もDiffとRestoreの対象にする。after snapshotを保存できない間は次のRunを開始せず、診断と再取得操作を表示する。
+
+tracked fileとuntrackedかつnon-ignored fileを対象とする。ignored file、submodule、非Gitディレクトリは初期対象外とする。既存の未コミット変更はbefore checkpointへ含める。
 
 ### 3.6 ChangeSet
 
 Hunkだけでなく、新規、削除、rename、binary、file mode変更を表現できるようにする。
 
 ```ts
+interface ChangeSet {
+  sessionId: string;
+  runId: string;
+  checkpointId: string;
+  beforeTree: string;
+  afterTree: string;
+  files: FileChange[];
+}
+
 interface FileChange {
   id: string;
   oldPath?: string;
@@ -172,26 +183,36 @@ interface FileChange {
   kind: 'modify' | 'add' | 'delete' | 'rename' | 'binary' | 'mode_change';
   original?: string;
   modified?: string;
-  reviewMode: 'hunk' | 'file';
-  status: 'pending' | 'partially_accepted' | 'accepted' | 'rejected';
+  restoreMode: 'hunk' | 'file';
+  status: 'changed' | 'partially_restored' | 'restored' | 'conflict';
   hunks: ChangeHunk[];
 }
 ```
 
-通常のテキスト変更はHunk単位、binaryやrenameなどはFile単位でReviewする。
+通常のテキスト変更はHunk単位、binaryやrenameなどはFile単位でcheckpointへ戻す。
 
-### 3.7 Accept／Reject
+### 3.7 Restore
 
-MVPではReview操作を不可逆とする。
+承認操作は設けない。Agentの変更はRun完了時点ですでに対象Working Treeへ反映済みであり、利用者が不要な変更だけを戻す。
 
 ```text
-pending → accepted
-pending → rejected
+changed → restored
+changed → conflict
 ```
 
-Accept時は、base内容と既にAccept済みのHunkから期待ファイル内容を再生成し、メインWorking Treeのhashが期待値と一致する場合だけatomicに反映する。一致しない場合は上書きせず`409 Conflict`を返す。
+Restore時はafter snapshotからbefore checkpointへの逆差分を生成する。対象File／Hunkの現在内容がafter snapshotと一致する場合だけatomicに反映する。
 
-RejectはメインWorking Treeを変更せず、状態とReview Eventだけを保存する。
+Run後に利用者または後続Runが同じ箇所を編集している場合は上書きせず`409 checkpoint_conflict`を返す。競合しないHunkは個別にRestoreできる。RestoreはWorking Treeだけを変更し、indexは暗黙に更新しない。
+
+### 3.8 同一Sessionでの継続修正
+
+Run完了後もSessionをactiveのまま保持する。利用者はAgentの変更を直接編集でき、その現在状態から同じSessionへ次のPromptを送信する。次のRunは新しいbefore checkpointを作成し、`codexThreadId`を使ってresumeする。
+
+同一Sessionで実行中のRunは1つまでとし、実行中の追加Promptは`409 Conflict`とする。実行中の利用者編集は妨げないが、Agentと同じ箇所を同時編集した場合は差分の帰属を保証しない。
+
+### 3.9 後方互換性
+
+今回の設計変更では後方互換性を考慮しない。旧Worktree、Accept／Reject、旧ChangeSet API、旧SQLiteデータを維持するためのlegacy mode、互換endpoint、dual schema、migration shimは実装しない。既存のローカル開発データは必要に応じて再作成し、新設計を正規実装とする。
 
 ## 4. リポジトリ構成
 
@@ -250,13 +271,13 @@ packages/
 - Chat、Timeline、Usage、History、Diff画面
 - Streaming、Cancel、Error、再接続表示
 - Monaco Diff Editor
-- Hunk／File単位のAccept／Reject
+- Hunk／File単位のRestore
 - 正常、失敗、Cancel、複数HunkのMock scenario
 
 完了条件:
 
 - `pnpm dev:mock`で主要フローを確認できる
-- Component testでEvent描画とReview操作を検証できる
+- Component testでEvent描画とRestore操作を検証できる
 
 ### Phase 2：Agent Manager基盤
 
@@ -295,39 +316,40 @@ packages/
 - fake Codex CLIで正常、遅延、invalid JSON、異常終了、cancelを再現できる
 - 実Codex CLIでPrompt、Streaming、完了、Usageを確認できる
 
-### Phase 4：Git WorktreeとChangeSet
+### Phase 4：Direct Working Tree、Checkpoint、ChangeSet
 
-- clean tree検証
-- base commit取得
-- Session専用detached worktree作成
-- Agentのcwdをworktreeに固定
+- Git repository検証（dirty Working Treeを許可）
+- Agentのcwdを対象リポジトリに固定
+- Run開始直前のHEAD／index／Working Tree checkpoint作成
+- Run終了直後のafter snapshot作成
+- Git private refによるcheckpoint保持
 - 実行前後のGit状態取得
 - text／binary／rename／delete／mode changeの差分検出
 - unified diffからHunk生成
 - 内容hashベースのHunk ID生成
-- Session終了時のcleanupとcleanup retry
+- checkpoint保持期限とcleanup
 
 完了条件:
 
-- Agent実行中にメインWorking Treeが変更されない
+- Agentの変更が対象Working Treeへ直接現れる
+- 既存の未コミット変更を保持したままRunを開始できる
 - Agentが申告しない変更もGit差分として検出できる
 - 複数ファイルと複数Hunkを再現できる
 
-### Phase 5：Review適用
+### Phase 5：Checkpoint Restore
 
-- Hunk patch生成
-- File単位変更の適用
-- base hash／期待hash検証
-- Accept／Reject API
-- Accept All／Reject All
-- `409 Conflict`処理
-- Review Event保存
+- after→before逆Hunk patch生成
+- File／Hunk／Run全体のRestore
+- after hash／現在hash検証
+- Restore API
+- `409 checkpoint_conflict`処理
+- Restore Event保存
 - 冪等な再送処理
 
 完了条件:
 
-- 一部HunkだけをメインWorking Treeへ反映できる
-- 外部変更を上書きしない
+- 一部HunkだけをRun前の状態へ戻せる
+- Run後の利用者変更や後続Run変更を上書きしない
 - API再送で二重適用されない
 
 ### Phase 6：Web版Codex MVP統合
@@ -346,10 +368,10 @@ packages/
 Browser
   → Agent Manager
   → Codex CLI
-  → Agent Worktree
+  → Repository Working Tree
+  → Checkpoint
   → ChangeSet
-  → Review
-  → Main Working Tree
+  → Optional Restore
 ```
 
 ### Phase 7：VS Code Extension
@@ -360,9 +382,8 @@ Browser
 - Agent Manager起動とhealth check
 - Workspace情報連携
 - `vscode.diff`
-- WorkspaceEdit
 - CodeLens／Decoration
-- Extension終了時のManager cleanup
+- Extension終了時のManager cleanup（checkpointは保持期限に従う）
 
 ExtensionにはCodex固有の実行ロジックを持たせない。
 
@@ -391,8 +412,10 @@ POST   /api/sessions/{id}/close
 POST   /api/runs/{id}/cancel
 GET    /api/sessions/{id}/events?afterSequence={n}
 GET    /api/sessions/{id}/changes
-POST   /api/sessions/{id}/changes/{hunkId}/accept
-POST   /api/sessions/{id}/changes/{hunkId}/reject
+GET    /api/sessions/{id}/checkpoints
+POST   /api/sessions/{id}/checkpoints/{checkpointId}/restore
+POST   /api/sessions/{id}/checkpoints/{checkpointId}/files/{fileId}/restore
+POST   /api/sessions/{id}/checkpoints/{checkpointId}/hunks/{hunkId}/restore
 POST   /api/ws-tickets
 ```
 
@@ -412,9 +435,7 @@ HTTP取得とWebSocket配信では同じ`SessionEvent` JSONを使用する。
 id
 agent
 workspace
-worktree
 codex_thread_id
-base_commit
 status
 created_at
 closed_at
@@ -475,10 +496,12 @@ created_at
 ```text
 id
 session_id
+run_id
+checkpoint_id
 file_path
 old_path
 change_kind
-review_mode
+restore_mode
 old_start
 old_lines
 new_start
@@ -486,10 +509,27 @@ new_lines
 original_text
 modified_text
 status
-base_hash
-expected_hash
-reviewed_at
+before_hash
+after_hash
+restored_at
 created_at
+```
+
+### checkpoints
+
+```text
+id
+session_id
+run_id
+head_commit
+index_tree
+before_tree
+after_tree
+before_ref
+after_ref
+status
+created_at
+completed_at
 ```
 
 ## 8. テスト方針
@@ -503,7 +543,8 @@ created_at
 - Secret masking
 - unified diff parser
 - Hunk ID生成
-- Accept patch再生成
+- checkpoint tree生成
+- Restore逆patch再生成
 
 ### Integration test
 
@@ -513,13 +554,14 @@ created_at
 - Event sequenceと再取得
 - fake Codex process
 - process cancel／timeout
-- Git worktree
-- Accept時の競合検出
+- dirty Working Treeを含むcheckpoint作成
+- Restore時の競合検出
+- 同一Sessionでの複数Runとcheckpoint連鎖
 
 ### E2E test
 
 - Mock UIフロー
-- Browser → Manager → fake Codex → diff → review
+- Browser → Manager → fake Codex → direct edit → diff → restore
 - Manager再起動後の履歴復元
 - WebSocket切断・再接続
 
@@ -534,7 +576,9 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 - API keyをManagerが常時保持・ログ出力しない
 - Raw Eventはマスク済みJSONのみ保存する
 - コマンド出力、Prompt、ソースコードの保存期間を設定可能にする
-- Agent worktreeのパスをユーザー入力で任意指定させない
+- Sessionのrepository pathを正規化し、Session作成時にGit repositoryであることを検証する
+- checkpoint作成でignored fileを保存しない
+- Restore時に現在内容を検証し、後続編集を上書きしない
 - Process起動時の引数は配列で渡し、shell経由で実行しない
 - Sessionごとに同時Runを1つに制限する
 
@@ -542,9 +586,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 
 以下はCodex MVP後に対応する。
 
-- dirty Working Treeのsnapshot
 - submodule
-- Hunk ReviewのUndo
 - queueing／steering
 - binary差分の専用UI
 - Agent比較、Cost集計、成功率
@@ -579,8 +621,8 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-10 | Portの割当 | 3100を優先し、使用中またはport=0指定時はOSの空きportを使用 | 3100とし、引数で指定可能とする | Phase 0開始前 | 検討済み |
 | D-11 | Port／tokenの通知方法 | 親プロセス指定のruntime metadata fileへJSONを書き、stdoutにも機械可読な1行を出力 | runtime metadata JSONにaddress／token／PID／versionを保存し、ログにはfile pathだけを出力 | Phase 0開始前 | 検討済み |
 | D-12 | Managerデータ保存先 | OS標準のユーザーデータディレクトリ配下の`maatgen/` | `os.UserConfigDir()/maatgen`。`--data-dir`で変更可能 | Phase 0開始前 | 検討済み |
-| D-13 | Worktree保存先 | Managerデータディレクトリ配下 | Managerデータディレクトリの`worktrees/<sessionId>` | Phase 0開始前 | 検討済み |
-| D-14 | Session開始条件 | Git repositoryかつclean Working Tree | Git repositoryかつclean Working Tree | Phase 0開始前 | 検討済み |
+| D-13 | Agent作業場所 | 利用者が指定したrepositoryのWorking Treeを直接使用 | 専用worktreeは作成せず、Sessionのrepository pathをAgentのcwdにする | Phase 0開始前 | 検討済み |
+| D-14 | Session開始条件 | Git repositoryであること。dirty Working Treeを許可しRun前checkpointへ含める | Git repositoryであれば開始可能とし、既存のtracked／untracked non-ignored変更をRun前checkpointへ含める | Phase 0開始前 | 検討済み |
 | D-15 | Codex実行バイナリ検出 | PATHから検出し、shellを介さず`codex --version`で検証・絶対パスとversionを保存 | `exec.LookPath`で検出し、shellなしの`--version`成功後に絶対パスとversionをAdapterへ保持 | Phase 0開始前 | 検討済み |
 | D-16 | Codex sandbox policy | `workspace-write` | `workspace-write` | Codex Adapter着手前 | 検討済み |
 | D-17 | Codex approval policy | 初期版は明示的な固定値として設定 | `--ask-for-approval never`。承認待ちを発生させず、失敗をCodexへ返す | Codex Adapter着手前 | 検討済み |
@@ -594,11 +636,11 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-25 | 同時実行制限 | SessionごとにRunを1つまで | SessionごとにRunを1つまで | Phase 2開始前 | 検討済み |
 | D-26 | 実行中の追加Prompt | 初期版は409で拒否 | 初期版は409で拒否 | Phase 2開始前 | 検討済み |
 | D-27 | Session終了操作 | 明示的なclose APIを用意 | 明示的なclose APIを用意 | Phase 2開始前 | 検討済み |
-| D-28 | Worktree cleanup | 全Review完了またはclose後に実行、失敗は再試行 | 明示closeで即時cleanupする。失敗状態と試行回数を保存し、冪等なclose APIの再送で再試行する。全Review完了時の自動cleanupはReview実装時に同じ処理を呼ぶ | Phase 4開始前 | 検討済み |
+| D-28 | Checkpoint cleanup | active Session中は保持し、close時にGit private refを削除 | Session close時に`refs/maatgen/checkpoints/<sessionId>/`を削除する。削除失敗は状態と試行回数を保存し、冪等なclose APIで再試行する | Phase 4開始前 | 検討済み |
 | D-29 | Hunk ID方式 | 内容を含むSHA-256 | 内容を含むSHA-256 | Phase 4開始前 | 検討済み |
-| D-30 | Accept／Rejectの可逆性 | MVPでは不可逆 | MVPでは不可逆 | Phase 5開始前 | 検討済み |
-| D-31 | Accept競合時の動作 | 上書きせず409 Conflict | 上書きせず409 Conflict | Phase 5開始前 | 検討済み |
-| D-32 | binary／renameのReview単位 | File単位 | File単位 | Phase 5開始前 | 検討済み |
+| D-30 | 変更確定方式 | 承認を不要とし、不要な変更だけcheckpointへ戻す | AgentはWorking Treeを直接変更する。Accept／Rejectは廃止し、Hunk／File／Run全体のRestoreを提供する | Phase 5開始前 | 検討済み |
+| D-31 | Restore競合時の動作 | 後続編集を上書きせず409 Conflict | 現在内容がafter snapshotと一致しない対象は`409 checkpoint_conflict`とし、atomicに変更せず終了する | Phase 5開始前 | 検討済み |
+| D-32 | binary／renameのRestore単位 | File単位 | binary／rename／delete／mode changeはFile単位でRestoreする | Phase 5開始前 | 検討済み |
 
 #### Phase 0前の検討結果（案）
 
@@ -614,8 +656,8 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-08 | HTTPは`/api/v1`、Eventは`schemaVersion` | API全体の互換性とEvent単位の再生互換性を分離できる | 最初のv1 endpoint一覧 | 
 | D-10 | 3100を優先し、衝突時またはport=0時はOSの空きport | 開発時の分かりやすさと複数Workspace起動を両立できる | 空きportの通知方法 | 
 | D-11 | runtime metadata JSONを主経路、stdoutの機械可読行を補助 | Browser開発とExtension起動の双方でManager情報を取得できる | metadata fileの権限とcleanup | 
-| D-12 | OS標準のユーザーデータ配下に`maatgen/` | Repositoryを汚さず、Session DBとworktreeを一元管理できる | OS別の具体パス | 
-| D-13 | D-12配下の`worktrees/<sessionId>` | DB、metadata、worktreeのライフサイクルを揃えやすい | 長いパスとcleanup retry | 
+| D-12 | OS標準のユーザーデータ配下に`maatgen/` | Repository外にSession DBとruntime metadataを保持できる | OS別の具体パス |
+| D-13 | 対象repositoryのWorking Treeを直接使用 | 利用者とAgentが同じコードを編集でき、適用待ちをなくせる | checkpointと後続編集の競合検出 |
 | D-15 | PATHから検出し、shellなしで`codex --version`を実行 | 任意コマンド実行を避け、診断画面に実体とversionを表示できる | Windowsの実行ファイル拡張子処理 | 
 
 上記は検討結果の推奨案であり、ユーザー承認前は各行の「決定事項」を空欄のまま保持する。承認後に決定事項へ転記し、ステータスを「検討済み」へ変更する。
@@ -635,21 +677,24 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-41 | WebSocket再接続backoff | 0.5秒開始、最大10秒の指数backoff。再接続ごとに短命ticketを再取得し、最後のsequenceから再開する | 0.5秒開始、最大10秒の指数backoff。再接続ごとに短命ticketを再取得し、最後のsequenceから再開する。受信成功時にbackoffをリセットする | Web UI統合時 | 検討済み |
 | D-42 | 大きなDiff／ログの遅延読み込み | — | — | Web UI統合時 | 未 |
 | D-43 | 新規・削除ファイルの表示UI | 既存Diffと同じ左右比較を使い、存在しない側を明示する | Original／Modifiedの左右比較を使い、存在しない内容は`∅`で表示する | Diff UI実装時 | 検討済み |
-| D-44 | File mode変更の表示UI | File単位Reviewとして変更種別を明示する | 内容DiffではなくFile単位Reviewの案内とAccept／Rejectを表示する | Diff UI実装時 | 検討済み |
-| D-45 | cleanup失敗時のユーザー通知 | APIエラーとSession状態の両方で通知し、再試行操作を可能にする | close APIは`503 worktree_cleanup_failed`を返し、Sessionへ`cleanupStatus`、`cleanupError`、`cleanupAttempts`、`cleanupUpdatedAt`を保存する。同じclose APIで再試行する | Worktree実装時 | 検討済み |
+| D-44 | File mode変更の表示UI | File単位Restoreとして変更種別を明示する | 内容DiffではなくFile単位Restoreの案内とRestore操作を表示する | Diff UI実装時 | 検討済み |
+| D-45 | checkpoint cleanup失敗時のユーザー通知 | APIエラーとSession状態の両方で通知し、再試行操作を可能にする | close APIは`503 checkpoint_cleanup_failed`を返し、Sessionへcleanup状態と試行回数を保存する。同じclose APIで再試行する | Checkpoint実装時 | 検討済み |
 | D-46 | fake Codex CLIのfixture仕様 | Go test helper processでversion、JSONL、stderr、終了コード、遅延を再現 | Go test binaryのhelper modeとJSONL testdataを使用し、外部scriptへ依存しない | Codex Adapter着手前 | 検討済み |
-| D-47 | CIでの実Codex手動テスト方法 | CIはfake CLIのみとし、実Codexはリリース前にcleanな検証用repositoryで主要フローを手動確認する | CIはfake CLIでUbuntu／Windows／macOSを検証する。実Codexはリリース前に`codex --version`確認後、Session作成、Prompt、Diff、Review、cleanupを手動確認する | CI構築時 | 検討済み |
+| D-47 | CIでの実Codex手動テスト方法 | CIはfake CLIのみとし、実Codexはリリース前に検証用repositoryで主要フローを手動確認する | CIはfake CLIでUbuntu／Windows／macOSを検証する。実Codexはリリース前にSession作成、dirty状態のcheckpoint、Prompt、直接変更、Diff、Restore、継続Prompt、cleanupを手動確認する | CI構築時 | 検討済み |
+| D-61 | Checkpoint実装方式 | Git plumbingとprivate refを使用し、ユーザーのindex／HEADを変更しない | 一時indexからbefore／after treeを作り、`refs/maatgen/checkpoints/<sessionId>/<runId>/`からtreeを直接参照する。ignored fileは対象外とする | Checkpoint実装時 | 検討済み |
+| D-62 | Run間の継続と利用者編集 | Run完了後の現在Working Treeを次Runの基準にする | Sessionをactiveのまま保持し、次Promptの直前に新しいcheckpointを作って同じAgent Threadをresumeする。実行中の同一箇所編集は帰属を保証しない | Checkpoint実装時 | 検討済み |
+| D-63 | 後方互換性 | 旧Worktree／Accept／Reject設計の互換性は持たない | 旧設計のlegacy mode、互換endpoint、dual schema、migration shimは実装せず、既存ローカルデータは必要に応じて再作成する | 設計変更時 | 検討済み |
 
 ### 11.3 Codex MVP後に決めること
 
 | ID | 決定対象 | 推奨（案） | 決定事項 | 関連機能 | ステータス |
 |---|---|---|---|---|---|
-| D-48 | dirty Working Treeのsnapshot方式 | — | — | 未コミット変更対応 | 未 |
+| D-48 | dirty Working Treeのsnapshot方式 | Git plumbingによるRun前checkpoint | D-61へ統合しMVP対象へ移動 | 未コミット変更対応 | 検討済み |
 | D-49 | submodule対応方針 | — | — | 複合Repository | 未 |
-| D-50 | Accept済みHunkのUndo | — | — | Review改善 | 未 |
-| D-51 | Reviewの再開・期限切れ | — | — | 長期Session | 未 |
+| D-50 | Agent変更のUndo | Run前checkpointへのRestore | Accept／Rejectを廃止し、Hunk／File／Run単位RestoreとしてMVP対象へ移動 | Restore | 検討済み |
+| D-51 | Checkpointの再開・期限切れ | active Session中は保持しclose時に削除 | D-28に統合 | 長期Session | 検討済み |
 | D-52 | 実行中Promptのqueueing／steering | — | — | 複数Turn制御 | 未 |
-| D-53 | binary Diffの専用表示 | — | — | Binary変更Review | 未 |
+| D-53 | binary Diffの専用表示 | — | — | Binary変更確認／Restore | 未 |
 | D-54 | Cost計算の料金表管理 | — | — | 使用量分析 | 未 |
 | D-55 | Agent比較指標 | — | — | Analytics | 未 |
 | D-56 | Claude Codeの出力・resume方式 | — | — | Claude Adapter | 未 |
@@ -667,7 +712,7 @@ docs/decisions/
 ├─ 001-runtime-and-toolchain.md
 ├─ 002-codex-execution.md
 ├─ 003-session-and-run.md
-├─ 004-worktree-and-review.md
+├─ 004-direct-workspace-and-checkpoint.md
 └─ 005-security-and-retention.md
 ```
 
@@ -698,14 +743,14 @@ docs/decisions/
 
 - [x] Vue 3／Vite Webアプリ基盤
 - [x] 実Agent Managerへ接続する`AgentApi`
-- [x] Session作成・履歴・close／cleanup retry UI
+- [x] Session作成・履歴UI
 - [x] Chat／Timeline／Cancel／Error表示
 - [x] Changed Files／Hunk概要表示
 - [x] Desktop 3ペインとモバイル向けレスポンシブ表示
 - [x] `npm run dev`によるManager／Web UI同時起動
 - [x] WebSocket streamingと再接続表示
 - [x] Diff詳細表示
-- [x] Hunk／File単位のAccept／Reject UI
+- [x] 旧Accept／Reject UIをCheckpoint Restore UIへ置換
 - [x] Component testとMock scenario
 - [x] Session履歴のkeyset pagination
 - [x] Manager未起動、認証失敗、Codex未導入の診断表示
@@ -750,32 +795,34 @@ docs/decisions/
 - [x] Session単位の同時Run制限とgraceful shutdown時の実行停止
 - [x] stdout／stderr Raw EventのSecret Masking
 
-### Phase 4：Git WorktreeとChangeSet（先行実装）
+### Phase 4：Direct Working Tree、Checkpoint、ChangeSet（再設計）
+
+旧Worktree方式は後方互換性を維持せず、直接Working Tree方式へ置換する。
 
 - [x] Git実行ファイルの検出
-- [x] Git repositoryとclean Working Treeの検証
-- [x] Session作成時のHEAD取得
-- [x] Managerデータディレクトリ配下へのdetached worktree作成
-- [x] Session作成HTTP APIとSQLite保存
-- [x] SQLite保存失敗時のworktree rollback
-- [x] Session close時のworktree cleanupとcleanup retry
-- [x] Git差分からのChangeSet生成
 - [x] text／binary／rename／delete／mode changeの分類
 - [x] unified diffからのHunk生成と内容ベースSHA-256 ID
-- [x] Run正常完了時のChangeSet自動更新
-- [x] ChangeSet取得HTTP API
+- [x] clean Working Tree必須条件を削除
+- [x] detached worktree作成を廃止し、Agentのcwdを対象repositoryへ変更
+- [x] Run前のHEAD／index／Working Tree checkpoint作成
+- [x] Run後snapshotとprivate ref保存
+- [x] Run単位のChangeSetへ移行
+- [x] Session close時のcheckpoint ref cleanupとretry
+- [x] 同一Sessionの次Run開始時に新checkpointを作成
+- [x] 旧Worktree実装、Accept／Reject API、旧ChangeSet schemaの削除または置換
 
-### Phase 5：Review適用
+### Phase 5：Checkpoint Restore（再設計）
 
-- [x] Hunk単位のAccept／Reject
-- [x] binary／rename／delete／mode changeを含むFile単位Review
-- [x] 既Accept Hunkから期待内容を再構築する競合検出
-- [x] atomic file writeと`409 working_tree_conflict`
-- [x] Review状態とReview Eventの永続化
-- [x] 冪等な同一操作の再送
-- [x] 詳細DiffとAccept／Reject UI
-- [x] Accept All／Reject All
-- [x] 全Review確定時のSession closeとworktree cleanup
+旧Accept／Reject方式は実装済みだが、後方互換性を維持せず置換する。
+
+- [x] Accept／Reject APIと状態モデルを廃止
+- [x] Hunk／File／Run全体のRestore API
+- [x] binary／rename／delete／mode changeのFile単位Restore
+- [x] after snapshotと現在内容による競合検出
+- [x] atomic file writeと`409 checkpoint_conflict`
+- [x] Restore状態とRestore Eventの永続化
+- [x] 冪等な同一Restore操作の再送
+- [x] 詳細DiffとRestore UI
 
 ### Phase 7：VS Code Extension
 
@@ -787,6 +834,6 @@ docs/decisions/
 - [ ] Web UI componentと`AgentApi`契約の再利用
 - [ ] Agent Manager起動、runtime metadata読込、health check
 - [ ] Extension host経由のHTTP／WebSocket bridge
-- [ ] `vscode.diff`とWorkspaceEdit
+- [ ] `vscode.diff`とCheckpoint Restore command
 - [ ] CodeLens／Decoration
-- [ ] Extension終了時のManager cleanup
+- [ ] Extension終了時のManager cleanup（active Sessionのcheckpointは維持）

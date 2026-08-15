@@ -19,7 +19,7 @@ const nextSessionCursor = ref('');
 const loadingMoreSessions = ref(false);
 const selected = ref<AgentSession>();
 const events = ref<SessionEvent[]>([]);
-const changes = ref<ChangeSet>({ sessionId: '', files: [] });
+const changes = ref<ChangeSet>(emptyChangeSet(''));
 const workspace = ref('');
 const prompt = ref('');
 const activeRun = ref<AgentRun>();
@@ -42,14 +42,13 @@ const selectedChange = computed(() => changes.value.files.find((file) => file.id
 const activeProvider = computed(() => selected.value?.agent ?? newSessionProvider.value);
 const availableModels = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.models ?? []);
 const providerLabel = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.label ?? activeProvider.value);
-const pendingReviews = computed(() => changes.value.files.reduce((total, file) => {
-  if (file.reviewMode === 'file') return total + (file.status === 'pending' ? 1 : 0);
-  return total + file.hunks.filter((hunk) => hunk.status === 'pending').length;
+const restorableChanges = computed(() => changes.value.files.reduce((total, file) => {
+  if (file.restoreMode === 'file') return total + (file.status !== 'restored' ? 1 : 0);
+  return total + file.hunks.filter((hunk) => hunk.status !== 'restored').length;
 }, 0));
 const statusLabel = computed(() => {
   if (!selected.value) return '待機中';
   if (activeRun.value) return `${providerLabel.value} 実行中`;
-  if (selected.value.cleanupStatus === 'failed') return 'Cleanup 要再試行';
   return selected.value.status === 'active' ? '準備完了' : '終了済み';
 });
 const streamLabel = computed(() => ({
@@ -66,7 +65,7 @@ function restoreActiveRun(items: SessionEvent[]) {
     .filter((id): id is string => Boolean(id)));
   const started = [...items].reverse().find((event) => event.type === 'run_started'
     && Boolean(event.runId)
-    && !terminalRunIDs.has(event.runId));
+    && !terminalRunIDs.has(event.runId!));
   if (!started?.runId) {
     if (activeRun.value && terminalRunIDs.has(activeRun.value.id)) activeRun.value = undefined;
     return;
@@ -116,8 +115,12 @@ function changePath(file: ChangeSet['files'][number]): string {
   return file.newPath ?? file.oldPath ?? 'unknown';
 }
 
-function reviewTargetStatus(target: { status: string }): string {
+function restoreTargetStatus(target: { status: string }): string {
   return target.status.replaceAll('_', ' ');
+}
+
+function emptyChangeSet(sessionId: string): ChangeSet {
+  return { sessionId, runId: '', checkpointId: '', beforeTree: '', afterTree: '', files: [] };
 }
 
 async function refreshSessions(reset = false) {
@@ -155,7 +158,7 @@ async function selectSession(session: AgentSession) {
   selected.value = session;
   if (selectedModel.value && !availableModels.value.includes(selectedModel.value)) selectedModel.value = '';
   events.value = [];
-  changes.value = { sessionId: session.id, files: [] };
+  changes.value = emptyChangeSet(session.id);
   activeRun.value = undefined;
   error.value = '';
   diagnostic.value = undefined;
@@ -213,7 +216,7 @@ function startEventStream(sessionId: string) {
       streamError.value = '';
       restoreActiveRun(events.value);
       updateDiagnosticFromEvents([event]);
-      if (['change_detected', 'change_reviewed', 'run_completed', 'run_failed', 'run_cancelled'].includes(event.type)) {
+      if (['change_detected', 'change_restored', 'run_completed', 'run_failed', 'run_cancelled'].includes(event.type)) {
         void refreshSelectedState(sessionId).catch((cause) => {
           handleFailure(cause);
         });
@@ -263,35 +266,26 @@ async function closeSession() {
   });
 }
 
-async function reviewChange(changeId: string, decision: 'accept' | 'reject') {
+async function restoreHunk(hunkId: string) {
   if (!selected.value) return;
   await act(async () => {
-    changes.value = decision === 'accept'
-      ? await api.acceptChange(selected.value!.id, changeId)
-      : await api.rejectChange(selected.value!.id, changeId);
-    selected.value = await api.getSession(selected.value!.id);
-    if (selected.value.status !== 'active') {
-      eventStream?.stop();
-      eventStream = undefined;
-    }
-    await refreshSessions();
+    changes.value = await api.restoreHunk(selected.value!.id, changes.value.checkpointId, hunkId);
   });
 }
 
-async function reviewAll(decision: 'accept' | 'reject') {
-  if (!selected.value || pendingReviews.value === 0) return;
-  if (decision === 'reject' && !window.confirm(`${pendingReviews.value}件の変更をすべてRejectしますか？`)) return;
+async function restoreFile(fileId: string) {
+  if (!selected.value) return;
   await act(async () => {
-    changes.value = decision === 'accept'
-      ? await api.acceptAllChanges(selected.value!.id)
-      : await api.rejectAllChanges(selected.value!.id);
+    changes.value = await api.restoreFile(selected.value!.id, changes.value.checkpointId, fileId);
+  });
+}
+
+async function restoreAll() {
+  if (!selected.value || restorableChanges.value === 0) return;
+  if (!window.confirm(`${restorableChanges.value}件の変更をRun開始時点へ戻しますか？`)) return;
+  await act(async () => {
+    changes.value = await api.restoreAllChanges(selected.value!.id, changes.value.checkpointId);
     selectedChangeId.value = '';
-    selected.value = await api.getSession(selected.value!.id);
-    if (selected.value.status !== 'active') {
-      eventStream?.stop();
-      eventStream = undefined;
-    }
-    await refreshSessions();
   });
 }
 
@@ -433,12 +427,11 @@ onBeforeUnmount(() => {
     <main class="conversation">
       <div v-if="selected" class="conversation-header">
         <div>
-          <p class="eyebrow">WORKTREE SESSION</p>
+          <p class="eyebrow">DIRECT REPOSITORY SESSION</p>
           <h1>{{ shortPath(selected.workspace) }}</h1>
-          <p class="path" :title="selected.worktree">{{ selected.worktree }}</p>
+          <p class="path" :title="selected.workspace">{{ selected.workspace }}</p>
         </div>
         <button v-if="isActive" class="quiet-button" :disabled="busy || !!activeRun" @click="closeSession">Close session</button>
-        <button v-else-if="selected.cleanupStatus === 'failed'" class="quiet-button warning" :disabled="busy" @click="closeSession">Retry cleanup</button>
       </div>
 
       <section v-if="diagnostic" class="diagnostic-card" :class="diagnostic.kind" role="alert">
@@ -451,7 +444,7 @@ onBeforeUnmount(() => {
         <div v-if="visibleEvents.length === 0" class="empty-state compact">
           <span class="empty-symbol">⌁</span>
           <h2>{{ providerLabel }}に最初の指示を送る</h2>
-          <p>このSession専用のworktreeで安全に作業します。</p>
+          <p>対象Repositoryを直接編集します。各Run開始前にcheckpointを作成します。</p>
         </div>
         <article v-for="event in visibleEvents" :key="event.id" class="event" :class="eventKind(event)">
           <div class="event-label">{{ eventKind(event) === 'assistant' ? providerLabel.toUpperCase() : eventKind(event).toUpperCase() }}</div>
@@ -464,7 +457,7 @@ onBeforeUnmount(() => {
       <section v-else class="empty-state hero">
         <span class="empty-symbol">⌘</span>
         <h1>Repositoryから始めましょう</h1>
-        <p>左側にcleanなGit repositoryのパスを入力して、新しいSessionを作成します。</p>
+        <p>左側にGit repositoryのパスを入力して、新しいSessionを作成します。</p>
       </section>
 
       <form v-if="selected && isActive" class="composer" @submit.prevent="sendPrompt">
@@ -487,17 +480,16 @@ onBeforeUnmount(() => {
       <div class="section-heading">
         <span>Changes</span><span class="count accent">{{ changes.files.length }}</span>
       </div>
-      <div v-if="changes.files.length" class="bulk-review">
-        <span>{{ pendingReviews }} pending</span>
+      <div v-if="changes.files.length" class="bulk-restore">
+        <span>{{ restorableChanges }} restorable</span>
         <div>
-          <button :disabled="busy || !isActive || pendingReviews === 0" class="bulk-reject" @click="reviewAll('reject')">Reject all</button>
-          <button :disabled="busy || !isActive || pendingReviews === 0" class="bulk-accept" @click="reviewAll('accept')">Accept all</button>
+          <button :disabled="busy || !isActive || restorableChanges === 0" class="restore-all-button" @click="restoreAll">Restore all</button>
         </div>
       </div>
       <div v-if="changes.files.length" class="change-list">
         <button v-for="file in changes.files" :key="file.id" type="button" class="change-card" @click="selectedChangeId = file.id">
           <div class="change-title"><span :class="['kind', file.kind]">{{ file.kind.slice(0, 1).toUpperCase() }}</span><span>{{ changePath(file) }}</span></div>
-          <div class="change-meta">{{ file.reviewMode }} review · {{ file.hunks.length }} hunk{{ file.hunks.length === 1 ? '' : 's' }}</div>
+          <div class="change-meta">{{ file.restoreMode }} restore · {{ file.hunks.length }} hunk{{ file.hunks.length === 1 ? '' : 's' }}</div>
           <div v-for="hunk in file.hunks" :key="hunk.id" class="hunk-preview">
             <span>-{{ hunk.oldStart }},{{ hunk.oldLines }}</span><span>+{{ hunk.newStart }},{{ hunk.newLines }}</span>
           </div>
@@ -510,9 +502,9 @@ onBeforeUnmount(() => {
       <section class="diff-dialog" role="dialog" aria-modal="true" :aria-label="`${changePath(selectedChange)} の差分`">
         <header class="diff-header">
           <div>
-            <p class="eyebrow">REVIEW CHANGE</p>
+            <p class="eyebrow">CHECKPOINT DIFF</p>
             <h2>{{ changePath(selectedChange) }}</h2>
-            <p>{{ selectedChange.kind }} · {{ reviewTargetStatus(selectedChange) }}</p>
+            <p>{{ selectedChange.kind }} · {{ restoreTargetStatus(selectedChange) }}</p>
           </div>
           <button class="close-dialog" aria-label="差分を閉じる" @click="selectedChangeId = ''">×</button>
         </header>
@@ -521,27 +513,25 @@ onBeforeUnmount(() => {
           <article v-for="hunk in selectedChange.hunks" :key="hunk.id" class="diff-hunk">
             <div class="hunk-header">
               <code>@@ -{{ hunk.oldStart }},{{ hunk.oldLines }} +{{ hunk.newStart }},{{ hunk.newLines }} @@</code>
-              <span :class="['review-badge', hunk.status]">{{ reviewTargetStatus(hunk) }}</span>
+              <span :class="['restore-badge', hunk.status]">{{ restoreTargetStatus(hunk) }}</span>
             </div>
             <div class="diff-columns">
               <div class="diff-side removed"><span>Original</span><pre>{{ hunk.originalText || '∅' }}</pre></div>
               <div class="diff-side added"><span>Modified</span><pre>{{ hunk.modifiedText || '∅' }}</pre></div>
             </div>
-            <div v-if="hunk.status === 'pending' && isActive" class="review-actions">
-              <button class="reject-button" :disabled="busy" @click="reviewChange(hunk.id, 'reject')">Reject hunk</button>
-              <button class="accept-button" :disabled="busy" @click="reviewChange(hunk.id, 'accept')">Accept hunk</button>
+            <div v-if="hunk.status !== 'restored' && isActive" class="restore-actions">
+              <button class="restore-button" :disabled="busy" @click="restoreHunk(hunk.id)">Restore hunk</button>
             </div>
           </article>
 
-          <article v-if="selectedChange.hunks.length === 0" class="file-review">
+          <article v-if="selectedChange.hunks.length === 0" class="file-restore">
             <div v-if="selectedChange.original !== undefined || selectedChange.modified !== undefined" class="diff-columns">
               <div class="diff-side removed"><span>Original</span><pre>{{ selectedChange.original || '∅' }}</pre></div>
               <div class="diff-side added"><span>Modified</span><pre>{{ selectedChange.modified || '∅' }}</pre></div>
             </div>
-            <div v-else class="binary-notice">Binaryまたはfile mode変更です。内容ではなくFile単位でReviewします。</div>
-            <div v-if="selectedChange.status === 'pending' && isActive" class="review-actions">
-              <button class="reject-button" :disabled="busy" @click="reviewChange(selectedChange.id, 'reject')">Reject file</button>
-              <button class="accept-button" :disabled="busy" @click="reviewChange(selectedChange.id, 'accept')">Accept file</button>
+            <div v-else class="binary-notice">Binary、rename、またはfile mode変更です。File単位でcheckpointへ戻せます。</div>
+            <div v-if="selectedChange.status !== 'restored' && isActive" class="restore-actions">
+              <button class="restore-button" :disabled="busy" @click="restoreFile(selectedChange.id)">Restore file</button>
             </div>
           </article>
         </div>

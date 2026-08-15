@@ -14,11 +14,11 @@ type Info struct {
 }
 
 type RunRequest struct {
-	Worktree string
-	Prompt   string
-	ThreadID string
-	Model    string
-	Timeout  time.Duration
+	Directory string
+	Prompt    string
+	ThreadID  string
+	Model     string
+	Timeout   time.Duration
 }
 
 type OutputStream string

@@ -18,13 +18,11 @@ import (
 
 func TestEventAPIAndWebSocketStream(t *testing.T) {
 	session := protocol.AgentSession{
-		ID:         "session-1",
-		Agent:      protocol.AgentCodex,
-		Workspace:  "C:/workspace/project",
-		Worktree:   "C:/data/maatgen/worktrees/session-1",
-		BaseCommit: "0123456789abcdef",
-		Status:     protocol.SessionActive,
-		CreatedAt:  time.Date(2026, 8, 15, 5, 0, 0, 0, time.UTC),
+		ID:        "session-1",
+		Agent:     protocol.AgentCodex,
+		Workspace: "C:/workspace/project",
+		Status:    protocol.SessionActive,
+		CreatedAt: time.Date(2026, 8, 15, 5, 0, 0, 0, time.UTC),
 	}
 	event := protocol.SessionEvent{
 		ID:            "event-1",

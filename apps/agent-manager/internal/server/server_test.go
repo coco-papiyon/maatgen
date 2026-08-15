@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitworktree"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
-	reviewservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/review"
+	restoreservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/restore"
 	runservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/run"
 	sessionservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/session"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
@@ -108,13 +108,11 @@ func TestNotFoundUsesCommonErrorEnvelope(t *testing.T) {
 func TestSessionListAndDetail(t *testing.T) {
 	createdAt := time.Date(2026, 8, 15, 3, 0, 0, 0, time.UTC)
 	session := protocol.AgentSession{
-		ID:         "session-1",
-		Agent:      protocol.AgentCodex,
-		Workspace:  "C:/workspace/project",
-		Worktree:   "C:/data/maatgen/worktrees/session-1",
-		BaseCommit: "0123456789abcdef",
-		Status:     protocol.SessionActive,
-		CreatedAt:  createdAt,
+		ID:        "session-1",
+		Agent:     protocol.AgentCodex,
+		Workspace: "C:/workspace/project",
+		Status:    protocol.SessionActive,
+		CreatedAt: createdAt,
 	}
 	reader := &fakeSessionReader{sessions: []protocol.AgentSession{session}}
 	handler := New(testConfig(), reader, nil).Handler()
@@ -209,7 +207,6 @@ func TestSessionAPIRequiresBearerToken(t *testing.T) {
 func TestCreateSessionAPI(t *testing.T) {
 	created := protocol.AgentSession{
 		ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repository",
-		Worktree: "C:/data/worktrees/session-1", BaseCommit: "abcdef",
 		Status: protocol.SessionActive, CreatedAt: time.Date(2026, 8, 15, 6, 0, 0, 0, time.UTC),
 	}
 	creator := &fakeSessionCreator{created: created}
@@ -244,8 +241,7 @@ func TestCreateSessionAPIValidationAndDomainErrors(t *testing.T) {
 		{name: "invalid JSON", body: `{`, status: http.StatusBadRequest, code: "invalid_request"},
 		{name: "unknown field", body: `{"agent":"codex","workspace":"C:/repository","extra":true}`, status: http.StatusBadRequest, code: "invalid_request"},
 		{name: "unsupported agent", body: `{"agent":"claude","workspace":"C:/repository"}`, err: sessionservice.ErrUnsupportedAgent, status: http.StatusBadRequest, code: "invalid_request"},
-		{name: "not repository", body: `{"agent":"codex","workspace":"C:/directory"}`, err: gitworktree.ErrNotRepository, status: http.StatusUnprocessableEntity, code: "not_git_repository"},
-		{name: "dirty", body: `{"agent":"codex","workspace":"C:/repository"}`, err: gitworktree.ErrDirty, status: http.StatusConflict, code: "workspace_not_clean"},
+		{name: "not repository", body: `{"agent":"codex","workspace":"C:/directory"}`, err: checkpoint.ErrNotRepository, status: http.StatusUnprocessableEntity, code: "not_git_repository"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -273,9 +269,8 @@ func TestCreateSessionAPIValidationAndDomainErrors(t *testing.T) {
 func TestCloseSessionAPI(t *testing.T) {
 	closedAt := time.Date(2026, 8, 15, 7, 0, 0, 0, time.UTC)
 	closer := &fakeSessionCloser{closed: protocol.AgentSession{
-		ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repository", Worktree: "C:/worktree",
-		BaseCommit: "abcdef", Status: protocol.SessionClosed, CreatedAt: closedAt.Add(-time.Hour), ClosedAt: &closedAt,
-		CleanupStatus: protocol.CleanupCompleted, CleanupAttempts: 1,
+		ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repository",
+		Status: protocol.SessionClosed, CreatedAt: closedAt.Add(-time.Hour), ClosedAt: &closedAt,
 	}}
 	config := testConfig()
 	config.SessionCloser = closer
@@ -288,7 +283,7 @@ func TestCloseSessionAPI(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response.CleanupStatus != protocol.CleanupCompleted || closer.sessionID != "session-1" {
+	if response.Status != protocol.SessionClosed || closer.sessionID != "session-1" {
 		t.Fatalf("response = %#v, requested = %q", response, closer.sessionID)
 	}
 }
@@ -302,7 +297,7 @@ func TestCloseSessionAPIErrors(t *testing.T) {
 	}{
 		{name: "missing", err: storage.ErrNotFound, status: http.StatusNotFound, code: "not_found"},
 		{name: "active run", err: sessionservice.ErrRunActive, status: http.StatusConflict, code: "run_already_active"},
-		{name: "cleanup failed", err: sessionservice.ErrCleanupFailed, status: http.StatusServiceUnavailable, code: "worktree_cleanup_failed"},
+		{name: "cleanup failed", err: sessionservice.ErrCleanupFailed, status: http.StatusServiceUnavailable, code: "checkpoint_cleanup_failed"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -402,9 +397,9 @@ func TestRunAPIValidationAndDomainErrors(t *testing.T) {
 func TestGetChangeSetAPI(t *testing.T) {
 	path := "changed.txt"
 	reader := &fakeChangeReader{changeSet: protocol.ChangeSet{
-		SessionID: "session-1",
+		SessionID: "session-1", RunID: "run-1", CheckpointID: "checkpoint-1", BeforeTree: "before", AfterTree: "after",
 		Files: []protocol.FileChange{
-			{ID: "file-1", NewPath: &path, Kind: protocol.FileAdd, ReviewMode: "hunk", Status: protocol.ReviewPending, Hunks: []protocol.ChangeHunk{}},
+			{ID: "file-1", NewPath: &path, Kind: protocol.FileAdd, RestoreMode: "file", Status: protocol.RestoreChanged, Hunks: []protocol.ChangeHunk{}},
 		},
 	}}
 	config := testConfig()
@@ -430,53 +425,46 @@ func TestGetChangeSetAPI(t *testing.T) {
 	}
 }
 
-func TestReviewAPI(t *testing.T) {
-	controller := &fakeReviewController{changeSet: protocol.ChangeSet{SessionID: "session-1", Files: []protocol.FileChange{}}}
+func TestRestoreAPI(t *testing.T) {
+	controller := &fakeRestoreController{changeSet: protocol.ChangeSet{SessionID: "session-1", CheckpointID: "checkpoint-1", Files: []protocol.FileChange{}}}
 	config := testConfig()
-	config.ReviewController = controller
+	config.RestoreController = controller
 	handler := New(config, nil, nil).Handler()
 
-	accept := httptest.NewRecorder()
-	handler.ServeHTTP(accept, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/changes/hunk-1/accept"))
-	if accept.Code != http.StatusOK || controller.operation != "accept" || controller.sessionID != "session-1" || controller.changeID != "hunk-1" {
-		t.Fatalf("accept status = %d, controller = %#v", accept.Code, controller)
+	hunk := httptest.NewRecorder()
+	handler.ServeHTTP(hunk, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/hunks/hunk-1/restore"))
+	if hunk.Code != http.StatusOK || controller.operation != "hunk" || controller.sessionID != "session-1" || controller.changeID != "hunk-1" {
+		t.Fatalf("hunk status = %d, controller = %#v", hunk.Code, controller)
 	}
-	reject := httptest.NewRecorder()
-	handler.ServeHTTP(reject, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/changes/file-1/reject"))
-	if reject.Code != http.StatusOK || controller.operation != "reject" || controller.changeID != "file-1" {
-		t.Fatalf("reject status = %d, controller = %#v", reject.Code, controller)
+	file := httptest.NewRecorder()
+	handler.ServeHTTP(file, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/files/file-1/restore"))
+	if file.Code != http.StatusOK || controller.operation != "file" || controller.changeID != "file-1" {
+		t.Fatalf("file status = %d, controller = %#v", file.Code, controller)
 	}
-	acceptAll := httptest.NewRecorder()
-	handler.ServeHTTP(acceptAll, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/changes/accept-all"))
-	if acceptAll.Code != http.StatusOK || controller.operation != "accept-all" || controller.sessionID != "session-1" {
-		t.Fatalf("accept all status = %d, controller = %#v", acceptAll.Code, controller)
-	}
-	rejectAll := httptest.NewRecorder()
-	handler.ServeHTTP(rejectAll, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/changes/reject-all"))
-	if rejectAll.Code != http.StatusOK || controller.operation != "reject-all" {
-		t.Fatalf("reject all status = %d, controller = %#v", rejectAll.Code, controller)
+	all := httptest.NewRecorder()
+	handler.ServeHTTP(all, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/restore"))
+	if all.Code != http.StatusOK || controller.operation != "all" || controller.checkpointID != "checkpoint-1" {
+		t.Fatalf("all status = %d, controller = %#v", all.Code, controller)
 	}
 }
 
-func TestReviewAPIErrors(t *testing.T) {
+func TestRestoreAPIErrors(t *testing.T) {
 	tests := []struct {
 		err    error
 		status int
 		code   string
 	}{
 		{err: storage.ErrNotFound, status: http.StatusNotFound, code: "not_found"},
-		{err: reviewservice.ErrConflict, status: http.StatusConflict, code: "working_tree_conflict"},
-		{err: reviewservice.ErrAlreadyReviewed, status: http.StatusConflict, code: "already_reviewed"},
-		{err: reviewservice.ErrSessionClosed, status: http.StatusConflict, code: "session_closed"},
-		{err: sessionservice.ErrCleanupFailed, status: http.StatusServiceUnavailable, code: "worktree_cleanup_failed"},
-		{err: sessionservice.ErrRunActive, status: http.StatusConflict, code: "run_already_active"},
+		{err: restoreservice.ErrConflict, status: http.StatusConflict, code: "checkpoint_conflict"},
+		{err: restoreservice.ErrSessionClosed, status: http.StatusConflict, code: "session_closed"},
+		{err: restoreservice.ErrNotRestorable, status: http.StatusUnprocessableEntity, code: "not_restorable"},
 	}
 	for _, test := range tests {
-		controller := &fakeReviewController{err: test.err}
+		controller := &fakeRestoreController{err: test.err}
 		config := testConfig()
-		config.ReviewController = controller
+		config.RestoreController = controller
 		recorder := httptest.NewRecorder()
-		New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/changes/hunk-1/accept"))
+		New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/hunks/hunk-1/restore"))
 		if recorder.Code != test.status {
 			t.Fatalf("status = %d, want %d", recorder.Code, test.status)
 		}
@@ -587,35 +575,31 @@ func (f *fakeChangeReader) GetChangeSet(_ context.Context, sessionID string) (pr
 
 var _ ChangeReader = (*fakeChangeReader)(nil)
 
-type fakeReviewController struct {
-	operation string
-	sessionID string
-	changeID  string
-	changeSet protocol.ChangeSet
-	err       error
+type fakeRestoreController struct {
+	operation    string
+	sessionID    string
+	checkpointID string
+	changeID     string
+	changeSet    protocol.ChangeSet
+	err          error
 }
 
-func (f *fakeReviewController) Accept(_ context.Context, sessionID, changeID string) (protocol.ChangeSet, error) {
-	f.operation, f.sessionID, f.changeID = "accept", sessionID, changeID
+func (f *fakeRestoreController) RestoreHunk(_ context.Context, sessionID, checkpointID, hunkID string) (protocol.ChangeSet, error) {
+	f.operation, f.sessionID, f.checkpointID, f.changeID = "hunk", sessionID, checkpointID, hunkID
 	return f.changeSet, f.err
 }
 
-func (f *fakeReviewController) Reject(_ context.Context, sessionID, changeID string) (protocol.ChangeSet, error) {
-	f.operation, f.sessionID, f.changeID = "reject", sessionID, changeID
+func (f *fakeRestoreController) RestoreFile(_ context.Context, sessionID, checkpointID, fileID string) (protocol.ChangeSet, error) {
+	f.operation, f.sessionID, f.checkpointID, f.changeID = "file", sessionID, checkpointID, fileID
 	return f.changeSet, f.err
 }
 
-func (f *fakeReviewController) AcceptAll(_ context.Context, sessionID string) (protocol.ChangeSet, error) {
-	f.operation, f.sessionID, f.changeID = "accept-all", sessionID, ""
+func (f *fakeRestoreController) RestoreAll(_ context.Context, sessionID, checkpointID string) (protocol.ChangeSet, error) {
+	f.operation, f.sessionID, f.checkpointID, f.changeID = "all", sessionID, checkpointID, ""
 	return f.changeSet, f.err
 }
 
-func (f *fakeReviewController) RejectAll(_ context.Context, sessionID string) (protocol.ChangeSet, error) {
-	f.operation, f.sessionID, f.changeID = "reject-all", sessionID, ""
-	return f.changeSet, f.err
-}
-
-var _ ReviewController = (*fakeReviewController)(nil)
+var _ RestoreController = (*fakeRestoreController)(nil)
 
 func (f *fakeSessionCreator) CreateSession(_ context.Context, request protocol.CreateSessionRequest) (protocol.AgentSession, error) {
 	f.request = request

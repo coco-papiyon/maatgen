@@ -6,11 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitworktree"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 )
@@ -19,37 +17,29 @@ var (
 	ErrInvalidRequest   = errors.New("invalid session request")
 	ErrUnsupportedAgent = errors.New("unsupported agent")
 	ErrRunActive        = errors.New("session has an active run")
-	ErrCleanupFailed    = errors.New("worktree cleanup failed")
+	ErrCleanupFailed    = errors.New("checkpoint cleanup failed")
 )
 
 type Store interface {
 	CreateSession(ctx context.Context, session protocol.AgentSession) error
 	GetSession(ctx context.Context, id string) (protocol.AgentSession, error)
-	PrepareSessionCleanup(ctx context.Context, id string, closedAt time.Time) (protocol.AgentSession, error)
-	FinishSessionCleanup(ctx context.Context, id string, status protocol.CleanupStatus, cleanupError *string, updatedAt time.Time) error
+	CloseSession(ctx context.Context, id string, closedAt time.Time) error
 }
 
-type WorktreeManager interface {
-	Create(ctx context.Context, workspace, destination string) (gitworktree.Worktree, error)
-	Remove(ctx context.Context, repository, worktreePath string) error
+type RepositoryManager interface {
+	ValidateRepository(ctx context.Context, workspace string) (string, error)
+	CleanupSession(ctx context.Context, repository, sessionID string) error
 }
 
 type Service struct {
-	store         Store
-	worktrees     WorktreeManager
-	worktreesRoot string
-	now           func() time.Time
-	newID         func() (string, error)
+	store        Store
+	repositories RepositoryManager
+	now          func() time.Time
+	newID        func() (string, error)
 }
 
-func New(store Store, worktrees WorktreeManager, worktreesRoot string) *Service {
-	return &Service{
-		store:         store,
-		worktrees:     worktrees,
-		worktreesRoot: worktreesRoot,
-		now:           time.Now,
-		newID:         generateID,
-	}
+func New(store Store, repositories RepositoryManager) *Service {
+	return &Service{store: store, repositories: repositories, now: time.Now, newID: generateID}
 }
 
 func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSessionRequest) (protocol.AgentSession, error) {
@@ -59,33 +49,19 @@ func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSess
 	if strings.TrimSpace(request.Workspace) == "" {
 		return protocol.AgentSession{}, fmt.Errorf("%w: workspace is required", ErrInvalidRequest)
 	}
+	repository, err := s.repositories.ValidateRepository(ctx, request.Workspace)
+	if err != nil {
+		return protocol.AgentSession{}, err
+	}
 	id, err := s.newID()
 	if err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("generate session ID: %w", err)
 	}
-	destination := filepath.Join(s.worktreesRoot, id)
-	prepared, err := s.worktrees.Create(ctx, request.Workspace, destination)
-	if err != nil {
-		return protocol.AgentSession{}, err
-	}
-
 	created := protocol.AgentSession{
-		ID:            id,
-		Agent:         request.Agent,
-		Workspace:     prepared.Repository,
-		Worktree:      prepared.Path,
-		BaseCommit:    prepared.BaseCommit,
-		Status:        protocol.SessionActive,
-		CreatedAt:     s.now().UTC(),
-		CleanupStatus: protocol.CleanupNotStarted,
+		ID: id, Agent: request.Agent, Workspace: repository,
+		Status: protocol.SessionActive, CreatedAt: s.now().UTC(),
 	}
 	if err := s.store.CreateSession(ctx, created); err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		cleanupErr := s.worktrees.Remove(cleanupCtx, prepared.Repository, prepared.Path)
-		if cleanupErr != nil {
-			return protocol.AgentSession{}, errors.Join(fmt.Errorf("persist session: %w", err), cleanupErr)
-		}
 		return protocol.AgentSession{}, fmt.Errorf("persist session: %w", err)
 	}
 	return created, nil
@@ -95,33 +71,21 @@ func (s *Service) CloseSession(ctx context.Context, id string) (protocol.AgentSe
 	if strings.TrimSpace(id) == "" {
 		return protocol.AgentSession{}, fmt.Errorf("%w: session ID is required", ErrInvalidRequest)
 	}
-	session, err := s.store.PrepareSessionCleanup(ctx, id, s.now().UTC())
-	if errors.Is(err, storage.ErrRunActive) {
-		return protocol.AgentSession{}, ErrRunActive
-	}
+	session, err := s.store.GetSession(ctx, id)
 	if err != nil {
 		return protocol.AgentSession{}, err
 	}
-	if session.CleanupStatus == protocol.CleanupCompleted {
-		return session, nil
-	}
-
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	if err := s.worktrees.Remove(cleanupCtx, session.Workspace, session.Worktree); err != nil {
-		message := err.Error()
-		persistErr := s.store.FinishSessionCleanup(
-			cleanupCtx, id, protocol.CleanupFailed, &message, s.now().UTC(),
-		)
-		if persistErr != nil {
-			return protocol.AgentSession{}, errors.Join(fmt.Errorf("%w: %v", ErrCleanupFailed, err), persistErr)
+	if session.Status == protocol.SessionActive {
+		if err := s.store.CloseSession(ctx, id, s.now().UTC()); errors.Is(err, storage.ErrRunActive) {
+			return protocol.AgentSession{}, ErrRunActive
+		} else if err != nil {
+			return protocol.AgentSession{}, err
 		}
+	}
+	if err := s.repositories.CleanupSession(ctx, session.Workspace, session.ID); err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("%w: %v", ErrCleanupFailed, err)
 	}
-	if err := s.store.FinishSessionCleanup(cleanupCtx, id, protocol.CleanupCompleted, nil, s.now().UTC()); err != nil {
-		return protocol.AgentSession{}, err
-	}
-	return s.store.GetSession(cleanupCtx, id)
+	return s.store.GetSession(ctx, id)
 }
 
 func generateID() (string, error) {
