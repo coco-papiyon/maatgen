@@ -56,6 +56,22 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('#usage-tab').attributes('aria-selected')).toBe('true');
   });
 
+  it('opens Run details in the central pane and returns to the chat', async () => {
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#usage-tab').trigger('click');
+    await mounted.wrapper.find('.usage-run').trigger('click');
+
+    expect(mounted.wrapper.find('.run-detail').exists()).toBe(true);
+    expect(mounted.wrapper.find('.run-detail').text()).toContain('Mock usage run');
+    expect(mounted.wrapper.find('.timeline').exists()).toBe(false);
+    expect(mounted.wrapper.find('.composer').exists()).toBe(false);
+
+    await mounted.wrapper.find('.run-detail .quiet-button').trigger('click');
+    expect(mounted.wrapper.find('.run-detail').exists()).toBe(false);
+    expect(mounted.wrapper.find('.timeline').exists()).toBe(true);
+    expect(mounted.wrapper.find('.composer').exists()).toBe(true);
+  });
+
   it('shows Copilot AI credits instead of token metrics', async () => {
     const mounted = await mountApp();
     await mounted.wrapper.findAll('.session-item')[2]!.trigger('click');

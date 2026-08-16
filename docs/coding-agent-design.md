@@ -1,5 +1,7 @@
 # Coding Agent VS Code Extension 設計書
 
+> 2026-08-16更新: RunごとのUsage詳細表示はWeb版限定とする。Web版ではUsageのRunカードから中央Conversation領域をRun詳細へ切り替え、トークン内訳、コマンド、関連Eventを表示する。詳細画面にはチャットへ戻る導線を設ける。VS Code版のUsage UIは変更しない。
+
 > 2026-08-15更新: Agentは対象リポジトリを直接変更する。変更の承認操作は設けず、Run前後のcheckpoint差分を確認し、必要なFile／HunkだけをRun前の状態へ戻す。
 
 ## 1. 概要

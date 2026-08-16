@@ -769,6 +769,8 @@ docs/decisions/
 - [x] Component testとMock scenario
 - [x] Session履歴のkeyset pagination
 - [x] Manager未起動、認証失敗、Codex未導入の診断表示
+  - [x] UsageのRunカードから中央のRun詳細（トークン内訳、コマンド、関連Event）を表示し、チャットへ戻る導線を提供
+  - [x] Run詳細表示はWeb版限定とし、VS Code版のUsage UIは変更しない
 
 ### Phase 2：Agent Manager基盤（先行実装）
 
