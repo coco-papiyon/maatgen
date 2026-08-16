@@ -32,3 +32,10 @@ func TestRedactJSONRejectsInvalidJSON(t *testing.T) {
 		t.Fatal("invalid JSON was accepted")
 	}
 }
+
+func TestRedactStringMasksCommandCredentials(t *testing.T) {
+	redacted := RedactString("curl -H 'Authorization: Bearer secret-token' --api-key=sk-abcdefgh123 --password plain-secret")
+	if strings.Contains(redacted, "secret-token") || strings.Contains(redacted, "sk-abcdefgh123") || strings.Contains(redacted, "plain-secret") {
+		t.Fatalf("redacted command = %q", redacted)
+	}
+}

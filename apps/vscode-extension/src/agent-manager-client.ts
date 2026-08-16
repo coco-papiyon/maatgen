@@ -12,6 +12,18 @@ export interface ChangeFile {
   hunks: Array<{ id: string; oldStart?: number; newStart?: number }>;
 }
 export interface ChangeSet { sessionId: string; checkpointId: string; files: ChangeFile[]; }
+export interface CommandApproval {
+  id: string;
+  sessionId: string;
+  runId: string;
+  command: string;
+  status: string;
+  risk?: string;
+  summary?: string;
+  factors: string[];
+  segments: Array<{ index: number; command: string; argv: string[] }>;
+}
+export interface ApprovalDecisionRequest { decision: 'allow_once' | 'allow_session' | 'allow_permanent' | 'deny'; ruleArgv?: string[]; }
 interface CreateSessionRequest { agent: string; workspace: string; }
 interface SendMessageRequest { message: string; model?: string; timeoutSeconds?: number; }
 
@@ -64,6 +76,18 @@ export class AgentManagerClient {
 
   getUsage(id: string): Promise<SessionUsage> {
     return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/usage`);
+  }
+
+  listApprovals(id: string): Promise<CommandApproval[]> {
+    return this.request<{ approvals: CommandApproval[] }>(
+      `/api/v1/sessions/${encodeURIComponent(id)}/approvals?status=pending`,
+    ).then((response) => response.approvals);
+  }
+
+  decideApproval(sessionId: string, approvalId: string, request: ApprovalDecisionRequest): Promise<CommandApproval> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}/decision`, {
+      method: 'POST', body: JSON.stringify(request),
+    });
   }
 
   sendMessage(id: string, request: SendMessageRequest): Promise<AgentRun> {

@@ -1,0 +1,19 @@
+{
+  "id": "approval-1",
+  "sessionId": "session-1",
+  "runId": "run-1",
+  "providerRequestId": "42",
+  "command": "go test ./... && git status",
+  "shell": "powershell",
+  "workingDirectory": "C:/workspace",
+  "segments": [
+    { "index": 0, "command": "go test ./...", "argv": ["go", "test", "./..."] },
+    { "index": 1, "command": "git status", "argv": ["git", "status"] }
+  ],
+  "status": "pending",
+  "risk": "high",
+  "confidence": 0.96,
+  "summary": "One segment requires confirmation.",
+  "factors": ["compound-command"],
+  "createdAt": "2026-08-16T00:00:00Z"
+}

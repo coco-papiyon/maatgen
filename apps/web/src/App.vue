@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AgentRun, AgentSession, ChangeSet, Provider, SessionEvent, TokenUsage } from '@maatgen/protocol';
+import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, SessionEvent, TokenUsage, ApprovalDecision } from '@maatgen/protocol';
 import { AgentApiError, httpAgentApi, type AgentApi, type SessionUsage } from './api';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import { renderMarkdown } from './markdown';
@@ -24,6 +24,8 @@ const selected = ref<AgentSession>();
 const events = ref<SessionEvent[]>([]);
 const changes = ref<ChangeSet>(emptyChangeSet(''));
 const usage = ref<SessionUsage>(emptySessionUsage(''));
+const approvals = ref<CommandApproval[]>([]);
+const approvalRule = ref('');
 const workspace = ref('');
 const prompt = ref('');
 const activeRun = ref<AgentRun>();
@@ -67,6 +69,7 @@ const selectedRunCommands = computed(() => {
   return [...commands.values()];
 });
 const activeProvider = computed(() => selected.value?.agent ?? newSessionProvider.value);
+const pendingApproval = computed(() => approvals.value.find((approval) => approval.status === 'pending'));
 const availableModels = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.models ?? []);
 const providerLabel = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.label ?? activeProvider.value);
 const restorableChanges = computed(() => changes.value.files.reduce((total, file) => {
@@ -75,6 +78,7 @@ const restorableChanges = computed(() => changes.value.files.reduce((total, file
 }, 0));
 const statusLabel = computed(() => {
   if (!selected.value) return '待機中';
+  if (pendingApproval.value) return 'コマンド承認待ち';
   if (activeRun.value) return `${providerLabel.value} 実行中`;
   return selected.value.status === 'active' ? '準備完了' : '終了済み';
 });
@@ -212,6 +216,26 @@ function usageValue(usageData: TokenUsage | undefined, key: TokenUsageKey): stri
   return formatTokens(usageData?.[key]);
 }
 
+function formatApprovalRule(argv?: string[]): string {
+  return (argv ?? []).map((value) => /\s|["']/.test(value) ? JSON.stringify(value) : value).join(' ');
+}
+
+function parseApprovalRule(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith('[')) {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) throw new Error('許可ルールは文字列のJSON配列で指定してください。');
+    return parsed;
+  }
+  const tokens = trimmed.match(/"(?:\\.|[^"\\])*"|'[^']*'|\S+/g) ?? [];
+  return tokens.map((token) => {
+    if (token.startsWith('"')) return JSON.parse(token) as string;
+    if (token.startsWith("'") && token.endsWith("'")) return token.slice(1, -1);
+    return token;
+  });
+}
+
 async function refreshSessions(reset = false) {
   const page = await api.listSessions(undefined, 25);
   if (reset || sessions.value.length === 0) {
@@ -253,6 +277,8 @@ async function selectSession(session: AgentSession) {
   events.value = [];
   changes.value = emptyChangeSet(session.id);
   usage.value = emptySessionUsage(session.id);
+  approvals.value = [];
+  approvalRule.value = '';
   activeRun.value = undefined;
   error.value = '';
   diagnostic.value = undefined;
@@ -275,11 +301,12 @@ async function persistSelectedModel() {
 async function refreshSelected(full = false) {
   if (!selected.value) return;
   const id = selected.value.id;
-  const [session, newEvents, changeSet, sessionUsage] = await Promise.all([
+  const [session, newEvents, changeSet, sessionUsage, pendingApprovals] = await Promise.all([
     api.getSession(id),
     api.getEvents(id, full ? 0 : lastSequence.value),
     api.getChanges(id),
     api.getUsage(id),
+    api.listApprovals(id, true),
   ]);
   selected.value = session;
   if (full) events.value = newEvents;
@@ -287,20 +314,25 @@ async function refreshSelected(full = false) {
   restoreActiveRun(events.value);
   changes.value = changeSet;
   usage.value = sessionUsage;
+  approvals.value = pendingApprovals;
+  if (pendingApprovals[0] && !approvalRule.value) approvalRule.value = formatApprovalRule(pendingApprovals[0].segments[0]?.argv);
   updateDiagnosticFromEvents(newEvents);
   scrollTimelineToBottom();
 }
 
 async function refreshSelectedState(sessionId: string) {
-  const [session, changeSet, sessionUsage] = await Promise.all([
+  const [session, changeSet, sessionUsage, pendingApprovals] = await Promise.all([
     api.getSession(sessionId),
     api.getChanges(sessionId),
     api.getUsage(sessionId),
+    api.listApprovals(sessionId, true),
   ]);
   if (selected.value?.id !== sessionId) return;
   selected.value = session;
   changes.value = changeSet;
   usage.value = sessionUsage;
+  approvals.value = pendingApprovals;
+  approvalRule.value = formatApprovalRule(pendingApprovals[0]?.segments[0]?.argv);
   if (session.status !== 'active') {
     eventStream?.stop();
     eventStream = undefined;
@@ -326,7 +358,7 @@ function startEventStream(sessionId: string) {
       restoreActiveRun(events.value);
       updateDiagnosticFromEvents([event]);
       scrollTimelineToBottom();
-      if (['change_detected', 'change_restored', 'run_completed', 'run_failed', 'run_cancelled'].includes(event.type)) {
+      if (['change_detected', 'change_restored', 'run_completed', 'run_failed', 'run_cancelled', 'command_approval_requested', 'command_approval_decided'].includes(event.type)) {
         void refreshSelectedState(sessionId).catch((cause) => {
           handleFailure(cause);
         });
@@ -334,6 +366,19 @@ function startEventStream(sessionId: string) {
     },
   });
   eventStream.start();
+}
+
+async function decideApproval(decision: ApprovalDecision) {
+  if (!selected.value || !pendingApproval.value) return;
+  await act(async () => {
+    const ruleArgv = parseApprovalRule(approvalRule.value);
+    await api.decideApproval(selected.value!.id, pendingApproval.value!.id, {
+      decision,
+      ...(['allow_session', 'allow_permanent'].includes(decision) ? { ruleArgv } : {}),
+    });
+    approvals.value = await api.listApprovals(selected.value!.id, true);
+    approvalRule.value = formatApprovalRule(approvals.value[0]?.segments[0]?.argv);
+  });
 }
 
 async function createSession() {
@@ -726,6 +771,36 @@ onBeforeUnmount(() => {
       <div v-else class="no-changes"><span>◇</span><p>変更はまだありません</p><small>Run完了後にGit差分が表示されます。</small></div>
       </div>
     </aside>
+
+    <div v-if="pendingApproval" class="approval-backdrop">
+      <section class="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="approval-title">
+        <header class="approval-header">
+          <div>
+            <p class="eyebrow">COMMAND APPROVAL</p>
+            <h2 id="approval-title">コマンドの実行を許可しますか？</h2>
+          </div>
+          <span :class="['risk-badge', pendingApproval.risk ?? 'unknown']">{{ pendingApproval.risk ?? '未判定' }}</span>
+        </header>
+        <pre class="approval-command"><code>{{ pendingApproval.command }}</code></pre>
+        <p v-if="pendingApproval.summary" class="approval-summary">{{ pendingApproval.summary }}</p>
+        <ul v-if="pendingApproval.factors.length" class="approval-factors">
+          <li v-for="factor in pendingApproval.factors" :key="factor">{{ factor }}</li>
+        </ul>
+        <div class="approval-segments">
+          <span v-for="segment in pendingApproval.segments" :key="segment.index"><strong>{{ segment.index + 1 }}</strong><code>{{ segment.command }}</code></span>
+        </div>
+        <label class="approval-rule">
+          許可ルール（引数ごとに空白で区切り、<code>*</code>を使用可能）
+          <input v-model="approvalRule" type="text" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="approval-actions">
+          <button type="button" class="deny-button" :disabled="busy" @click="decideApproval('deny')">不許可</button>
+          <button type="button" :disabled="busy" @click="decideApproval('allow_once')">今回のみ許可</button>
+          <button type="button" :disabled="busy || !approvalRule.trim()" @click="decideApproval('allow_session')">セッション中許可</button>
+          <button type="button" class="primary-approval" :disabled="busy || !approvalRule.trim()" @click="decideApproval('allow_permanent')">永続的に許可</button>
+        </div>
+      </section>
+    </div>
 
     <div v-if="selectedChange" class="diff-backdrop" @click.self="selectedChangeId = ''">
       <section class="diff-dialog" role="dialog" aria-modal="true" :aria-label="`${changePath(selectedChange)} の差分`">

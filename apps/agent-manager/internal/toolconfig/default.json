@@ -3,7 +3,7 @@
     {
       "id": "codex",
       "label": "Codex",
-      "models": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.3-codex"]
+      "models": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.3-codex"]
     },
     {
       "id": "copilot",
@@ -11,5 +11,21 @@
       "models": ["auto", "claude-sonnet-4.6", "gpt-5.4", "claude-haiku-4.5", "gpt-5.3-codex"],
       "defaultModel": "auto"
     }
-  ]
+  ],
+  "commandApproval": {
+    "enabled": true,
+    "autoApproveMaxRisk": "low",
+    "humanResponseTimeoutSeconds": 600,
+    "reviewer": {
+      "provider": "same-as-run",
+      "modelByProvider": { "codex": "gpt-5.4-mini" },
+      "timeoutSeconds": 15,
+      "minConfidence": 0.8
+    },
+    "allowedCommands": [
+      { "argv": ["git", "status", "*"] },
+      { "argv": ["go", "test", "*"] },
+      { "argv": ["npm", "test", "*"] }
+    ]
+  }
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/copilot"
+	approvalservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/approval"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/changeset"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/eventbroker"
@@ -107,14 +108,29 @@ func run() error {
 	if deleted > 0 {
 		slog.Info("removed empty sessions", "count", deleted)
 	}
+	now := time.Now().UTC()
+	if expired, expireErr := store.ExpirePendingApprovals(context.Background(), now); expireErr != nil {
+		return fmt.Errorf("expire interrupted approvals: %w", expireErr)
+	} else if expired > 0 {
+		slog.Info("expired interrupted approvals", "count", expired)
+	}
+	if interrupted, interruptErr := store.FailInterruptedRuns(context.Background(), now); interruptErr != nil {
+		return fmt.Errorf("fail interrupted runs: %w", interruptErr)
+	} else if interrupted > 0 {
+		slog.Info("failed interrupted runs", "count", interrupted)
+	}
 	defer store.Close()
 	pricingModels := make(map[string][]string)
 	fallbackModels := make(map[string]string)
 	for _, provider := range toolConfig.Providers {
 		pricingModels[string(provider.ID)] = provider.Models
 		fallback := provider.DefaultModel
-		if fallback == "" && len(provider.Models) > 0 { fallback = provider.Models[0] }
-		if fallback != "auto" { fallbackModels[string(provider.ID)] = fallback }
+		if fallback == "" && len(provider.Models) > 0 {
+			fallback = provider.Models[0]
+		}
+		if fallback != "auto" {
+			fallbackModels[string(provider.ID)] = fallback
+		}
 	}
 	pricingCtx, cancelPricing := context.WithTimeout(context.Background(), 10*time.Second)
 	fetcher := pricing.Fetcher{}
@@ -139,7 +155,28 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	runs := runservice.NewMulti(store, []agent.Adapter{codex.New("codex"), copilot.New("copilot")}, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store))
+	approvalRules := make([][]string, 0, len(toolConfig.CommandApproval.AllowedCommands))
+	for _, rule := range toolConfig.CommandApproval.AllowedCommands {
+		approvalRules = append(approvalRules, append([]string(nil), rule.Argv...))
+	}
+	var reviewer approvalservice.Reviewer
+	if model := toolConfig.CommandApproval.Reviewer.ModelByProvider[string(protocol.AgentCodex)]; model != "" {
+		reviewer = approvalservice.CodexReviewer{Binary: "codex", Model: model}
+	}
+	approvals := approvalservice.New(store, approvalservice.Config{
+		Enabled: toolConfig.CommandApproval.Enabled, MaxRisk: toolConfig.CommandApproval.AutoApproveMaxRisk,
+		MinConfidence:   toolConfig.CommandApproval.Reviewer.MinConfidence,
+		HumanTimeout:    time.Duration(toolConfig.CommandApproval.HumanResponseTimeoutSeconds) * time.Second,
+		ReviewerTimeout: time.Duration(toolConfig.CommandApproval.Reviewer.TimeoutSeconds) * time.Second,
+		AllowedCommands: approvalRules, Reviewer: reviewer,
+		SavePermanentRule: func(argv []string) error {
+			modelConfigMu.Lock()
+			defer modelConfigMu.Unlock()
+			return toolconfig.SaveAllowedCommand(resolvedConfigPath, &toolConfig, argv)
+		},
+	})
+	defer approvals.Close()
+	runs := runservice.NewMulti(store, []agent.Adapter{codex.New("codex"), copilot.New("copilot")}, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle))
 	restores, err := restoreservice.New(store, checkpointManager)
 	if err != nil {
 		return err
@@ -187,7 +224,8 @@ func run() error {
 				defer modelConfigMu.Unlock()
 				return toolconfig.SaveDefaultModel(resolvedConfigPath, &toolConfig, provider, model)
 			},
-			UsageReader: store,
+			UsageReader:        store,
+			ApprovalController: approvals,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

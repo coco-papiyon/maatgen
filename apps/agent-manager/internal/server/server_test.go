@@ -475,6 +475,40 @@ func TestRestoreAPIErrors(t *testing.T) {
 	}
 }
 
+func TestCommandApprovalAPI(t *testing.T) {
+	controller := &fakeApprovalController{approval: protocol.CommandApproval{
+		ID: "approval-1", SessionID: "session-1", RunID: "run-1", ProviderRequestID: "provider-1",
+		Command: "go test ./...", Shell: "powershell", WorkingDirectory: "C:/workspace",
+		Status: protocol.ApprovalPending, Factors: []string{}, CreatedAt: time.Now().UTC(),
+	}}
+	config := testConfig()
+	config.ApprovalController = controller
+	handler := New(config, nil, nil).Handler()
+
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, authorizedRequest(http.MethodGet, "/api/v1/sessions/session-1/approvals?status=pending"))
+	if list.Code != http.StatusOK || controller.sessionID != "session-1" || !controller.pendingOnly {
+		t.Fatalf("list status = %d, controller = %#v", list.Code, controller)
+	}
+
+	decision := httptest.NewRecorder()
+	handler.ServeHTTP(decision, authorizedJSONRequest(http.MethodPost, "/api/v1/sessions/session-1/approvals/approval-1/decision", `{"decision":"allow_session","ruleArgv":["go","test","*"]}`))
+	if decision.Code != http.StatusOK || controller.approvalID != "approval-1" || controller.request.Decision != protocol.ApprovalAllowSession {
+		t.Fatalf("decision status = %d, controller = %#v, body = %s", decision.Code, controller, decision.Body.String())
+	}
+}
+
+func TestCommandApprovalDecisionConflict(t *testing.T) {
+	controller := &fakeApprovalController{err: storage.ErrConflict}
+	config := testConfig()
+	config.ApprovalController = controller
+	recorder := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedJSONRequest(http.MethodPost, "/api/v1/sessions/session-1/approvals/approval-1/decision", `{"decision":"deny"}`))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func testConfig() Config {
 	return Config{Version: "test", SchemaVersion: 1, AuthToken: "test-token"}
 }
@@ -600,6 +634,27 @@ func (f *fakeRestoreController) RestoreAll(_ context.Context, sessionID, checkpo
 }
 
 var _ RestoreController = (*fakeRestoreController)(nil)
+
+type fakeApprovalController struct {
+	sessionID   string
+	approvalID  string
+	pendingOnly bool
+	request     protocol.ApprovalDecisionRequest
+	approval    protocol.CommandApproval
+	err         error
+}
+
+func (f *fakeApprovalController) List(_ context.Context, sessionID string, pendingOnly bool) (protocol.ApprovalListResponse, error) {
+	f.sessionID, f.pendingOnly = sessionID, pendingOnly
+	return protocol.ApprovalListResponse{Approvals: []protocol.CommandApproval{f.approval}}, f.err
+}
+
+func (f *fakeApprovalController) Decide(_ context.Context, sessionID, approvalID string, request protocol.ApprovalDecisionRequest) (protocol.CommandApproval, error) {
+	f.sessionID, f.approvalID, f.request = sessionID, approvalID, request
+	return f.approval, f.err
+}
+
+var _ ApprovalController = (*fakeApprovalController)(nil)
 
 func (f *fakeSessionCreator) CreateSession(_ context.Context, request protocol.CreateSessionRequest) (protocol.AgentSession, error) {
 	f.request = request

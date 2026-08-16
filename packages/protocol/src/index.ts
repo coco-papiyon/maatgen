@@ -9,6 +9,7 @@ import type {
   RestoreStatus as GeneratedRestoreStatus,
 } from './generated/change-set.js';
 import type { CreateSessionRequest as GeneratedCreateSessionRequest } from './generated/create-session-request.js';
+import type { CommandApproval as GeneratedCommandApproval } from './generated/command-approval.js';
 import type { EventListResponse as GeneratedEventListResponse } from './generated/event-list.js';
 import type { ProviderListResponse as GeneratedProviderListResponse } from './generated/provider-list.js';
 import type { SendMessageRequest as GeneratedSendMessageRequest } from './generated/send-message-request.js';
@@ -27,6 +28,10 @@ export type AgentRun = GeneratedAgentRun;
 export type RunStatus = AgentRun['status'];
 
 export type TokenUsage = GeneratedTokenUsage;
+export type CommandApproval = GeneratedCommandApproval;
+export type ApprovalDecision = NonNullable<CommandApproval['decision']>;
+export interface ApprovalListResponse { approvals: CommandApproval[]; }
+export interface ApprovalDecisionRequest { decision: ApprovalDecision; ruleArgv?: string[]; }
 
 export interface RunUsageEntry {
   run: AgentRun;

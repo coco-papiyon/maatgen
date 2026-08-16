@@ -14,6 +14,7 @@ var (
 	bearerPattern     = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+`)
 	secretPattern     = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}\b`)
 	assignmentPattern = regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|password|authorization)(\s*[:=]\s*)([^\s,;]+)`)
+	flagPattern       = regexp.MustCompile(`(?i)(--?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|authorization)\s+)([^\s,;]+)`)
 )
 
 func RedactJSON(raw json.RawMessage) (json.RawMessage, error) {
@@ -28,6 +29,12 @@ func RedactJSON(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, fmt.Errorf("encode redacted JSON: %w", err)
 	}
 	return encoded, nil
+}
+
+// RedactString masks credentials in text before it is persisted or sent to a
+// diagnostic model.
+func RedactString(value string) string {
+	return redactString(value)
 }
 
 func redactValue(value any) any {
@@ -63,5 +70,6 @@ func sensitiveKey(key string) bool {
 func redactString(value string) string {
 	value = bearerPattern.ReplaceAllString(value, "Bearer "+redacted)
 	value = secretPattern.ReplaceAllString(value, redacted)
-	return assignmentPattern.ReplaceAllString(value, `$1$2`+redacted)
+	value = assignmentPattern.ReplaceAllString(value, `$1$2`+redacted)
+	return flagPattern.ReplaceAllString(value, `$1`+redacted)
 }

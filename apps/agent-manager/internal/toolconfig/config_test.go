@@ -25,6 +25,9 @@ func TestLoadRelativeToExecutable(t *testing.T) {
 	if path != filepath.Join(configDir, "providers.json") || config.Providers[0].Label != "Codex CLI" || len(config.Providers[0].Models) != 2 {
 		t.Fatalf("path = %q, config = %#v", path, config)
 	}
+	if !config.CommandApproval.Enabled {
+		t.Fatal("command approval should default to enabled when an older config omits the section")
+	}
 }
 
 func TestLoadUsesEmbeddedDefaultWhenFileIsMissing(t *testing.T) {
@@ -57,6 +60,28 @@ func TestSaveDefaultModel(t *testing.T) {
 	loaded, _, err := Load(filepath.Join(dir, "agent-manager.exe"), DefaultRelativePath)
 	if err != nil || loaded.Providers[0].DefaultModel != "model-b" || len(loaded.Providers[0].Models) != 2 {
 		t.Fatalf("loaded = %#v, err = %v", loaded, err)
+	}
+}
+
+func TestSaveAllowedCommandPersistsNormalizedArgvWithoutDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config", "providers.json")
+	config := Config{Providers: []protocol.Provider{{ID: protocol.AgentCodex, Label: "Codex", Models: []string{"model-a"}}}}
+	if err := SaveAllowedCommand(path, &config, []string{" go ", "test", "*"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveAllowedCommand(path, &config, []string{"go", "test", "*"}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := Load(filepath.Join(dir, "agent-manager.exe"), DefaultRelativePath)
+	if err != nil || len(loaded.CommandApproval.AllowedCommands) != 1 {
+		t.Fatalf("loaded = %#v, err = %v", loaded, err)
+	}
+	want := []string{"go", "test", "*"}
+	for index := range want {
+		if loaded.CommandApproval.AllowedCommands[0].Argv[index] != want[index] {
+			t.Fatalf("argv = %#v", loaded.CommandApproval.AllowedCommands[0].Argv)
+		}
 	}
 }
 

@@ -74,6 +74,7 @@ type Service struct {
 	changeDetector  ChangeDetector
 	checkpoints     CheckpointManager
 	pricing         PricingReader
+	approval        agent.ApprovalHandler
 }
 
 type Option func(*Service)
@@ -90,6 +91,10 @@ func WithCheckpointManager(manager CheckpointManager) Option {
 
 func WithPricingReader(reader PricingReader) Option {
 	return func(service *Service) { service.pricing = reader }
+}
+
+func WithApprovalHandler(handler agent.ApprovalHandler) Option {
+	return func(service *Service) { service.approval = handler }
 }
 
 func New(store Store, adapter agent.Adapter, options ...Option) *Service {
@@ -267,9 +272,17 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	if request.TimeoutSeconds != nil {
 		timeout = time.Duration(*request.TimeoutSeconds) * time.Second
 	}
+	var approvalHandler agent.ApprovalHandler
+	if s.approval != nil && session.Agent == protocol.AgentCodex {
+		approvalHandler = func(approvalCtx context.Context, approvalRequest agent.ApprovalRequest) (agent.ApprovalDecision, error) {
+			approvalRequest.SessionID = session.ID
+			approvalRequest.RunID = run.ID
+			return s.approval(approvalCtx, approvalRequest)
+		}
+	}
 	result, runErr := adapter.Run(ctx, agent.RunRequest{
 		Directory: session.Workspace, Prompt: run.Prompt, ThreadID: stringValue(session.AgentThreadID),
-		Model: model, Timeout: timeout,
+		Model: model, Timeout: timeout, Approval: approvalHandler,
 	}, func(output agent.Output) error {
 		if output.Stream == agent.OutputStderr {
 			return s.persistRaw(ctx, session.ID, run.ID, session.Agent, map[string]any{"stream": "stderr", "line": output.Line})
@@ -299,6 +312,11 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 			if session.Agent == protocol.AgentCopilot {
 				accumulatedUsage = addUsage(accumulatedUsage, usage)
 				usage = accumulatedUsage
+			} else {
+				if usage.ActualModel == nil && accumulatedUsage.ActualModel != nil {
+					usage.ActualModel = accumulatedUsage.ActualModel
+				}
+				accumulatedUsage = usage
 			}
 			if s.pricing != nil && usage.ActualModel != nil {
 				if rates, pricingErr := s.pricing.GetModelPricing(ctx, string(session.Agent), *usage.ActualModel); pricingErr == nil {
@@ -331,6 +349,26 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		}
 		return nil
 	})
+	if result.ActualModel != "" {
+		usage := accumulatedUsage
+		if usage.Source == "" {
+			usage.Source = "cli"
+		}
+		usage.ActualModel = &result.ActualModel
+		if usage.Model == nil && requestedModel != "" {
+			usage.Model = &requestedModel
+		}
+		if s.pricing != nil {
+			if rates, pricingErr := s.pricing.GetModelPricing(context.WithoutCancel(ctx), string(session.Agent), result.ActualModel); pricingErr == nil {
+				cost := pricing.CostUSD(usage, rates, usage.AICredits)
+				usage.CostUSD = &cost
+			}
+		}
+		raw := json.RawMessage(`{"source":"app-server-thread"}`)
+		if err := s.store.UpsertRunUsage(context.WithoutCancel(ctx), run.ID, usage, raw); err != nil && runErr == nil {
+			runErr = err
+		}
+	}
 
 	finishedAt := result.FinishedAt
 	if finishedAt.IsZero() {

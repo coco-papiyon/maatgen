@@ -7,7 +7,7 @@
 export interface AgentRun {
   id: string;
   sessionId: string;
-  status: 'queued' | 'starting' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'starting' | 'running' | 'waiting_for_approval' | 'completed' | 'failed' | 'cancelled';
   prompt: string;
   startedAt?: string;
   finishedAt?: string;

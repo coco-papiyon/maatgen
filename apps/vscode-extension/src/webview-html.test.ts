@@ -51,5 +51,8 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain("type: 'model.select'");
     expect(html).toContain("session.agent + ' · ' + session.status");
     expect(html).toContain("(provider?.label || 'Agent') + 'に指示する…'");
+    expect(html).toContain('id="approval-card"');
+    expect(html).toContain('data-approval-decision="allow_permanent"');
+    expect(html).toContain("type: 'approval.decide'");
   });
 });

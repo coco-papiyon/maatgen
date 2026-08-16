@@ -112,6 +112,15 @@ func (s *Store) DeleteEmptySessions(ctx context.Context) (int64, error) {
 	return affected, nil
 }
 
+func (s *Store) FailInterruptedRuns(ctx context.Context, finishedAt time.Time) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE runs SET status = 'failed', finished_at = COALESCE(finished_at, ?)
+		WHERE status IN ('queued', 'starting', 'running', 'waiting_for_approval')`, formatTime(finishedAt))
+	if err != nil {
+		return 0, fmt.Errorf("fail interrupted runs: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 func (s *Store) migrate(ctx context.Context) error {
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
@@ -251,7 +260,7 @@ func (s *Store) CloseSession(ctx context.Context, id string, closedAt time.Time)
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE sessions SET status = ?, closed_at = COALESCE(closed_at, ?)
 		 WHERE id = ? AND NOT EXISTS (
-		   SELECT 1 FROM runs WHERE session_id = ? AND status IN ('queued', 'starting', 'running')
+		   SELECT 1 FROM runs WHERE session_id = ? AND status IN ('queued', 'starting', 'running', 'waiting_for_approval')
 		 )`,
 		protocol.SessionClosed, formatTime(closedAt), id, id,
 	)
@@ -270,7 +279,7 @@ func (s *Store) CloseSession(ctx context.Context, id string, closedAt time.Time)
 		if exists == 0 {
 			return storage.ErrNotFound
 		}
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE session_id = ? AND status IN ('queued','starting','running')`, id).Scan(&active); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE session_id = ? AND status IN ('queued','starting','running','waiting_for_approval')`, id).Scan(&active); err != nil {
 			return err
 		}
 		if active > 0 {

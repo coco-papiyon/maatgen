@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { createNonce } from './nonce.js';
 import { renderWebviewHtml } from './webview-html.js';
 import { AgentManagerClient, type AgentProvider, type SessionUsage } from './agent-manager-client.js';
-import type { AgentSession, ChangeSet, SessionEvent } from './agent-manager-client.js';
+import type { AgentSession, ChangeSet, CommandApproval, SessionEvent } from './agent-manager-client.js';
 
 interface WorkspaceState {
   name: string;
@@ -16,6 +16,7 @@ type WebviewMessage =
   | { type: 'provider.select'; provider: string }
   | { type: 'model.select'; model: string }
   | { type: 'run.cancel' }
+  | { type: 'approval.decide'; approvalId: string; decision: 'allow_once' | 'allow_session' | 'allow_permanent' | 'deny'; ruleArgv?: string[] }
   | { type: 'session.select'; sessionId: string }
   | { type: 'session.close' };
 
@@ -34,6 +35,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   private pollTimer: ReturnType<typeof setInterval> | undefined;
   private syncBusy = false;
   private activeRunId: string | undefined;
+  private approvals: CommandApproval[] = [];
 
   constructor(private readonly extensionUri: vscode.Uri) {
     const config = vscode.workspace.getConfiguration('maatgen');
@@ -79,6 +81,8 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
           this.selectedModel = message.model;
         } else if (message.type === 'run.cancel' && this.activeRunId) {
           void this.manager.cancelRun(this.activeRunId).then(() => this.syncSession());
+        } else if (message.type === 'approval.decide' && this.session) {
+          void this.decideApproval(message);
         } else if (message.type === 'session.select') {
           this.selectedSessionId = message.sessionId;
           void this.syncSession();
@@ -89,6 +93,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
             this.selectedSessionId = undefined;
             this.events = [];
             this.activeRunId = undefined;
+            this.approvals = [];
             await this.postState(undefined, [], undefined, undefined);
           });
         }
@@ -115,6 +120,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         this.session = undefined;
         this.events = [];
         this.activeRunId = undefined;
+        this.approvals = [];
         await this.postState(undefined, [], undefined, undefined);
         return;
       }
@@ -141,15 +147,17 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         this.selectedModel = '';
       }
       if (!this.sessions.some((candidate) => candidate.id === this.session?.id)) this.sessions = [this.session, ...this.sessions];
-      const [session, events, usage, changes] = await Promise.all([
+      const [session, events, usage, changes, approvals] = await Promise.all([
         this.manager.getSession(this.session.id),
         this.manager.getEvents(this.session.id),
         this.manager.getUsage(this.session.id),
         this.manager.getChanges(this.session.id),
+        this.manager.listApprovals(this.session.id),
       ]);
       this.session = session;
       this.events = events;
       this.activeRunId = this.findActiveRunId(events);
+      this.approvals = approvals;
       await this.postState(session, events, usage, changes);
       this.startPolling();
     } catch (error) {
@@ -183,10 +191,23 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async decideApproval(message: Extract<WebviewMessage, { type: 'approval.decide' }>): Promise<void> {
+    if (!this.session) return;
+    try {
+      await this.manager.decideApproval(this.session.id, message.approvalId, {
+        decision: message.decision,
+        ...(message.ruleArgv?.length ? { ruleArgv: message.ruleArgv } : {}),
+      });
+      await this.syncSession();
+    } catch (error) {
+      await this.view?.webview.postMessage({ type: 'manager.error', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   private async postState(session: AgentSession | undefined, events: SessionEvent[], usage: SessionUsage | undefined, changes: ChangeSet | undefined): Promise<void> {
     await this.view?.webview.postMessage({
       type: 'session.state', workspace: this.getWorkspaceState(), sessions: this.sessions, session, events, usage, changes, activeRunId: this.activeRunId,
-      providers: this.providers, selectedProvider: this.selectedProvider, selectedModel: this.selectedModel,
+      approvals: this.approvals, providers: this.providers, selectedProvider: this.selectedProvider, selectedModel: this.selectedModel,
     });
   }
 

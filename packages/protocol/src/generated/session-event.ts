@@ -18,6 +18,8 @@ export interface SessionEvent {
     | 'reasoning_summary'
     | 'command_started'
     | 'command_completed'
+    | 'command_approval_requested'
+    | 'command_approval_decided'
     | 'file_change_reported'
     | 'usage_reported'
     | 'change_detected'

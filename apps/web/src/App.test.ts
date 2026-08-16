@@ -5,7 +5,7 @@ import App from './App.vue';
 import { AgentApiError } from './api';
 import type { EventStreamFactory } from './event-stream';
 import { createMockEnvironment, MockAgentApi } from './testing/mock-agent-api';
-import type { SessionEvent } from '@maatgen/protocol';
+import type { ApprovalDecisionRequest, CommandApproval, SessionEvent } from '@maatgen/protocol';
 
 let wrapper: VueWrapper | undefined;
 
@@ -44,6 +44,40 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.text()).toContain('認証処理を確認し、テストを追加しました。');
     expect(mounted.wrapper.find('.stream-state').text()).toBe('Live');
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
+  });
+
+  it('restores a pending command approval and submits a session rule', async () => {
+    class ApprovalApi extends MockAgentApi {
+      decision?: ApprovalDecisionRequest;
+      approval: CommandApproval = {
+        id: 'approval-1', sessionId: 'mock-success', runId: 'run-1', providerRequestId: 'provider-1',
+        command: 'go test ./internal/approval', shell: 'powershell', workingDirectory: 'C:/demo/success',
+        segments: [{ index: 0, command: 'go test ./internal/approval', argv: ['go', 'test', './internal/approval'] }],
+        status: 'pending', risk: 'high', summary: 'テストコマンドの確認が必要です', factors: ['workspace-write'],
+        createdAt: '2026-08-16T00:00:00Z',
+      };
+
+      override async listApprovals(id: string) {
+        return id === this.approval.sessionId && this.approval.status === 'pending' ? [this.approval] : [];
+      }
+
+      override async decideApproval(_sessionId: string, _approvalId: string, request: ApprovalDecisionRequest) {
+        this.decision = request;
+        this.approval = { ...this.approval, status: 'approved', decision: request.decision };
+        return this.approval;
+      }
+    }
+    const api = new ApprovalApi();
+    wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+
+    expect(wrapper.find('.approval-dialog').text()).toContain('go test ./internal/approval');
+    await wrapper.find('.approval-rule input').setValue('go test *');
+    await wrapper.findAll('.approval-actions button')[2]!.trigger('click');
+    await flushPromises();
+
+    expect(api.decision).toEqual({ decision: 'allow_session', ruleArgv: ['go', 'test', '*'] });
+    expect(wrapper.find('.approval-dialog').exists()).toBe(false);
   });
 
   it('switches the side panel between Usage and Changes tabs', async () => {

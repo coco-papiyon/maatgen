@@ -8,7 +8,7 @@
 
 Codex CLI版の共通Protocol、Session管理、Checkpoint／Diff／Restore、Web／VS Code連携が完了したため、次のAdapterとしてGitHub Copilot CLIを対象に加える。Claude Codeは引き続き後続対象とする。
 
-初期のCodex連携には、安定扱いの `codex exec --json` を使用する。Codex App Serverはexperimentalであるため、初期実装では採用しない。
+Codexの実行前コマンド承認には双方向通信が必要なため、通常Runは`codex app-server --stdio`を使用する。短命なAI診断はtool実行を許可しない`codex exec --json`を使用する。詳細は[ADR-006](./decisions/006-command-approval.md)に従う。
 
 ## 2. MVPの完成条件
 
@@ -21,7 +21,7 @@ Codex CLI版の共通Protocol、Session管理、Checkpoint／Diff／Restore、We
 5. CodexのJSONL出力をリアルタイム表示する
 6. Prompt、Assistant message、Command、File change、Usage、Raw Eventを保存する
 7. Run前後の実Git差分からChangeSetを作成して表示する
-8. 承認操作なしで変更を利用でき、不要なFile／HunkだけをRun前checkpointへ戻せる
+8. コマンドは設定、AI診断、利用者確認の順に実行前承認し、Agentによるファイル変更自体はAccept操作なしで利用できる
 9. 利用者が直接編集した現在のコードから、同じSessionで次のCodex指示を継続できる
 10. Session履歴を再起動後も表示できる
 11. WebSocket切断後にEventを再取得して表示を復元する
@@ -30,19 +30,7 @@ Codex CLI版の共通Protocol、Session管理、Checkpoint／Diff／Restore、We
 
 ### 3.1 Codexの実行方式
 
-```text
-codex exec --json --sandbox workspace-write --cd <repository> -
-```
-
-Promptはstdinから渡す。stdoutはJSONL、stderrは診断ログとして扱う。
-
-追加メッセージは次の形でCodex Threadを再開する。
-
-```text
-codex exec resume <codexThreadId> --json --cd <repository> -
-```
-
-App Server、TUIのPTY制御、Codex内部データベースの直接参照は初期対象外とする。
+通常Runは`codex app-server --stdio`を起動し、JSON-RPCの`thread/start`または`thread/resume`、`turn/start`を使用する。stdoutはresponse、notification、server requestへ振り分け、stderrは診断ログとして扱う。コマンド承認server requestへの応答中もread loopを継続する。TUIのPTY制御とCodex内部データベースの直接参照は対象外とする。
 
 ### 3.2 SessionとRunを分離する
 
@@ -73,6 +61,7 @@ interface AgentRun {
     | 'queued'
     | 'starting'
     | 'running'
+    | 'waiting_for_approval'
     | 'completed'
     | 'failed'
     | 'cancelled';
@@ -639,7 +628,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-14 | Session開始条件 | Git repositoryであること。dirty Working Treeを許可しRun前checkpointへ含める | Git repositoryであれば開始可能とし、既存のtracked／untracked non-ignored変更をRun前checkpointへ含める | Phase 0開始前 | 検討済み |
 | D-15 | Codex実行バイナリ検出 | PATHから検出し、shellを介さず`codex --version`で検証・絶対パスとversionを保存 | `exec.LookPath`で検出し、shellなしの`--version`成功後に絶対パスとversionをAdapterへ保持 | Phase 0開始前 | 検討済み |
 | D-16 | Codex sandbox policy | `workspace-write` | `workspace-write` | Codex Adapter着手前 | 検討済み |
-| D-17 | Codex approval policy | 初期版は明示的な固定値として設定 | `--ask-for-approval never`。承認待ちを発生させず、失敗をCodexへ返す | Codex Adapter着手前 | 検討済み |
+| D-17 | Codex approval policy | 設定、AI診断、利用者確認の三段階 | App Serverの承認requestをAgent Managerで判定する。診断用Codexだけ`--ask-for-approval never`とread-only sandboxを使用する | Codex Adapter着手前 | 検討済み |
 | D-18 | Codex model指定 | 未指定時はCodex設定に委譲し、要求値だけ保存 | 未指定時はCLI設定へ委譲し、指定時だけ`--model`を渡す。Web UIで選択した既定モデルは、Managerのツール設定（`config/providers.json`）へ保存し、次回起動時に復元する | Codex Adapter着手前 | 検討済み |
 | D-19 | Codex timeout | Run単位の上限時間を設定可能にする | 既定30分。Run要求で変更可能とし、timeout時はプロセスツリーを終了する | Codex Adapter着手前 | 検討済み |
 | D-20 | 認証方式 | HTTP Bearer token、WebSocket短命ticket | HTTP Bearer token、WebSocket短命ticket | Phase 2開始前 | 検討済み |
@@ -866,3 +855,17 @@ docs/decisions/
 - [x] Protocol／SQLite schemaのCodex＋Copilot対応
 - [x] Web／VS CodeのProvider／Model選択とCLI診断表示
 - [x] fake Copilot CLI、parser、複数Adapter統合テスト
+
+### Phase 10：Codexコマンド承認
+
+- [x] `commandApproval`設定とargv単位の許可ルール
+- [x] 複合commandのsegment分割と全segment照合
+- [x] Codex App Serverのread loop、pending response map、直列write
+- [x] 軽量Codexモデルによる短命Diagnostic Reviewer
+- [x] `waiting_for_approval`、approval Event、SQLite migration
+- [x] pending一覧／decision HTTP APIと二重応答の競合検出
+- [x] 1回、Session、永続、不許可のdecision scope
+- [x] Web／VS Codeのpending復元と承認UI
+- [x] cancel、timeout、Manager再起動時のfail-closed recovery
+- [x] parser、rule、AI、human decision、永続化のGoテスト
+- [ ] 実Codex CLIを使ったWindows／macOS／Linux手動統合試験

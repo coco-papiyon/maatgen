@@ -49,6 +49,15 @@ button { font: inherit; }
 .run-options { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }.run-options label { display: grid; gap: 3px; color: var(--muted); font-size: 10px; }.run-options select { min-width: 0; padding: 4px; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); }
 .session-card-header { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font: 10px var(--vscode-editor-font-family); }
 .session-card-header .eyebrow { margin: 0; }.event-list { flex: 1 1 auto; min-height: 80px; overflow: auto; }
+.approval-card { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--vscode-focusBorder); border-radius: 5px; background: var(--vscode-editorWidget-background); }
+.approval-card[hidden] { display: none; }
+.approval-heading { display: flex; justify-content: space-between; align-items: center; }.approval-heading .eyebrow { margin: 0; }
+.approval-risk { padding: 2px 5px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font: 700 8px var(--vscode-editor-font-family); text-transform: uppercase; }
+.approval-risk.safe, .approval-risk.low { color: var(--green); }.approval-risk.high, .approval-risk.critical { color: var(--vscode-errorForeground); border-color: var(--vscode-inputValidation-errorBorder); }
+.approval-card > strong { font-size: 11px; }.approval-card pre { max-height: 90px; overflow: auto; margin: 0; padding: 7px; color: var(--vscode-editor-foreground); background: var(--vscode-textCodeBlock-background); font: 10px/1.45 var(--vscode-editor-font-family); white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval-summary { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.approval-rule { display: grid; gap: 4px; color: var(--muted); font-size: 9px; }.approval-rule input { width: 100%; padding: 5px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--line)); font: 10px var(--vscode-editor-font-family); }
+.approval-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }.approval-actions button { padding: 5px 4px; border: 0; border-radius: 3px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); font-size: 9px; cursor: pointer; }.approval-actions .deny-action { color: var(--vscode-errorForeground); background: transparent; border: 1px solid var(--vscode-inputValidation-errorBorder); }
 .event-item { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 7px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 11px; }
 .event-label { color: var(--muted); font: 9px var(--vscode-editor-font-family); text-transform: uppercase; }.event-content { overflow-wrap: anywhere; }
 .event-item.error, .event-item.run-failed { color: var(--vscode-errorForeground); }.prompt-form textarea { width: 100%; resize: vertical; padding: 7px; border: 1px solid var(--line); color: var(--vscode-input-foreground); background: var(--vscode-input-background); }

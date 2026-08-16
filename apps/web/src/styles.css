@@ -184,6 +184,28 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .no-changes > span { font-size: 25px; color: #3f4d42; }.no-changes p { margin: 12px 0 4px; color: #9ba69d; font-size: 12px; }.no-changes small { font-size: 10px; line-height: 1.6; }
 
 .diff-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 28px; background: rgba(3, 7, 4, .76); backdrop-filter: blur(5px); }
+.approval-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 28px; background: rgba(3, 7, 4, .82); backdrop-filter: blur(6px); }
+.approval-dialog { width: min(680px, 100%); max-height: calc(100vh - 56px); overflow: auto; padding: 22px; border: 1px solid #415b46; border-radius: 10px; background: #101712; box-shadow: 0 22px 70px rgba(0, 0, 0, .55); }
+.approval-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.approval-header h2 { margin: 2px 0 14px; color: #e4eee6; font-size: 18px; }
+.risk-badge { padding: 4px 8px; border: 1px solid #59645b; border-radius: 999px; color: #abb5ad; font: 700 10px ui-monospace, monospace; text-transform: uppercase; }
+.risk-badge.safe, .risk-badge.low { border-color: #3e7650; color: #75d391; background: #17301e; }
+.risk-badge.high, .risk-badge.critical { border-color: #8c493f; color: #ff9a86; background: #351a16; }
+.approval-command { overflow: auto; margin: 0; padding: 14px; border: 1px solid #2c3a2f; border-radius: 6px; color: #d6e4d8; background: #080d09; font: 12px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval-summary { margin: 12px 0 4px; color: #c6d1c8; line-height: 1.5; }
+.approval-factors { margin: 7px 0 0; padding-left: 20px; color: #93a096; font-size: 12px; }
+.approval-segments { display: grid; gap: 5px; margin: 14px 0; }
+.approval-segments span { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 7px; align-items: baseline; color: #aeb9b0; font-size: 11px; }
+.approval-segments strong { color: var(--green); font: 600 10px ui-monospace, monospace; }
+.approval-segments code { overflow-wrap: anywhere; }
+.approval-rule { display: grid; gap: 6px; color: #8e9b90; font-size: 11px; }
+.approval-rule input { width: 100%; padding: 9px 10px; border: 1px solid #344438; border-radius: 5px; color: #e0e9e2; background: #0a100b; font: 12px ui-monospace, monospace; }
+.approval-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 18px; }
+.approval-actions button { padding: 8px 11px; border: 1px solid #3b4d3e; border-radius: 5px; color: #cbd6cd; background: #18211a; cursor: pointer; }
+.approval-actions button:hover:not(:disabled) { border-color: #66806b; background: #202c23; }
+.approval-actions button:disabled { opacity: .45; cursor: default; }
+.approval-actions .deny-button { margin-right: auto; border-color: #68423c; color: #e6a99e; background: #291816; }
+.approval-actions .primary-approval { border-color: #4c865c; color: #09110b; background: var(--green); }
 .diff-dialog { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(1040px, 96vw); max-height: 90vh; overflow: hidden; border: 1px solid #35453a; border-radius: 12px; background: #0f1510; box-shadow: 0 30px 100px rgba(0, 0, 0, .58); }
 .diff-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .diff-header h2 { margin: 0; font: 600 15px ui-monospace, monospace; }
@@ -222,6 +244,9 @@ button:disabled { opacity: .42; cursor: not-allowed; }
   .run-detail { padding-inline: 18px; }.run-detail-header { align-items: flex-start; }.run-detail-metrics, .detail-token-grid { grid-template-columns: 1fr; }
   .composer { margin-inline: 14px; }
   .diff-backdrop { padding: 8px; }
+  .approval-backdrop { padding: 8px; }
+  .approval-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .approval-actions .deny-button { margin-right: 0; }
   .diff-dialog { width: 100%; max-height: 96vh; }
   .diff-columns { grid-template-columns: 1fr; }
   .diff-side + .diff-side { border-left: 0; border-top: 1px solid #2b372e; }

@@ -2,6 +2,7 @@ import type {
   AgentRun,
   AgentSession,
   ChangeSet,
+  CommandApproval,
   CreateSessionRequest,
   RestoreStatus,
   SendMessageRequest,
@@ -157,6 +158,14 @@ export class MockAgentApi implements AgentApi {
       }
     }
     return clone({ sessionId: id, summary, runs });
+  }
+
+  async listApprovals(_id: string): Promise<CommandApproval[]> {
+    return [];
+  }
+
+  async decideApproval(_sessionId: string, _approvalId: string, _request: import('@maatgen/protocol').ApprovalDecisionRequest): Promise<CommandApproval> {
+    throw new Error('mock approval was not found');
   }
 
   restoreHunk(sessionId: string, _checkpointId: string, hunkId: string): Promise<ChangeSet> {

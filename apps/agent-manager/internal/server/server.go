@@ -18,21 +18,22 @@ import (
 )
 
 type Config struct {
-	Version           string
-	SchemaVersion     int
-	DefaultWorkspace  string
-	AuthToken         string
-	AllowedOrigins    []string
-	TicketTTL         time.Duration
-	EventSubscriber   EventSubscriber
-	SessionCreator    SessionCreator
-	SessionCloser     SessionCloser
-	RunController     RunController
-	ChangeReader      ChangeReader
-	RestoreController RestoreController
-	Providers         []protocol.Provider
-	ModelSetter       ModelSetter
-	UsageReader       UsageReader
+	Version            string
+	SchemaVersion      int
+	DefaultWorkspace   string
+	AuthToken          string
+	AllowedOrigins     []string
+	TicketTTL          time.Duration
+	EventSubscriber    EventSubscriber
+	SessionCreator     SessionCreator
+	SessionCloser      SessionCloser
+	RunController      RunController
+	ChangeReader       ChangeReader
+	RestoreController  RestoreController
+	Providers          []protocol.Provider
+	ModelSetter        ModelSetter
+	UsageReader        UsageReader
+	ApprovalController ApprovalController
 }
 
 type ModelSetter func(ctx context.Context, provider protocol.AgentName, model string) error
@@ -80,6 +81,11 @@ type ChangeReader interface {
 
 type UsageReader interface {
 	GetSessionUsage(ctx context.Context, sessionID string) (protocol.SessionUsage, error)
+}
+
+type ApprovalController interface {
+	List(ctx context.Context, sessionID string, pendingOnly bool) (protocol.ApprovalListResponse, error)
+	Decide(ctx context.Context, sessionID, approvalID string, request protocol.ApprovalDecisionRequest) (protocol.CommandApproval, error)
 }
 
 type RestoreController interface {
@@ -189,6 +195,38 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
+		})))
+	}
+	if config.ApprovalController != nil {
+		mux.Handle("GET /api/v1/sessions/{id}/approvals", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			pendingOnly := r.URL.Query().Get("status") == "pending"
+			response, err := config.ApprovalController.List(r.Context(), r.PathValue("id"), pendingOnly)
+			if err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		})))
+		mux.Handle("POST /api/v1/sessions/{id}/approvals/{approvalId}/decision", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request protocol.ApprovalDecisionRequest
+			if err := readJSON(w, r, &request); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
+				return
+			}
+			approval, err := config.ApprovalController.Decide(r.Context(), r.PathValue("id"), r.PathValue("approvalId"), request)
+			if err != nil {
+				if errors.Is(err, storage.ErrConflict) {
+					writeAPIError(w, http.StatusConflict, "approval_conflict", err.Error(), nil)
+					return
+				}
+				if errors.Is(err, storage.ErrNotFound) {
+					writeStorageError(w, err)
+					return
+				}
+				writeAPIError(w, http.StatusBadRequest, "invalid_approval", err.Error(), nil)
+				return
+			}
+			writeJSON(w, http.StatusOK, approval)
 		})))
 	}
 

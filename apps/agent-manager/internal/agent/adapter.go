@@ -23,7 +23,25 @@ type RunRequest struct {
 	ThreadID  string
 	Model     string
 	Timeout   time.Duration
+	Approval  ApprovalHandler
 }
+
+type ApprovalRequest struct {
+	ProviderRequestID string
+	SessionID         string
+	RunID             string
+	Command           string
+	Shell             string
+	WorkingDirectory  string
+	Explanation       string
+}
+
+type ApprovalDecision struct {
+	Approved bool
+	Reason   string
+}
+
+type ApprovalHandler func(context.Context, ApprovalRequest) (ApprovalDecision, error)
 
 type OutputStream string
 
@@ -52,11 +70,12 @@ type ParsedLine struct {
 }
 
 type RunResult struct {
-	ExitCode   int
-	StartedAt  time.Time
-	FinishedAt time.Time
-	Canceled   bool
-	TimedOut   bool
+	ExitCode    int
+	StartedAt   time.Time
+	FinishedAt  time.Time
+	Canceled    bool
+	TimedOut    bool
+	ActualModel string
 }
 
 type Emitter func(Output) error

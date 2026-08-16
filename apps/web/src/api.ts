@@ -8,6 +8,8 @@ import type {
   SessionListResponse,
   ProviderListResponse,
   WsTicketResponse,
+  CommandApproval,
+  ApprovalDecisionRequest,
 } from '@maatgen/protocol';
 
 export interface SessionUsage {
@@ -30,6 +32,8 @@ export interface AgentApi {
   issueWebSocketTicket(): Promise<WsTicketResponse>;
   getChanges(id: string): Promise<ChangeSet>;
   getUsage(id: string): Promise<SessionUsage>;
+  listApprovals(id: string, pendingOnly?: boolean): Promise<CommandApproval[]>;
+  decideApproval(sessionId: string, approvalId: string, request: ApprovalDecisionRequest): Promise<CommandApproval>;
   restoreHunk(sessionId: string, checkpointId: string, hunkId: string): Promise<ChangeSet>;
   restoreFile(sessionId: string, checkpointId: string, fileId: string): Promise<ChangeSet>;
   restoreAllChanges(sessionId: string, checkpointId: string): Promise<ChangeSet>;
@@ -123,6 +127,16 @@ export const httpAgentApi: AgentApi = {
   },
   getUsage(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/usage`);
+  },
+  async listApprovals(id, pendingOnly = true) {
+    const suffix = pendingOnly ? '?status=pending' : '';
+    const response = await request<{ approvals: CommandApproval[] }>(`/api/v1/sessions/${encodeURIComponent(id)}/approvals${suffix}`);
+    return response.approvals;
+  },
+  decideApproval(sessionId, approvalId, requestBody) {
+    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}/decision`, {
+      method: 'POST', body: JSON.stringify(requestBody),
+    });
   },
   restoreHunk(sessionId, checkpointId, hunkId) {
     return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/hunks/${encodeURIComponent(hunkId)}/restore`, { method: 'POST' });

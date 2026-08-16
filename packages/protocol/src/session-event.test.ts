@@ -16,6 +16,7 @@ const contracts = [
   'ws-ticket',
   'create-session-request',
   'send-message-request',
+  'command-approval',
 ] as const;
 
 function readJSON(path: string): Record<string, unknown> {

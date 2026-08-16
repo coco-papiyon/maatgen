@@ -8,7 +8,7 @@
   "properties": {
     "id": { "type": "string", "minLength": 1 },
     "sessionId": { "type": "string", "minLength": 1 },
-    "status": { "enum": ["queued", "starting", "running", "completed", "failed", "cancelled"] },
+    "status": { "enum": ["queued", "starting", "running", "waiting_for_approval", "completed", "failed", "cancelled"] },
     "prompt": { "type": "string", "minLength": 1 },
     "startedAt": { "type": "string", "format": "date-time" },
     "finishedAt": { "type": "string", "format": "date-time" },

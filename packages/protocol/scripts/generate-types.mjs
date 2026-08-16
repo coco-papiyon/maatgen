@@ -11,6 +11,7 @@ const schemas = [
   'agent-session',
   'api-error',
   'change-set',
+  'command-approval',
   'create-session-request',
   'event-list',
   'provider-list',

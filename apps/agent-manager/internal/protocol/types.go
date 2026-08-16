@@ -35,12 +35,13 @@ const (
 type RunStatus string
 
 const (
-	RunQueued    RunStatus = "queued"
-	RunStarting  RunStatus = "starting"
-	RunRunning   RunStatus = "running"
-	RunCompleted RunStatus = "completed"
-	RunFailed    RunStatus = "failed"
-	RunCancelled RunStatus = "cancelled"
+	RunQueued             RunStatus = "queued"
+	RunStarting           RunStatus = "starting"
+	RunRunning            RunStatus = "running"
+	RunWaitingForApproval RunStatus = "waiting_for_approval"
+	RunCompleted          RunStatus = "completed"
+	RunFailed             RunStatus = "failed"
+	RunCancelled          RunStatus = "cancelled"
 )
 
 type AgentSession struct {
@@ -79,6 +80,88 @@ type AgentRun struct {
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	ExitCode   *int       `json:"exitCode,omitempty"`
+}
+
+type ApprovalStatus string
+
+const (
+	ApprovalPending   ApprovalStatus = "pending"
+	ApprovalApproved  ApprovalStatus = "approved"
+	ApprovalDenied    ApprovalStatus = "denied"
+	ApprovalCancelled ApprovalStatus = "cancelled"
+	ApprovalExpired   ApprovalStatus = "expired"
+)
+
+type ApprovalRisk string
+
+const (
+	ApprovalRiskSafe     ApprovalRisk = "safe"
+	ApprovalRiskLow      ApprovalRisk = "low"
+	ApprovalRiskHigh     ApprovalRisk = "high"
+	ApprovalRiskCritical ApprovalRisk = "critical"
+)
+
+type ApprovalScope string
+
+const (
+	ApprovalScopeOnce      ApprovalScope = "once"
+	ApprovalScopeSession   ApprovalScope = "session"
+	ApprovalScopePermanent ApprovalScope = "permanent"
+)
+
+type ApprovalDecision string
+
+const (
+	ApprovalAllowOnce      ApprovalDecision = "allow_once"
+	ApprovalAllowSession   ApprovalDecision = "allow_session"
+	ApprovalAllowPermanent ApprovalDecision = "allow_permanent"
+	ApprovalDeny           ApprovalDecision = "deny"
+)
+
+type ApprovalSource string
+
+const (
+	ApprovalSourceConfig ApprovalSource = "config"
+	ApprovalSourceAI     ApprovalSource = "ai"
+	ApprovalSourceHuman  ApprovalSource = "human"
+	ApprovalSourceSystem ApprovalSource = "system"
+)
+
+type CommandSegment struct {
+	Index   int      `json:"index"`
+	Command string   `json:"command"`
+	Argv    []string `json:"argv"`
+}
+
+type CommandApproval struct {
+	ID                string            `json:"id"`
+	SessionID         string            `json:"sessionId"`
+	RunID             string            `json:"runId"`
+	ProviderRequestID string            `json:"providerRequestId"`
+	Command           string            `json:"command"`
+	Shell             string            `json:"shell"`
+	WorkingDirectory  string            `json:"workingDirectory"`
+	Segments          []CommandSegment  `json:"segments"`
+	Status            ApprovalStatus    `json:"status"`
+	Risk              *ApprovalRisk     `json:"risk,omitempty"`
+	Confidence        *float64          `json:"confidence,omitempty"`
+	Summary           *string           `json:"summary,omitempty"`
+	Factors           []string          `json:"factors"`
+	Decision          *ApprovalDecision `json:"decision,omitempty"`
+	Scope             *ApprovalScope    `json:"scope,omitempty"`
+	Source            *ApprovalSource   `json:"source,omitempty"`
+	RuleArgv          []string          `json:"ruleArgv,omitempty"`
+	CreatedAt         time.Time         `json:"createdAt"`
+	DecidedAt         *time.Time        `json:"decidedAt,omitempty"`
+}
+
+type ApprovalListResponse struct {
+	Approvals []CommandApproval `json:"approvals"`
+}
+
+type ApprovalDecisionRequest struct {
+	Decision ApprovalDecision `json:"decision"`
+	RuleArgv []string         `json:"ruleArgv,omitempty"`
 }
 
 type TokenUsage struct {
@@ -127,20 +210,22 @@ type SessionEvent struct {
 }
 
 const (
-	EventTypeUserPrompt         = "user_prompt"
-	EventTypeAssistantMessage   = "assistant_message"
-	EventTypeReasoningSummary   = "reasoning_summary"
-	EventTypeCommandStarted     = "command_started"
-	EventTypeCommandCompleted   = "command_completed"
-	EventTypeFileChangeReported = "file_change_reported"
-	EventTypeCheckpointCreated  = "checkpoint_created"
-	EventTypeChangeRestored     = "change_restored"
-	EventTypeUsageReported      = "usage_reported"
-	EventTypeRunStarted         = "run_started"
-	EventTypeRunCompleted       = "run_completed"
-	EventTypeRunFailed          = "run_failed"
-	EventTypeRunCancelled       = "run_cancelled"
-	EventTypeError              = "error"
+	EventTypeUserPrompt               = "user_prompt"
+	EventTypeAssistantMessage         = "assistant_message"
+	EventTypeReasoningSummary         = "reasoning_summary"
+	EventTypeCommandStarted           = "command_started"
+	EventTypeCommandCompleted         = "command_completed"
+	EventTypeCommandApprovalRequested = "command_approval_requested"
+	EventTypeCommandApprovalDecided   = "command_approval_decided"
+	EventTypeFileChangeReported       = "file_change_reported"
+	EventTypeCheckpointCreated        = "checkpoint_created"
+	EventTypeChangeRestored           = "change_restored"
+	EventTypeUsageReported            = "usage_reported"
+	EventTypeRunStarted               = "run_started"
+	EventTypeRunCompleted             = "run_completed"
+	EventTypeRunFailed                = "run_failed"
+	EventTypeRunCancelled             = "run_cancelled"
+	EventTypeError                    = "error"
 )
 
 type FileChangeKind string

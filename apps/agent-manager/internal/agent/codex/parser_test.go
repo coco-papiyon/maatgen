@@ -129,6 +129,28 @@ func TestParseKnownIncompleteEventAsMalformed(t *testing.T) {
 	}
 }
 
+func TestParseAppServerNotifications(t *testing.T) {
+	thread := ParseLine(`{"method":"thread/started","params":{"thread":{"id":"thread-app-server"}}}`)
+	if thread.ThreadID != "thread-app-server" {
+		t.Fatalf("thread = %#v", thread)
+	}
+	command := ParseLine(`{"method":"item/completed","params":{"item":{"id":"item-1","type":"commandExecution","command":"go test ./...","status":"completed","aggregatedOutput":"ok","exitCode":0}}}`)
+	if len(command.Events) != 1 || command.Events[0].Type != protocol.EventTypeCommandCompleted {
+		t.Fatalf("command = %#v", command)
+	}
+	usage := ParseLine(`{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"last":{"inputTokens":10,"cachedInputTokens":4,"outputTokens":3,"totalTokens":13,"model":"gpt-5.4"}}}}`)
+	if usage.Usage == nil || usage.Usage.ActualModel == nil || *usage.Usage.ActualModel != "gpt-5.4" || usage.Usage.TotalTokens == nil || *usage.Usage.TotalTokens != 13 {
+		t.Fatalf("usage = %#v", usage.Usage)
+	}
+}
+
+func TestAppServerApprovalCommandUsesExactCommandAndWorkingDirectory(t *testing.T) {
+	command, cwd, reason := appServerApprovalCommand(json.RawMessage(`{"command":"go test ./... && git status","cwd":"C:/workspace/subdir","reason":"run tests","commandActions":[{"command":"go test ./..."},{"command":"git status"}]}`))
+	if command != "go test ./... && git status" || cwd != "C:/workspace/subdir" || reason != "run tests" {
+		t.Fatalf("command = %q, cwd = %q, reason = %q", command, cwd, reason)
+	}
+}
+
 func parseFixture(t *testing.T, path string) []ParsedLine {
 	t.Helper()
 	file, err := os.Open(path)

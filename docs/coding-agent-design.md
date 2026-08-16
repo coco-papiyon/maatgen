@@ -281,6 +281,7 @@ VS Code Extension から各 CLI を直接起動せず、原則としてすべて
 Agent Manager
 ├─ Agent process 起動
 ├─ Agent process 停止
+├─ コマンド承認（設定／AI診断／利用者）
 ├─ Session 管理
 ├─ CLI JSON / JSONL 解析
 ├─ 共通Event形式への変換
@@ -324,8 +325,21 @@ CodingAgent
 - Tool / Command イベント
 - Error 表現
 - 終了コード
+- 実行前コマンド承認request／response
 
-### 9.1 GitHub Copilot CLI Adapter
+### 9.1 Codex CLI Adapterとコマンド承認
+
+通常RunのCodex Adapterは、承認要求を双方向に扱うため`codex app-server --stdio`を起動する。Adapter内のread loopはJSON-RPC response、notification、server requestを振り分け、write mutexでrequestとapproval responseを直列化する。`item/commandExecution/requestApproval`はAgent Manager内のApproval Coordinatorへ渡し、判定完了後に`accept`または`decline`をCodexへ返す。Run自体はHTTP requestから独立したworkerで動作するため、利用者の承認待ちでもAPI、Event配信、別SessionのRunを停止しない。
+
+Approval Coordinatorは次の順にfail-closedで判定する。
+
+1. `commandApproval.allowedCommands`のargvルールに全command segmentが一致すれば設定で許可する。
+2. 一致しなければ、同じProviderの設定済み軽量モデルをread-onlyの短命processとして実行し、`safe`／`low`／`high`／`critical`を判定する。設定した最大risk以下かつconfidence閾値以上の場合だけAIで許可する。
+3. それ以外はRunを`waiting_for_approval`にし、SQLiteへ要求を保存してWebとVS Codeへ通知する。利用者は1回、Session中、永続、または不許可を選択する。
+
+永続許可は設定ファイルへargv配列としてatomicに保存する。複合commandは`|`、`||`、`&&`、`;`、改行、`&`で分割し、すべてのsegmentが個別に一致した場合だけ全体を許可する。subshell、redirection、動的実行など静的に安全に解釈できない構文は設定で自動許可しない。詳細は[ADR-006](./decisions/006-command-approval.md)を参照する。
+
+### 9.2 GitHub Copilot CLI Adapter
 
 GitHub Copilot CLIはprogrammatic modeを使用し、対象Repositoryをcwdとして次の引数で実行する。
 

@@ -91,6 +91,25 @@ func TestRunServicePersistsCodexOutput(t *testing.T) {
 	}
 }
 
+func TestRunServicePersistsActualModelReturnedByAppServer(t *testing.T) {
+	store, session := createRunTestStore(t)
+	adapter := &fakeAdapter{actualModel: "gpt-5.4", lines: []agent.Output{
+		{Stream: agent.OutputStdout, Line: `{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"last":{"inputTokens":10,"cachedInputTokens":2,"outputTokens":3,"reasoningOutputTokens":1,"totalTokens":13}}}}`},
+	}}
+	service := New(store, adapter, WithCheckpointManager(&fakeCheckpointManager{}))
+	t.Cleanup(func() { _ = service.Close(context.Background()) })
+
+	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Implement it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRunStatus(t, store, run.ID, protocol.RunCompleted)
+	usage, _, err := store.GetRunUsage(context.Background(), run.ID)
+	if err != nil || usage.ActualModel == nil || *usage.ActualModel != "gpt-5.4" || usage.Model == nil || *usage.Model != "default" {
+		t.Fatalf("usage = %#v, err = %v", usage, err)
+	}
+}
+
 func TestRunServiceSelectsCopilotAdapterAndPersistsThread(t *testing.T) {
 	ctx := context.Background()
 	store, _ := createRunTestStore(t)
@@ -258,11 +277,12 @@ func TestRunServiceReportsUnavailableCodex(t *testing.T) {
 }
 
 type fakeAdapter struct {
-	name     protocol.AgentName
-	lines    []agent.Output
-	block    bool
-	runErr   error
-	requests []agent.RunRequest
+	name        protocol.AgentName
+	lines       []agent.Output
+	block       bool
+	runErr      error
+	actualModel string
+	requests    []agent.RunRequest
 }
 
 type terminalBlockingStore struct {
@@ -360,7 +380,7 @@ func (f *fakeAdapter) Run(ctx context.Context, request agent.RunRequest, emit ag
 	if f.runErr != nil {
 		return agent.RunResult{StartedAt: startedAt, FinishedAt: time.Now().UTC(), ExitCode: -1}, f.runErr
 	}
-	return agent.RunResult{StartedAt: startedAt, FinishedAt: time.Now().UTC(), ExitCode: 0}, nil
+	return agent.RunResult{StartedAt: startedAt, FinishedAt: time.Now().UTC(), ExitCode: 0, ActualModel: f.actualModel}, nil
 }
 
 func createRunTestStore(t *testing.T) (*storesqlite.Store, protocol.AgentSession) {

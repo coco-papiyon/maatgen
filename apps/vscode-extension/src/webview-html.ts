@@ -73,6 +73,19 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
             <label>Provider <select id="provider-select" aria-label="Provider"></select></label>
             <label>Model <select id="model-select" aria-label="Model"></select></label>
           </div>
+          <section id="approval-card" class="approval-card" role="dialog" aria-labelledby="approval-heading" hidden>
+            <div class="approval-heading"><span id="approval-heading" class="eyebrow">COMMAND APPROVAL</span><span id="approval-risk" class="approval-risk"></span></div>
+            <strong>コマンドの実行を許可しますか？</strong>
+            <pre id="approval-command"></pre>
+            <p id="approval-summary" class="approval-summary"></p>
+            <label class="approval-rule">許可ルール（<code>*</code>を使用可能）<input id="approval-rule" type="text" spellcheck="false"></label>
+            <div class="approval-actions">
+              <button type="button" data-approval-decision="deny" class="deny-action">不許可</button>
+              <button type="button" data-approval-decision="allow_once">今回のみ</button>
+              <button type="button" data-approval-decision="allow_session">セッション中</button>
+              <button type="button" data-approval-decision="allow_permanent">永続的</button>
+            </div>
+          </section>
           <div id="event-list" class="event-list"></div>
           <form id="prompt-form" class="prompt-form">
             <textarea id="prompt-input" rows="2" placeholder="Agentに指示する…"></textarea>
@@ -111,6 +124,11 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const closeSessionButton = document.getElementById('close-session');
       const providerSelect = document.getElementById('provider-select');
       const modelSelect = document.getElementById('model-select');
+      const approvalCard = document.getElementById('approval-card');
+      const approvalRisk = document.getElementById('approval-risk');
+      const approvalCommand = document.getElementById('approval-command');
+      const approvalSummary = document.getElementById('approval-summary');
+      const approvalRule = document.getElementById('approval-rule');
       const managerError = document.getElementById('manager-error');
       const resultSection = document.querySelector('.assistant-result');
       const outputElement = document.getElementById('assistant-output');
@@ -122,6 +140,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const changesCount = document.getElementById('changes-count');
       const changesList = document.getElementById('changes-list');
       let followLatestEvent = true;
+      let pendingApprovalId = '';
       const isNearEventListBottom = () => eventList.scrollHeight - eventList.clientHeight - eventList.scrollTop < 24;
       const scrollEventListToLatest = () => {
         if (followLatestEvent) eventList.scrollTop = eventList.scrollHeight;
@@ -226,6 +245,35 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         modelSelect.disabled = !!activeRun || !(provider?.models || []).length;
       };
 
+      const formatApprovalRule = (argv) => (argv || []).map((value) => /\\s|["']/.test(value) ? JSON.stringify(value) : value).join(' ');
+      const parseApprovalRule = (value) => {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+        if (trimmed.startsWith('[')) {
+          const parsed = JSON.parse(trimmed);
+          if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) throw new Error('許可ルールは文字列のJSON配列で指定してください。');
+          return parsed;
+        }
+        return (trimmed.match(/"(?:\\\\.|[^"\\\\])*"|'[^']*'|\\S+/g) || []).map((token) => {
+          if (token.startsWith('"')) return JSON.parse(token);
+          if (token.startsWith("'") && token.endsWith("'")) return token.slice(1, -1);
+          return token;
+        });
+      };
+
+      const renderApproval = (approvals) => {
+        const approval = (approvals || [])[0];
+        approvalCard.hidden = !approval;
+        pendingApprovalId = approval?.id || '';
+        if (!approval) return;
+        approvalRisk.textContent = approval.risk || '未判定';
+        approvalRisk.className = 'approval-risk ' + (approval.risk || 'unknown');
+        approvalCommand.textContent = approval.command;
+        approvalSummary.textContent = approval.summary || '';
+        approvalSummary.hidden = !approval.summary;
+        approvalRule.value = formatApprovalRule(approval.segments?.[0]?.argv);
+      };
+
       const escapeHtml = (value) => value.replace(/[&<>\"']/g, (character) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;'
       }[character] || character));
@@ -294,12 +342,13 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           renderSessionHistory(event.data.sessions || [], event.data.session?.id);
           emptyState.hidden = Boolean(event.data.session);
           sessionSection.hidden = !event.data.session;
-          sessionStatus.textContent = event.data.activeRunId ? 'Running' : (event.data.session?.status ?? 'Offline');
+          sessionStatus.textContent = event.data.approvals?.length ? 'Approval required' : (event.data.activeRunId ? 'Running' : (event.data.session?.status ?? 'Offline'));
           renderProviderOptions(event.data.providers, event.data.selectedProvider, event.data.selectedModel, Boolean(event.data.session), Boolean(event.data.activeRunId));
           runButton.hidden = Boolean(event.data.activeRunId);
           cancelButton.hidden = !event.data.activeRunId;
           closeSessionButton.disabled = Boolean(event.data.activeRunId);
           renderEvents(event.data.events || []);
+          renderApproval(event.data.approvals || []);
           renderChanges(event.data.changes);
           if (event.data.usage?.summary) {
             renderUsage(event.data.usage.summary);
@@ -346,6 +395,24 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       modelSelect.addEventListener('change', () => vscode.postMessage({ type: 'model.select', model: modelSelect.value }));
       cancelButton.addEventListener('click', () => vscode.postMessage({ type: 'run.cancel' }));
       closeSessionButton.addEventListener('click', () => vscode.postMessage({ type: 'session.close' }));
+      document.querySelectorAll('[data-approval-decision]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!pendingApprovalId) return;
+          const decision = button.dataset.approvalDecision;
+          let ruleArgv;
+          try {
+            ruleArgv = parseApprovalRule(approvalRule.value);
+          } catch (error) {
+            managerError.textContent = error instanceof Error ? error.message : String(error);
+            managerError.hidden = false;
+            return;
+          }
+          vscode.postMessage({
+            type: 'approval.decide', approvalId: pendingApprovalId, decision,
+            ...(['allow_session', 'allow_permanent'].includes(decision) ? { ruleArgv } : {}),
+          });
+        });
+      });
 
       vscode.postMessage({ type: 'webview.ready' });
     </script>

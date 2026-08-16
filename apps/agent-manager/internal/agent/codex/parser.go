@@ -46,6 +46,21 @@ func ParseLine(line string) ParsedLine {
 		return malformedLine(line, "Codex emitted an invalid JSONL line")
 	}
 	parsed := ParsedLine{RawJSON: json.RawMessage(append([]byte(nil), trimmed...))}
+	var rpc struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+		Result json.RawMessage `json:"result"`
+	}
+	if json.Unmarshal(parsed.RawJSON, &rpc) == nil {
+		if rpc.Method != "" {
+			return parseAppServer(parsed, rpc.Method, rpc.Params)
+		}
+		if len(rpc.ID) > 0 {
+			parsed.Ignored = true
+			return parsed
+		}
+	}
 	var envelope rawEnvelope
 	if err := json.Unmarshal(parsed.RawJSON, &envelope); err != nil || envelope.Type == "" {
 		return malformedJSON(parsed.RawJSON, "Codex JSONL event is missing a valid type")
@@ -83,6 +98,99 @@ func ParseLine(line string) ParsedLine {
 		})}
 	case "item.started", "item.updated", "item.completed":
 		return parseItem(parsed, envelope)
+	default:
+		parsed.Ignored = true
+	}
+	return parsed
+}
+
+func parseAppServer(parsed ParsedLine, method string, raw json.RawMessage) ParsedLine {
+	var params struct {
+		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
+		Thread   struct {
+			ID string `json:"id"`
+		} `json:"thread"`
+		Turn struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		} `json:"turn"`
+		Item struct {
+			ID               string          `json:"id"`
+			Type             string          `json:"type"`
+			Text             string          `json:"text"`
+			Command          string          `json:"command"`
+			Status           string          `json:"status"`
+			AggregatedOutput string          `json:"aggregatedOutput"`
+			ExitCode         *int            `json:"exitCode"`
+			Changes          json.RawMessage `json:"changes"`
+		} `json:"item"`
+		TokenUsage struct {
+			Last struct {
+				InputTokens           *int64 `json:"inputTokens"`
+				CachedInputTokens     *int64 `json:"cachedInputTokens"`
+				OutputTokens          *int64 `json:"outputTokens"`
+				ReasoningOutputTokens *int64 `json:"reasoningOutputTokens"`
+				TotalTokens           *int64 `json:"totalTokens"`
+				Model                 string `json:"model"`
+			} `json:"last"`
+		} `json:"tokenUsage"`
+	}
+	if len(raw) > 0 && json.Unmarshal(raw, &params) != nil {
+		return malformedJSON(parsed.RawJSON, "Codex app-server event has invalid params")
+	}
+	switch method {
+	case "thread/started":
+		parsed.ThreadID = params.Thread.ID
+		if parsed.ThreadID == "" {
+			parsed.ThreadID = params.ThreadID
+		}
+	case "turn/started":
+		parsed.Events = []NormalizedEvent{newEvent(protocol.EventTypeRunStarted, map[string]any{"codexType": method})}
+	case "item/started", "item/completed":
+		envelopeType := "item.started"
+		if method == "item/completed" {
+			envelopeType = "item.completed"
+		}
+		itemType := map[string]string{"agentMessage": "agent_message", "reasoning": "reasoning", "commandExecution": "command_execution", "fileChange": "file_change"}[params.Item.Type]
+		if itemType == "" {
+			parsed.Ignored = true
+			return parsed
+		}
+		item, _ := json.Marshal(map[string]any{
+			"id": params.Item.ID, "type": itemType, "text": params.Item.Text, "command": params.Item.Command,
+			"status": params.Item.Status, "aggregated_output": params.Item.AggregatedOutput,
+			"exit_code": params.Item.ExitCode, "changes": params.Item.Changes,
+		})
+		return parseItem(parsed, rawEnvelope{Type: envelopeType, Item: item})
+	case "thread/tokenUsage/updated":
+		last := params.TokenUsage.Last
+		usage := protocol.TokenUsage{
+			InputTokens: last.InputTokens, CachedInputTokens: last.CachedInputTokens, OutputTokens: last.OutputTokens,
+			ReasoningOutputTokens: last.ReasoningOutputTokens, TotalTokens: last.TotalTokens, Source: "cli",
+		}
+		if usage.TotalTokens == nil && usage.InputTokens != nil && usage.OutputTokens != nil {
+			total := *usage.InputTokens + *usage.OutputTokens
+			usage.TotalTokens = &total
+		}
+		if last.Model != "" {
+			usage.ActualModel = &last.Model
+		}
+		parsed.Usage = &usage
+		parsed.Events = []NormalizedEvent{newEvent(protocol.EventTypeUsageReported, usage)}
+	case "turn/completed":
+		if params.Turn.Status == "completed" {
+			parsed.Events = []NormalizedEvent{newEvent(protocol.EventTypeRunCompleted, map[string]any{"codexType": method})}
+		} else {
+			message := params.Turn.Status
+			if params.Turn.Error != nil && params.Turn.Error.Message != "" {
+				message = params.Turn.Error.Message
+			}
+			parsed.Events = []NormalizedEvent{newEvent(protocol.EventTypeRunFailed, map[string]any{"message": message})}
+		}
 	default:
 		parsed.Ignored = true
 	}

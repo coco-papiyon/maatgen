@@ -103,6 +103,9 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 			return agent.RunResult{}, err
 		}
 	}
+	if request.Approval != nil {
+		return a.runAppServer(ctx, info.Path, directory, request, emit)
+	}
 
 	args := append([]string{}, a.prefixArgs...)
 	args = append(args,
