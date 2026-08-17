@@ -9,6 +9,12 @@ interface WorkspaceState {
   path: string;
 }
 
+// Default providers configuration matching Agent Manager configuration
+const DEFAULT_PROVIDERS: AgentProvider[] = [
+  { id: 'codex', label: 'Codex', models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'], defaultModel: 'gpt-5.6-luna' },
+  { id: 'copilot', label: 'GitHub Copilot', models: ['auto', 'claude-sonnet-4.6', 'gpt-5.4', 'claude-haiku-4.5', 'gpt-5.3-codex', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.6-flash', 'mai-code-1-flash'], defaultModel: 'auto' },
+];
+
 type WebviewMessage =
   | { type: 'webview.ready' }
   | { type: 'workspace.refresh' }
@@ -124,7 +130,15 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         await this.postState(undefined, [], undefined, undefined);
         return;
       }
-      this.providers = await this.manager.listProviders();
+      try {
+        this.providers = await this.manager.listProviders();
+      } catch (error) {
+        // If fetching providers fails, use default providers
+        this.providers = DEFAULT_PROVIDERS;
+      }
+      if (!this.providers || this.providers.length === 0) {
+        this.providers = DEFAULT_PROVIDERS;
+      }
       if (!this.providers.some((provider) => provider.id === this.selectedProvider)) {
         this.selectedProvider = this.providers[0]?.id ?? 'codex';
       }
