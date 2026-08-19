@@ -47,10 +47,10 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
                 <span>Total <strong id="usage-total">—</strong></span>
                 <span>Cost <strong id="usage-cost">—</strong></span>
               </div>
-              <span data-copilot-usage hidden>Actual model <strong id="usage-model">—</strong></span>
-              <div data-copilot-usage hidden class="usage-credits-cost">
+              <span data-credit-usage hidden>Actual model <strong id="usage-model">—</strong></span>
+              <div data-credit-usage hidden class="usage-credits-cost">
                 <span>AI credits <strong id="usage-credits">—</strong></span>
-                <span>Cost <strong id="usage-cost-copilot">—</strong></span>
+                <span>Cost <strong id="usage-cost-credits">—</strong></span>
               </div>
             </div>
           </div>
@@ -135,7 +135,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const usageCount = document.getElementById('usage-count');
       const usageElements = {
         input: document.getElementById('usage-input'), cached: document.getElementById('usage-cached'), output: document.getElementById('usage-output'), total: document.getElementById('usage-total'), model: document.getElementById('usage-model'), credits: document.getElementById('usage-credits'), cost: document.getElementById('usage-cost'),
-        costCopilot: document.getElementById('usage-cost-copilot')
+        costCredits: document.getElementById('usage-cost-credits')
       };
       const changesCount = document.getElementById('changes-count');
       const changesList = document.getElementById('changes-list');
@@ -152,9 +152,11 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const formatCredits = (value) => typeof value === 'number' ? value.toLocaleString('en-US', { maximumFractionDigits: 6 }) : '—';
       const formatCost = (value) => typeof value === 'number' ? '$' + value.toFixed(6) : '—';
       const renderUsage = (summary) => {
-        const isCopilotUsage = typeof summary.model === 'string' || typeof summary.aiCredits === 'number';
-        document.querySelectorAll('[data-token-usage]').forEach((element) => { element.hidden = isCopilotUsage; });
-        document.querySelectorAll('[data-copilot-usage]').forEach((element) => { element.hidden = !isCopilotUsage; });
+        // Only GitHub Copilot bills in AI credits. Codex and Claude Code both
+        // report token counts, so the token grid is the default layout.
+        const isCreditUsage = typeof summary.aiCredits === 'number';
+        document.querySelectorAll('[data-token-usage]').forEach((element) => { element.hidden = isCreditUsage; });
+        document.querySelectorAll('[data-credit-usage]').forEach((element) => { element.hidden = !isCreditUsage; });
         usageElements.input.textContent = formatTokens(summary.inputTokens);
         usageElements.cached.textContent = formatTokens(summary.cachedInputTokens);
         usageElements.output.textContent = formatTokens(summary.outputTokens);
@@ -162,7 +164,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         usageElements.model.textContent = typeof summary.actualModel === 'string' ? summary.actualModel : '—';
         usageElements.credits.textContent = formatCredits(summary.aiCredits);
         usageElements.cost.textContent = formatCost(summary.costUsd);
-        usageElements.costCopilot.textContent = formatCost(summary.costUsd);
+        usageElements.costCredits.textContent = formatCost(summary.costUsd);
         usageCount.textContent = 'available';
       };
       const eventText = (event) => {

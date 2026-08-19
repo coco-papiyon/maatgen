@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, SessionEvent, TokenUsage, ApprovalDecision } from '@maatgen/protocol';
-import { AgentApiError, httpAgentApi, type AgentApi, type SessionUsage } from './api';
+import { AgentApiError, httpAgentApi, type AgentApi, type SessionUsage, type SourceStats } from './api';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import { renderMarkdown } from './markdown';
 
@@ -24,6 +24,7 @@ const selected = ref<AgentSession>();
 const events = ref<SessionEvent[]>([]);
 const changes = ref<ChangeSet>(emptyChangeSet(''));
 const usage = ref<SessionUsage>(emptySessionUsage(''));
+const sourceStats = ref<SourceStats>(emptySourceStats(''));
 const approvals = ref<CommandApproval[]>([]);
 const approvalRule = ref('');
 const workspace = ref('');
@@ -33,10 +34,14 @@ const busy = ref(false);
 const error = ref('');
 const streamError = ref('');
 const streamState = ref<EventStreamState>('disconnected');
-const diagnostic = ref<{ kind: 'manager' | 'auth' | 'codex' | 'copilot'; title: string; message: string }>();
+const diagnostic = ref<{ kind: 'manager' | 'auth' | 'codex' | 'claude' | 'copilot'; title: string; message: string }>();
 const selectedChangeId = ref('');
 const selectedRunId = ref('');
-const activeSidePanel = ref<'usage' | 'changes'>(localStorage.getItem('maatgen.sidePanel') === 'usage' ? 'usage' : 'changes');
+type SidePanel = 'usage' | 'changes' | 'sourceStats';
+const storedSidePanel = localStorage.getItem('maatgen.sidePanel');
+const activeSidePanel = ref<SidePanel>(
+  storedSidePanel === 'usage' || storedSidePanel === 'sourceStats' ? storedSidePanel : 'changes',
+);
 const showSystemMessages = ref(localStorage.getItem('maatgen.showSystemMessages') === 'true');
 let sessionPollTimer: number | undefined;
 let eventStream: EventStreamLike | undefined;
@@ -122,7 +127,7 @@ function toggleSystemMessages() {
   localStorage.setItem('maatgen.showSystemMessages', String(showSystemMessages.value));
 }
 
-function selectSidePanel(panel: 'usage' | 'changes') {
+function selectSidePanel(panel: SidePanel) {
   activeSidePanel.value = panel;
   localStorage.setItem('maatgen.sidePanel', panel);
 }
@@ -189,6 +194,10 @@ function emptyChangeSet(sessionId: string): ChangeSet {
 
 function emptySessionUsage(sessionId: string): SessionUsage {
   return { sessionId, summary: { source: 'unknown' }, runs: [] };
+}
+
+function emptySourceStats(sessionId: string): SourceStats {
+  return { sessionId, languages: [], total: { language: '', files: 0, blank: 0, comment: 0, code: 0 } };
 }
 
 function formatTokens(value?: number): string {
@@ -277,12 +286,20 @@ async function selectSession(session: AgentSession) {
   events.value = [];
   changes.value = emptyChangeSet(session.id);
   usage.value = emptySessionUsage(session.id);
+  sourceStats.value = emptySourceStats(session.id);
   approvals.value = [];
   approvalRule.value = '';
   activeRun.value = undefined;
   error.value = '';
   diagnostic.value = undefined;
   await refreshSelected(true);
+  // Counted once at session creation, so fetch it once here rather than on every poll.
+  try {
+    const stats = await api.getSourceStats(session.id);
+    if (selected.value?.id === session.id) sourceStats.value = stats;
+  } catch (cause) {
+    handleFailure(cause);
+  }
   if (selected.value?.id === session.id && selected.value.status === 'active') {
     startEventStream(session.id);
   }
@@ -475,24 +492,32 @@ function handleFailure(cause: unknown) {
   }
 }
 
+const cliDiagnostics: Record<string, { kind: 'codex' | 'claude' | 'copilot'; title: string; message: string }> = {
+  codex_unavailable: {
+    kind: 'codex',
+    title: 'Codex CLIを利用できません',
+    message: 'Codex CLIをインストールしてPATHを確認し、codex --versionが成功する状態にしてください。',
+  },
+  claude_unavailable: {
+    kind: 'claude',
+    title: 'Claude Code CLIを利用できません',
+    message: 'Claude Code CLIをインストール・ログインしてPATHを確認し、claude --versionが成功する状態にしてください。',
+  },
+  copilot_unavailable: {
+    kind: 'copilot',
+    title: 'GitHub Copilot CLIを利用できません',
+    message: 'GitHub Copilot CLIをインストール・ログインしてPATHを確認し、copilot --versionが成功する状態にしてください。',
+  },
+};
+
 function updateDiagnosticFromEvents(items: SessionEvent[]) {
   const unavailable = items.find((event) => {
     const data = event.data as Record<string, unknown> | undefined;
-    return event.type === 'run_failed' && ['codex_unavailable', 'copilot_unavailable'].includes(String(data?.code));
+    return event.type === 'run_failed' && String(data?.code) in cliDiagnostics;
   });
   if (unavailable) {
     const code = String((unavailable.data as Record<string, unknown> | undefined)?.code);
-    diagnostic.value = code === 'copilot_unavailable'
-      ? {
-          kind: 'copilot',
-          title: 'GitHub Copilot CLIを利用できません',
-          message: 'GitHub Copilot CLIをインストール・ログインしてPATHを確認し、copilot --versionが成功する状態にしてください。',
-        }
-      : {
-          kind: 'codex',
-          title: 'Codex CLIを利用できません',
-          message: 'Codex CLIをインストールしてPATHを確認し、codex --versionが成功する状態にしてください。',
-        };
+    diagnostic.value = cliDiagnostics[code];
   }
 }
 
@@ -600,7 +625,7 @@ onBeforeUnmount(() => {
 
       <section v-if="diagnostic" class="diagnostic-card" :class="diagnostic.kind" role="alert">
         <div><strong>{{ diagnostic.title }}</strong><p>{{ diagnostic.message }}</p></div>
-        <button v-if="!['codex', 'copilot'].includes(diagnostic.kind)" :disabled="busy" @click="retryConnection">再試行</button>
+        <button v-if="!['codex', 'claude', 'copilot'].includes(diagnostic.kind)" :disabled="busy" @click="retryConnection">再試行</button>
       </section>
       <div v-else-if="error" class="error-banner" role="alert">{{ error }}</div>
 
@@ -701,6 +726,9 @@ onBeforeUnmount(() => {
         <button id="changes-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'changes'" :class="{ selected: activeSidePanel === 'changes' }" @click="selectSidePanel('changes')">
           Changes <span class="tab-count">{{ changes.files.length }}</span>
         </button>
+        <button id="source-stats-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'sourceStats'" :class="{ selected: activeSidePanel === 'sourceStats' }" @click="selectSidePanel('sourceStats')">
+          コード数 <span class="tab-count">{{ sourceStats.total.files }}</span>
+        </button>
       </div>
       <div v-if="activeSidePanel === 'usage'" id="usage-panel" class="usage-section" role="tabpanel" aria-labelledby="usage-tab">
         <div class="section-heading">
@@ -749,7 +777,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="usage-empty">RunごとのUsageはまだありません。</div>
       </div>
-      <div v-else id="changes-panel" class="changes-section" role="tabpanel" aria-labelledby="changes-tab">
+      <div v-else-if="activeSidePanel === 'changes'" id="changes-panel" class="changes-section" role="tabpanel" aria-labelledby="changes-tab">
       <div class="section-heading">
         <span>Changes</span><span class="count accent">{{ changes.files.length }}</span>
       </div>
@@ -769,6 +797,23 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div v-else class="no-changes"><span>◇</span><p>変更はまだありません</p><small>Run完了後にGit差分が表示されます。</small></div>
+      </div>
+      <div v-else id="source-stats-panel" class="source-stats-section" role="tabpanel" aria-labelledby="source-stats-tab">
+        <div class="section-heading">
+          <span>コード数</span><span class="count accent">{{ sourceStats.total.files }}</span>
+        </div>
+        <div v-if="sourceStats.languages.length" class="usage-summary">
+          <div><span>Files</span><strong>{{ formatTokens(sourceStats.total.files) }}</strong></div>
+          <div><span>Code</span><strong>{{ formatTokens(sourceStats.total.code) }}</strong></div>
+        </div>
+        <div v-if="sourceStats.languages.length" class="source-stats-list">
+          <div v-for="language in sourceStats.languages" :key="language.language" class="source-stats-row">
+            <span class="source-stats-language">{{ language.language }}</span>
+            <span class="source-stats-files">{{ formatTokens(language.files) }} files</span>
+            <span class="source-stats-code">{{ formatTokens(language.code) }} code</span>
+          </div>
+        </div>
+        <div v-else class="no-changes"><span>◇</span><p>コード数はまだ計測されていません</p><small>Git管理下のファイルをcloc未導入か、計測が完了していません。</small></div>
       </div>
     </aside>
 

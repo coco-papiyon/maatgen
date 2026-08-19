@@ -40,7 +40,7 @@ describe('App with MockAgentApi', () => {
   it('renders session history, timeline events, changes, and live state', async () => {
     const mounted = await mountApp();
     expect(mounted.wrapper.find('.error-banner').exists() ? mounted.wrapper.find('.error-banner').text() : '').toBe('');
-    expect(mounted.wrapper.findAll('.session-item')).toHaveLength(5);
+    expect(mounted.wrapper.findAll('.session-item')).toHaveLength(6);
     expect(mounted.wrapper.text()).toContain('認証処理を確認し、テストを追加しました。');
     expect(mounted.wrapper.find('.stream-state').text()).toBe('Live');
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
@@ -88,6 +88,18 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('#usage-panel').exists()).toBe(true);
     expect(mounted.wrapper.find('#changes-panel').exists()).toBe(false);
     expect(mounted.wrapper.find('#usage-tab').attributes('aria-selected')).toBe('true');
+  });
+
+  it('shows source line counts by language in the コード数 tab', async () => {
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#source-stats-tab').trigger('click');
+    expect(mounted.wrapper.find('#source-stats-panel').exists()).toBe(true);
+    expect(mounted.wrapper.find('#changes-panel').exists()).toBe(false);
+    expect(mounted.wrapper.find('#source-stats-tab').attributes('aria-selected')).toBe('true');
+    const text = mounted.wrapper.find('#source-stats-panel').text();
+    expect(text).toContain('Go');
+    expect(text).toContain('9,894 code');
+    expect(text).toContain('TypeScript');
   });
 
   it('opens Run details in the central pane and returns to the chat', async () => {
@@ -289,7 +301,7 @@ describe('App with MockAgentApi', () => {
     expect(wrapper.find('.load-more').exists()).toBe(true);
     await wrapper.find('.load-more').trigger('click');
     await flushPromises();
-    expect(wrapper.findAll('.session-item')).toHaveLength(5);
+    expect(wrapper.findAll('.session-item')).toHaveLength(6);
     expect(wrapper.find('.load-more').exists()).toBe(false);
   });
 
@@ -328,5 +340,26 @@ describe('App with MockAgentApi', () => {
     await failure!.trigger('click');
     await flushPromises();
     expect(mounted.wrapper.find('.diagnostic-card.copilot').text()).toContain('GitHub Copilot CLIを利用できません');
+  });
+
+  it('shows the Claude Code installation diagnostic from a failed run event', async () => {
+    const mounted = await mountApp();
+    const failure = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('claude-failure'));
+    await failure!.trigger('click');
+    await flushPromises();
+    expect(mounted.wrapper.find('.diagnostic-card.claude').text()).toContain('Claude Code CLIを利用できません');
+  });
+
+  it('shows Claude Code token metrics and its CLI reported cost', async () => {
+    const mounted = await mountApp();
+    const claudeSession = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('claude-failure'));
+    await claudeSession!.trigger('click');
+    await flushPromises();
+    await mounted.wrapper.find('#usage-tab').trigger('click');
+    const panel = mounted.wrapper.find('#usage-panel').text();
+    expect(panel).toContain('Input');
+    expect(panel).toContain('1,200');
+    expect(panel).toContain('$0.250000');
+    expect(panel).not.toContain('AI credits');
   });
 });

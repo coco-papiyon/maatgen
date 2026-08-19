@@ -2,7 +2,8 @@
 
 ## Product direction
 
-- The initial product targets Codex CLI only. Do not add Claude Code or GitHub Copilot behavior until the Codex implementation is complete.
+- Codex CLI, GitHub Copilot CLI, and Claude Code CLI are all supported providers. Keep each CLI's process arguments, output parsing, and usage accounting inside its own adapter.
+- Command approval (ADR-006) is Codex-only. Copilot runs with `--allow-all` and Claude Code with `--permission-mode bypassPermissions`.
 - Agent runs modify the user's target repository Working Tree directly. Do not create or use a Git Worktree for the new design.
 - Changes are immediately usable; there is no Accept/Reject approval step.
 - Before every Run, create a checkpoint of the current Working Tree. After every terminal Run state, create an after snapshot and show the diff.
@@ -26,7 +27,7 @@
 
 ## Implementation boundaries
 
-- Keep Codex-specific process and JSONL behavior inside the Codex adapter.
+- Keep provider-specific process and JSONL behavior inside that provider's adapter.
 - Keep the Extension thin; repository mutation and checkpoint logic belong in Agent Manager.
 - When modifying frontend behavior or presentation, update and verify both the Web version and the VS Code version. Keep their user-facing behavior and shared Session／Run／Usage／ChangeSet concepts aligned, adapting only the surface-specific layout or interaction as needed.
 - Update `docs/coding-agent-design.md` and `docs/implementation-plan.md` when implementation details change the design.
@@ -43,8 +44,9 @@
 - The Agent Manager refreshes pricing at startup from the official sources:
   - OpenAI model comparison: `https://developers.openai.com/api/docs/models/compare`
   - GitHub Copilot model pricing: `https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing`
+- Claude Code has no pricing source because its CLI prices each Run itself. Store `result.total_cost_usd` as reported and never recalculate it from the rate table. A cost that a provider CLI already reported is authoritative; the rate table is only for providers that report none.
 - Retrieved rates are retained in the SQLite `model_pricing` table with provider, model, input/cached-input/cache-write/output rates per one million tokens, source URL, and retrieval time. A failed refresh must not delete the last known rate.
-- Codex cost is calculated from recorded token usage and the retained model rate. Cached input tokens are charged at the cached-input rate and subtracted from ordinary input tokens. Copilot cost is calculated from recorded AI credits; one Copilot AI credit is USD 0.01. Do not use Copilot's `assistant.usage.cost` as a currency amount because it is a model multiplier.
+- Codex cost is calculated from recorded token usage and the retained model rate. Cached input tokens are charged at the cached-input rate and subtracted from ordinary input tokens. Copilot cost is calculated from recorded AI credits; one Copilot AI credit is USD 0.01. Do not use Copilot's `assistant.usage.cost` as a currency amount because it is a model multiplier. Claude Code cost comes from the CLI's `result.total_cost_usd`.
 - `assistant.usage.model` is the authoritative actual model for Copilot, including when the requested model is `auto`; for CLI JSONL versions that omit `assistant.usage`, retain `assistant.message.data.model` as a fallback. If the CLI only emits `result.usage.premiumRequests`, retain that value as the Copilot usage quantity because no token-level AIU is present in that output format.
 
 ### Updating pricing behavior

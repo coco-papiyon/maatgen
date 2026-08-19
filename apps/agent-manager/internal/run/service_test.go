@@ -12,6 +12,7 @@ import (
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
+	claudeadapter "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/claude"
 	copilotadapter "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/copilot"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
@@ -155,6 +156,65 @@ func TestRunServiceSelectsCopilotAdapterAndPersistsThread(t *testing.T) {
 	usage, _, err := store.GetRunUsage(ctx, run.ID)
 	if err != nil || usage.Model != nil || usage.ActualModel == nil || *usage.ActualModel != "gpt-5.4" || usage.AICredits == nil || *usage.AICredits != 0.75 || usage.TotalTokens != nil {
 		t.Fatalf("usage = %#v, err = %v", usage, err)
+	}
+}
+
+func TestRunServiceSelectsClaudeAdapterAndKeepsReportedCost(t *testing.T) {
+	ctx := context.Background()
+	store, _ := createRunTestStore(t)
+	session := protocol.AgentSession{ID: "session-claude", Agent: protocol.AgentClaude, Workspace: t.TempDir(), Status: protocol.SessionActive, CreatedAt: time.Now().UTC()}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	codexAdapter := &fakeAdapter{}
+	claudeAdapter := &fakeAdapter{name: protocol.AgentClaude, lines: []agent.Output{
+		{Stream: agent.OutputStdout, Line: `{"type":"system","subtype":"init","session_id":"claude-session-123","model":"claude-sonnet-5-20260101"}`},
+		{Stream: agent.OutputStdout, Line: `{"type":"assistant","session_id":"claude-session-123","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Implemented with Claude Code."}]}}`},
+		{Stream: agent.OutputStdout, Line: `{"type":"result","subtype":"success","is_error":false,"session_id":"claude-session-123","result":"done","total_cost_usd":0.25,` +
+			`"usage":{"input_tokens":100,"cache_creation_input_tokens":50,"cache_read_input_tokens":850,"output_tokens":200},` +
+			`"modelUsage":{"claude-sonnet-5-20260101":{"outputTokens":200}}}`},
+	}}
+	// Pricing is available but must not override the cost Claude Code reported.
+	service := NewMulti(store, []agent.Adapter{codexAdapter, claudeAdapter},
+		WithCheckpointManager(&fakeCheckpointManager{}), WithChangeDetector(&fakeChangeDetector{}), WithPricingReader(store))
+	t.Cleanup(func() { _ = service.Close(context.Background()) })
+	run, err := service.StartRun(ctx, session.ID, protocol.SendMessageRequest{Message: "implement"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRunStatus(t, store, run.ID, protocol.RunCompleted)
+	updated, err := store.GetSession(ctx, session.ID)
+	if err != nil || updated.AgentThreadID == nil || *updated.AgentThreadID != "claude-session-123" {
+		t.Fatalf("session = %#v, err = %v", updated, err)
+	}
+	if len(codexAdapter.requests) != 0 || len(claudeAdapter.requests) != 1 {
+		t.Fatalf("Codex requests = %d, Claude requests = %d", len(codexAdapter.requests), len(claudeAdapter.requests))
+	}
+	events, err := store.ListEventsAfter(ctx, session.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.Type == protocol.EventTypeAssistantMessage && event.Source == protocol.EventSourceClaude {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("events = %#v", events)
+	}
+	usage, _, err := store.GetRunUsage(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.InputTokens == nil || *usage.InputTokens != 1000 || usage.CachedInputTokens == nil || *usage.CachedInputTokens != 850 {
+		t.Fatalf("input usage = %#v", usage)
+	}
+	if usage.TotalTokens == nil || *usage.TotalTokens != 1200 || usage.CostUSD == nil || *usage.CostUSD != 0.25 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	if usage.Model == nil || *usage.Model != "default" || usage.ActualModel == nil || *usage.ActualModel != "claude-sonnet-5-20260101" {
+		t.Fatalf("models = %#v", usage)
 	}
 }
 
@@ -357,10 +417,14 @@ func (*fakeAdapter) Check(context.Context) (agent.Info, error) {
 }
 
 func (f *fakeAdapter) ParseLine(line string) agent.ParsedLine {
-	if f.Name() == protocol.AgentCopilot {
+	switch f.Name() {
+	case protocol.AgentCopilot:
 		return copilotadapter.ParseLine(line)
+	case protocol.AgentClaude:
+		return claudeadapter.ParseLine(line)
+	default:
+		return codex.ParseLine(line)
 	}
-	return codex.ParseLine(line)
 }
 
 func (f *fakeAdapter) Run(ctx context.Context, request agent.RunRequest, emit agent.Emitter) (agent.RunResult, error) {

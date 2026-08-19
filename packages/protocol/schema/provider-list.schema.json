@@ -13,7 +13,7 @@
         "additionalProperties": false,
         "required": ["id", "label", "models"],
         "properties": {
-          "id": { "const": "codex" },
+          "id": { "enum": ["codex", "claude", "copilot"] },
           "label": { "type": "string", "minLength": 1 },
           "models": {
             "type": "array",

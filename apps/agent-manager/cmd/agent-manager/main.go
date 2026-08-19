@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/claude"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/copilot"
 	approvalservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/approval"
@@ -30,6 +31,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/runtimeinfo"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/server"
 	sessionservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/session"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/sourcestats"
 	storesqlite "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage/sqlite"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/toolconfig"
 )
@@ -150,7 +152,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	sessions := sessionservice.New(store, checkpointManager)
+	sessions := sessionservice.New(store, checkpointManager, sessionservice.WithSourceStatsAnalyzer(sourcestats.New("cloc")))
 	changeDetector, err := changeset.New()
 	if err != nil {
 		return err
@@ -176,7 +178,7 @@ func run() error {
 		},
 	})
 	defer approvals.Close()
-	runs := runservice.NewMulti(store, []agent.Adapter{codex.New("codex"), copilot.New("copilot")}, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle))
+	runs := runservice.NewMulti(store, []agent.Adapter{codex.New("codex"), claude.New("claude"), copilot.New("copilot")}, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle))
 	restores, err := restoreservice.New(store, checkpointManager)
 	if err != nil {
 		return err
@@ -225,6 +227,7 @@ func run() error {
 				return toolconfig.SaveDefaultModel(resolvedConfigPath, &toolConfig, provider, model)
 			},
 			UsageReader:        store,
+			SourceStatsReader:  store,
 			ApprovalController: approvals,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,

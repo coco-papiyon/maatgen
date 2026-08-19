@@ -6,7 +6,7 @@
 
 > 2026-08-15設計変更: Agent専用worktreeとAccept／Reject方式を廃止し、対象Working Treeの直接編集、Run単位checkpoint、必要箇所のRestore方式へ置換する。既存のWorktree／Review実装は後方互換性を維持せず置換対象とする。
 
-Codex CLI版の共通Protocol、Session管理、Checkpoint／Diff／Restore、Web／VS Code連携が完了したため、次のAdapterとしてGitHub Copilot CLIを対象に加える。Claude Codeは引き続き後続対象とする。
+Codex CLI版の共通Protocol、Session管理、Checkpoint／Diff／Restore、Web／VS Code連携が完了したため、追加AdapterとしてGitHub Copilot CLIとClaude Code CLIを対象に加える。
 
 Codexの実行前コマンド承認には双方向通信が必要なため、通常Runは`codex app-server --stdio`を使用する。短命なAI診断はtool実行を許可しない`codex exec --json`を使用する。詳細は[ADR-006](./decisions/006-command-approval.md)に従う。
 
@@ -46,7 +46,7 @@ AgentSession
 ```ts
 interface AgentSession {
   id: string;
-  agent: 'codex' | 'copilot';
+  agent: 'codex' | 'claude' | 'copilot';
   workspace: string;
   agentThreadId?: string;
   status: 'active' | 'closed';
@@ -89,13 +89,11 @@ type AgentAdapter interface {
 ```text
 AgentAdapter
 ├─ CodexAdapter
+├─ ClaudeAdapter
 └─ CopilotAdapter
-
-将来
-└─ ClaudeAdapter
 ```
 
-Claude／Copilotの仕様が確定するまでは、過度なcapability抽象化は行わない。
+CLI仕様の差分はAdapterへ閉じ込め、過度なcapability抽象化は行わない。
 
 ### 3.4 Eventモデル
 
@@ -109,7 +107,7 @@ interface SessionEvent {
   sequence: number;
   timestamp: string;
   schemaVersion: 2;
-  source: 'user' | 'codex' | 'copilot' | 'manager';
+  source: 'user' | 'codex' | 'claude' | 'copilot' | 'manager';
   type:
     | 'user_prompt'
     | 'assistant_message'
@@ -130,7 +128,7 @@ interface SessionEvent {
 }
 ```
 
-Codexの`thread.started`またはCopilot JSONLの`sessionId`から得られるAgent Thread IDは、ManagerのSession IDとは別に保存する。
+Codexの`thread.started`、Copilot JSONLの`sessionId`、Claude Code stream-jsonの`session_id`から得られるAgent Thread IDは、ManagerのSession IDとは別に保存する。
 
 `reasoning`はCodexが出力した要約だけを保存し、内部推論を再構成・推測しない。
 
@@ -195,7 +193,7 @@ Run後に利用者または後続Runが同じ箇所を編集している場合�
 
 ### 3.8 同一Sessionでの継続修正
 
-Run完了後もSessionをactiveのまま保持する。利用者はAgentの変更を直接編集でき、その現在状態から同じSessionへ次のPromptを送信する。次のRunは新しいbefore checkpointを作成し、`agentThreadId`を使ってCodexまたはCopilotをresumeする。
+Run完了後もSessionをactiveのまま保持する。利用者はAgentの変更を直接編集でき、その現在状態から同じSessionへ次のPromptを送信する。次のRunは新しいbefore checkpointを作成し、`agentThreadId`を使ってCodex、Claude Code、またはCopilotをresumeする。
 
 同一Sessionで実行中のRunは1つまでとし、実行中の追加Promptは`409 Conflict`とする。実行中の利用者編集は妨げないが、Agentと同じ箇所を同時編集した場合は差分の帰属を保証しない。
 
@@ -390,15 +388,17 @@ ExtensionにはCodex固有の実行ロジックを持たせない。
 
 ### Phase 9：追加Adapter
 
-Codex MVPの完了後に、同じ`AgentAdapter`と`SessionEvent`契約へGitHub Copilot CLIを追加する。Claude CodeはCopilot対応後に追加する。
+Codex MVPの完了後に、同じ`AgentAdapter`と`SessionEvent`契約へGitHub Copilot CLIとClaude Code CLIを追加する。
 
-Copilotは`--output-format json`、`--prompt`、`--resume=<sessionId>`を使用する。JSONL parser、引数、利用不可エラーだけをAdapterへ閉じ込め、Session／Run／Checkpoint／RestoreとWeb／VS Code UIは共通契約を使う。
+Copilotは`--output-format json`、`--prompt`、`--resume=<sessionId>`を使用する。Claude Codeは`--print --output-format stream-json --verbose --permission-mode bypassPermissions`を使用し、Promptはstdinへ、継続は`--resume <sessionId>`で渡す。JSONL parser、引数、利用不可エラーだけをAdapterへ閉じ込め、Session／Run／Checkpoint／RestoreとWeb／VS Code UIは共通契約を使う。ADR-006のコマンド承認はCodex専用とする。
 
-実行結果の`model`には指定モデル（Codex未指定は`default`、Copilot自動選択は`auto`）を、`actualModel`には実モデルを保存する。Copilotの`assistant.usage.model`または`assistant.message.data.model`を実モデルとして保存し、`auto`指定時にも選択されたモデルを確認可能にする。Codexのdefault指定時もCLIが返したモデルを`actualModel`へ保存する。Copilotではtoken数を保存せず、リクエスト単位の`copilotUsage.totalNanoAiu`をAI creditsへ変換してRun／Session単位に集計する。旧CLIの`result.usage.premiumRequests`形式もフォールバックとして取り込む。
+実行結果の`model`には指定モデル（CodexとClaude Codeの未指定は`default`、Copilot自動選択は`auto`）を、`actualModel`には実モデルを保存する。Copilotの`assistant.usage.model`または`assistant.message.data.model`を実モデルとして保存し、`auto`指定時にも選択されたモデルを確認可能にする。Codexのdefault指定時もCLIが返したモデルを`actualModel`へ保存する。Claude Codeは`modelUsage`のうち出力token数が最大のモデル、なければ`system`（`subtype: init`）の`model`を`actualModel`とする。Copilotではtoken数を保存せず、リクエスト単位の`copilotUsage.totalNanoAiu`をAI creditsへ変換してRun／Session単位に集計する。旧CLIの`result.usage.premiumRequests`形式もフォールバックとして取り込む。
 
-Manager起動時に[OpenAIモデル比較](https://developers.openai.com/api/docs/models/compare)と[GitHub Copilotモデル料金](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing)を取得し、モデル料金をSQLiteへ保持する。Run完了時にCodexはtoken単価から、CopilotはAI credit単価からUSDコストを計算し、Web／VS Codeへ表示する。
+Claude Codeのtoken数は`result.usage`から取り、`inputTokens`は`input_tokens`・`cache_creation_input_tokens`・`cache_read_input_tokens`の合計、`cachedInputTokens`は`cache_read_input_tokens`とする。
 
-`--backfill-costs`は未計算の全Usageを再処理する。保存モデルがない旧Codex Usageは現在の既定モデル（未指定時は設定リスト先頭）を用い、Copilot Usageはモデルの有無にかかわらず保存済みAI creditから計算する。
+Manager起動時に[OpenAIモデル比較](https://developers.openai.com/api/docs/models/compare)と[GitHub Copilotモデル料金](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing)を取得し、モデル料金をSQLiteへ保持する。Run完了時にCodexはtoken単価から、CopilotはAI credit単価からUSDコストを計算し、Web／VS Codeへ表示する。Claude CodeはCLIが`result.total_cost_usd`を返すため、その金額をそのまま保存し、`claude` providerの料金取得と再計算は行わない。
+
+`--backfill-costs`は未計算の全Usageを再処理する。保存モデルがない旧Codex Usageは現在の既定モデル（未指定時は設定リスト先頭）を用い、Copilot Usageはモデルの有無にかかわらず保存済みAI creditから計算する。Claude CodeのUsageはRun完了時点でコストが確定するため、backfillの対象にならない。
 
 ## 6. HTTP API
 
@@ -482,6 +482,21 @@ raw_json
 ```
 
 `model_pricing`にはprovider、model、入力／cached入力／cache write／出力の1M token単価、source URL、retrieved_atを保存する。
+
+### session_source_stats
+
+```text
+id
+session_id
+language
+files
+blank
+comment
+code
+created_at
+```
+
+Session作成時に一度だけclocの結果を保存する。言語ごとに1行、合計は`language = 'SUM'`の行として保存する。
 
 ### redacted_raw_events
 
@@ -593,8 +608,6 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 - queueing／steering
 - binary差分の専用UI
 - Agent比較、Cost集計、成功率
-- Claude Code Adapter
-- GitHub Copilot CLI Adapter
 - GitHub Issue、Commit、Pull Request連携
 - Multi-Agent Session
 
@@ -700,9 +713,11 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-53 | binary Diffの専用表示 | — | — | Binary変更確認／Restore | 未 |
 | D-54 | Cost計算の料金表管理 | — | — | 使用量分析 | 未 |
 | D-55 | Agent比較指標 | — | — | Analytics | 未 |
-| D-56 | Claude Codeの出力・resume方式 | — | — | Claude Adapter | 未 |
+| D-56 | Claude Codeの出力・resume方式 | print modeのstream-JSONとCLI管理のログイン情報を使用する | `--print --output-format stream-json --verbose --permission-mode bypassPermissions`を正規化する。Promptはstdinへ渡し、認証情報は保存せずCLIのログイン状態を利用する。`session_id`を`agentThreadId`へ保存して`--resume`する | Claude Adapter | 検討済み |
+| D-65 | Claude Code Usageとコストの記録 | CLIが報告するtoken数とUSDコストをそのまま保存する | `result.usage`から`inputTokens`（`input_tokens`＋cache write＋cache read）、`cachedInputTokens`（cache read）、`outputTokens`を保存し、`result.total_cost_usd`をコストとする。`claude` providerの料金表取得と再計算は行わない | Claude Adapter | 検討済み |
 | D-57 | Copilot CLIの出力・認証方式 | programmatic JSONLとCLI管理のログイン情報を使用 | `--output-format json`を正規化し、認証情報は保存せずCLIのログイン状態を利用する。Session IDは`agentThreadId`へ保存して`--resume`する | Copilot Adapter | 検討済み |
 | D-64 | Copilot Usageの記録単位 | 実動作モデルとAI credits | `assistant.usage.model`を保存し、`copilotUsage.totalNanoAiu / 1_000_000_000`をRun内で加算する。Copilotのtoken数とモデル倍率`cost`は共通Usageへ保存しない | Copilot Adapter | 検討済み |
+| D-66 | Session作成時のコード数計測 | cloc（`--vcs=git`）をSession作成時に一度だけ実行し結果を保存する | `cloc --vcs=git --json <workspace>`をSession作成のCreateSession内で同期実行し、`session_source_stats`テーブルへ言語別・合計行を保存する。Runごとの再計測は行わない。計測失敗（cloc未導入含む）はSession作成を失敗させず、コード数を未計測のまま扱う。UIはWeb版限定でUsage／Changesと並ぶ「コード数」Tabに表示する | Session作成／Web UI | 検討済み |
 | D-58 | GitHub Issue／PR連携方式 | — | — | GitHub連携 | 未 |
 | D-59 | Multi-Agent Sessionの分離単位 | — | — | 複数Agent実行 | 未 |
 | D-60 | リモート実行・外部公開の認証 | — | — | 将来のServer化 | 未 |

@@ -18,6 +18,15 @@ const (
 	CopilotCreditUSD = 0.01
 )
 
+// sourceByProvider maps a provider to the official page its rates are read
+// from. Claude Code is absent on purpose: its stream-json `result` event prices
+// each turn itself, including per-model cache read and cache write rates, so
+// the Manager stores the reported amount instead of deriving one.
+var sourceByProvider = map[string]string{
+	"codex":   OpenAISource,
+	"copilot": CopilotSource,
+}
+
 type ModelPricing struct {
 	Provider              string
 	Model                 string
@@ -38,9 +47,9 @@ func (f Fetcher) Refresh(ctx context.Context, models map[string][]string) []Mode
 	}
 	result := make([]ModelPricing, 0)
 	for provider, names := range models {
-		url := OpenAISource
-		if provider == "copilot" {
-			url = CopilotSource
+		url, known := sourceByProvider[provider]
+		if !known {
+			continue
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {

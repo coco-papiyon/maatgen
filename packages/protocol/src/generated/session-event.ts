@@ -11,7 +11,7 @@ export interface SessionEvent {
   sequence: number;
   timestamp: string;
   schemaVersion: 2;
-  source: 'user' | 'codex' | 'copilot' | 'manager';
+  source: 'user' | 'codex' | 'claude' | 'copilot' | 'manager';
   type:
     | 'user_prompt'
     | 'assistant_message'

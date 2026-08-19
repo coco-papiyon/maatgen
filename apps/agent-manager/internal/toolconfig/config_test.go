@@ -32,7 +32,7 @@ func TestLoadRelativeToExecutable(t *testing.T) {
 
 func TestLoadUsesEmbeddedDefaultWhenFileIsMissing(t *testing.T) {
 	config, _, err := Load(filepath.Join(t.TempDir(), "agent-manager"), DefaultRelativePath)
-	if err != nil || len(config.Providers) != 2 || config.Providers[0].ID != "codex" || config.Providers[1].ID != "copilot" {
+	if err != nil || len(config.Providers) != 3 || config.Providers[0].ID != "codex" || config.Providers[1].ID != "claude" || config.Providers[2].ID != "copilot" {
 		t.Fatalf("config = %#v, err = %v", config, err)
 	}
 }

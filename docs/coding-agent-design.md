@@ -1,5 +1,9 @@
 # Coding Agent VS Code Extension 設計書
 
+> 2026-08-20更新: Session作成時に一度だけclocでGit管理下のコード数を計測し、Web版のUsage／Changesと並ぶ「コード数」Tabで表示する（13章）。Runごとの再計測は行わない。
+
+> 2026-08-19更新: Claude Code Adapterを追加する。Claude CodeはCLIがRunごとのtoken数とUSDコストを返すため、Managerは料金表からコストを再計算せず、CLIが報告した金額をそのまま保存する。
+
 > 2026-08-16更新: RunごとのUsage詳細表示はWeb版限定とする。Web版ではUsageのRunカードから中央Conversation領域をRun詳細へ切り替え、トークン内訳、コマンド、関連Eventを表示する。詳細画面にはチャットへ戻る導線を設ける。VS Code版のUsage UIは変更しない。
 
 > 2026-08-15更新: Agentは対象リポジトリを直接変更する。変更の承認操作は設けず、Run前後のcheckpoint差分を確認し、必要なFile／HunkだけをRun前の状態へ戻す。
@@ -359,6 +363,25 @@ CopilotのUsageはtoken数を共通Usageへ転記せず、`assistant.usage`ま�
 
 初回RunでJSONLの`sessionId`を`AgentSession.agentThreadId`へ保存し、次Runから`--resume=<sessionId>`で同じ会話を継続する。CLI未導入、認証／quota error、timeout、cancelはCodexと同じRun終端処理およびafter snapshot取得へ合流する。
 
+### 9.3 Claude Code Adapter
+
+Claude Code CLIはprint modeを使用し、対象Repositoryをcwdとして次の引数で実行する。Promptは引数ではなくstdinへ渡し、Repositoryの内容がプロセス引数へ露出することとコマンドライン長の上限を避ける。
+
+```text
+claude --print --output-format stream-json --verbose \
+  --permission-mode bypassPermissions [--model <model>] [--resume <sessionId>]
+```
+
+`--permission-mode bypassPermissions`はCopilotの`--allow-all`に相当する。[ADR-006](./decisions/006-command-approval.md)のコマンド承認はCodex専用であり、Claude Codeでは使用しない。
+
+`stream-json`の各行はClaude Code Adapter内で解釈する。`system`（`subtype: init`）、`assistant`、`user`、`result`を共通`SessionEvent`へ正規化し、`stream_event`などの未知Eventはマスク済みRaw Eventとして保持する。`assistant`の`content` blockは種別ごとに分解し、`text`を`assistant_message`、`thinking`を`reasoning_summary`、`tool_use`を`command_started`へ、`user`の`tool_result`を`command_completed`へ変換する。`parent_tool_use_id`を持つsub-agent由来のEventはmain chatへ混在させない。
+
+Usageは`result`の`usage`から記録する。`input_tokens`はcache write・cache readを含まないため、`inputTokens`にはこの3値の合計を、`cachedInputTokens`には`cache_read_input_tokens`を保存する。実動作モデルは`modelUsage`のうち出力token数が最大のモデルとし、`modelUsage`がない場合は`system`（`subtype: init`）の`model`を使用する。
+
+コストはCLIが返す`total_cost_usd`をそのまま保存する。Claude Code CLIはcache readとcache writeを含めてモデル別に課金額を算出するため、Managerは料金表からの再計算を行わず、`claude` providerの料金取得も行わない。Managerが料金表からコストを算出するのは、CLIがコストを報告しないProviderのUsageに限る。
+
+初回Runで`session_id`を`AgentSession.agentThreadId`へ保存し、次Runから`--resume <sessionId>`で同じ会話を継続する。CLI未導入、timeout、cancelはCodexと同じRun終端処理およびafter snapshot取得へ合流する。
+
 ---
 
 ## 10. Session
@@ -369,7 +392,7 @@ CopilotのUsageはtoken数を共通Usageへ転記せず、`assistant.usage`ま�
 export interface AgentSession {
   id: string;
 
-  agent: 'codex' | 'copilot';
+  agent: 'codex' | 'claude' | 'copilot';
 
   agentThreadId?: string;
 
@@ -487,11 +510,39 @@ export interface TokenUsage {
 }
 ```
 
-`model`は実行時に指定したモデル（Codexの未指定は`default`、Copilotの自動選択は`auto`）で、`actualModel`はCLIが返す実際のモデルとする。Codexはtoken使用量を記録し、Codexのdefault指定時もCLIが返した実モデルを`actualModel`へ保存する。Copilotは`assistant.usage.model`または`assistant.message.data.model`を`actualModel`へ保存し、token使用量は記録しない。UsageはSession単位だけでなく、可能な場合はEvent単位でも記録する。
+`model`は実行時に指定したモデル（CodexとClaude Codeの未指定は`default`、Copilotの自動選択は`auto`）で、`actualModel`はCLIが返す実際のモデルとする。Codexはtoken使用量を記録し、Codexのdefault指定時もCLIが返した実モデルを`actualModel`へ保存する。Claude Codeはtoken使用量に加えてCLIが算出した`costUsd`を保存する。Copilotは`assistant.usage.model`または`assistant.message.data.model`を`actualModel`へ保存し、token使用量は記録しない。UsageはSession単位だけでなく、可能な場合はEvent単位でも記録する。
+
+UIはAI creditsを報告するProvider（Copilot）でのみcredit表示へ切り替え、CodexとClaude Codeはtoken内訳を表示する。
 
 ---
 
-## 13. Agent 操作ログ
+## 13. Source Stats（コード数）
+
+Session作成時に一度だけ`cloc --vcs=git --json <workspace>`を実行し、Git管理下のファイルを言語別に集計する。Runごとの再計測は行わない。計測に失敗した場合（`cloc`未導入など）はSession作成自体を失敗させず、コード数は未計測のまま扱う。
+
+```ts
+export interface SourceStatsLanguage {
+  language: string;
+  files: number;
+  blank: number;
+  comment: number;
+  code: number;
+}
+
+export interface SourceStats {
+  sessionId: string;
+  languages: SourceStatsLanguage[];
+  total: SourceStatsLanguage;
+}
+```
+
+`GET /api/v1/sessions/{id}/source-stats`で取得する。SQLiteは`session_source_stats`テーブルに言語ごとの行と、`language`列に`SUM`を格納した合計行を保持する。
+
+UIはWeb版限定で、Usage／Changesと並ぶ「コード数」Tabとして表示する。VS Code版のUIは変更しない。
+
+---
+
+## 14. Agent 操作ログ
 
 以下を可能な範囲で記録する。
 
@@ -558,7 +609,7 @@ git diff <before-tree> <after-tree>
 
 ---
 
-## 14. Source Change Tracking
+## 15. Source Change Tracking
 
 Agent はユーザーが開いているリポジトリを直接変更する。変更は承認待ちにせず即座にWorking Treeへ現れ、利用者はそのままコードを編集・実行できる。
 
@@ -586,7 +637,7 @@ After Snapshot / ChangeSet
 
 ---
 
-## 15. ChangeSet データモデル
+## 16. ChangeSet データモデル
 
 ```ts
 export interface ChangeSet {
@@ -631,7 +682,7 @@ export interface ChangeHunk {
 
 ---
 
-## 16. Checkpoint / Restore
+## 17. Checkpoint / Restore
 
 承認操作は設けない。AgentがRunを完了した時点で変更は対象リポジトリに反映済みとする。利用者が不要と判断した変更だけを、FileまたはHunk単位でRun開始時のチェックポイントへ戻す。
 
@@ -703,7 +754,7 @@ Sessionは複数Runを保持する。Run完了後、利用者はAgentの変更�
 
 ---
 
-## 17. Diff 表示
+## 18. Diff 表示
 
 ### Web版
 
@@ -727,7 +778,7 @@ VS Code 固有 UI は Extension 側に実装し、差分データ自体は Web �
 
 ---
 
-## 18. Agent Workspace
+## 19. Agent Workspace
 
 Agentの作業ディレクトリは、Session作成時に利用者が指定したリポジトリのWorking Treeそのものとする。専用Git Worktreeは作成しない。
 
@@ -763,7 +814,7 @@ Session開始時にcleanであることは要求しない。既存の未コミ�
 
 ---
 
-## 19. HTTP API
+## 20. HTTP API
 
 Agent Manager は localhost の HTTP Server として起動する。
 
@@ -796,7 +847,7 @@ Agent Manager は原則として loopback interface のみに bind する。
 
 ---
 
-## 20. WebSocket
+## 21. WebSocket
 
 リアルタイムの Agent 出力は WebSocket で配信する。
 
@@ -835,7 +886,7 @@ ws://127.0.0.1:3100/ws
 
 ---
 
-## 21. SQLite
+## 22. SQLite
 
 初期バージョンでは SQLite を採用する。
 
@@ -936,7 +987,7 @@ completed_at
 
 ---
 
-## 22. UI
+## 23. UI
 
 ### Main Chat
 
@@ -1013,7 +1064,7 @@ src/auth.test.ts
 
 ---
 
-## 23. Web開発モード
+## 24. Web開発モード
 
 通常の UI 開発では VS Code を起動しない。
 
@@ -1047,7 +1098,7 @@ Codex / Claude / Copilot
 
 ---
 
-## 24. Mock モード
+## 25. Mock モード
 
 CLI を実際に起動せず UI を開発できる Mock Agent を用意する。
 
@@ -1096,7 +1147,7 @@ Mock Event例：
 
 ---
 
-## 25. テスト方針
+## 26. テスト方針
 
 ### Level 1: Web UI + Mock
 
@@ -1160,7 +1211,7 @@ Coding Agent
 
 ---
 
-## 26. VS Code Extension
+## 27. VS Code Extension
 
 VS Code Extension は極力薄くする。
 
@@ -1180,7 +1231,7 @@ AI Agent のビジネスロジックを Extension 側に持たせない。
 
 ---
 
-## 27. Agent Manager 配布
+## 28. Agent Manager 配布
 
 Agent Manager は Go で単一実行ファイルとしてビルドする。
 
@@ -1202,7 +1253,7 @@ Codex / Claude Code / GitHub Copilot CLI 自体については、ユーザー環
 
 ---
 
-## 28. 配布
+## 29. 配布
 
 Marketplace には公開せず VSIX を利用する。
 
@@ -1235,7 +1286,7 @@ code --install-extension coding-agent-0.1.0.vsix
 
 ---
 
-## 29. セキュリティ
+## 30. セキュリティ
 
 Agent Manager は任意コマンドを実行可能なため、以下を考慮する。
 
@@ -1280,7 +1331,7 @@ GITHUB_TOKEN=****
 
 ---
 
-## 30. 実装フェーズ
+## 31. 実装フェーズ
 
 ### Phase 1
 
@@ -1352,7 +1403,7 @@ VSIX 化する。
 
 ---
 
-## 31. 将来拡張
+## 32. 将来拡張
 
 以下を将来的な拡張候補とする。
 
@@ -1408,7 +1459,7 @@ Session
 
 ---
 
-## 32. 設計上の基本原則
+## 33. 設計上の基本原則
 
 本システムでは以下を基本原則とする。
 
@@ -1425,7 +1476,7 @@ Session
 
 ---
 
-## 33. 最終アーキテクチャ
+## 34. 最終アーキテクチャ
 
 ```text
                          ┌─────────────────────┐

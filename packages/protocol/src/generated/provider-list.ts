@@ -6,7 +6,7 @@
 
 export interface ProviderListResponse {
   providers: {
-    id: 'codex';
+    id: 'codex' | 'claude' | 'copilot';
     label: string;
     models: string[];
     defaultModel?: string;

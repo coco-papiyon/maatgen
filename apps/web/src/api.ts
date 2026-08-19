@@ -18,6 +18,20 @@ export interface SessionUsage {
   runs: Array<{ run: AgentRun; usage?: import('@maatgen/protocol').TokenUsage }>;
 }
 
+export interface SourceStatsLanguage {
+  language: string;
+  files: number;
+  blank: number;
+  comment: number;
+  code: number;
+}
+
+export interface SourceStats {
+  sessionId: string;
+  languages: SourceStatsLanguage[];
+  total: SourceStatsLanguage;
+}
+
 export interface AgentApi {
   getDefaultWorkspace(): Promise<string>;
   listProviders(): Promise<ProviderListResponse>;
@@ -32,6 +46,7 @@ export interface AgentApi {
   issueWebSocketTicket(): Promise<WsTicketResponse>;
   getChanges(id: string): Promise<ChangeSet>;
   getUsage(id: string): Promise<SessionUsage>;
+  getSourceStats(id: string): Promise<SourceStats>;
   listApprovals(id: string, pendingOnly?: boolean): Promise<CommandApproval[]>;
   decideApproval(sessionId: string, approvalId: string, request: ApprovalDecisionRequest): Promise<CommandApproval>;
   restoreHunk(sessionId: string, checkpointId: string, hunkId: string): Promise<ChangeSet>;
@@ -127,6 +142,9 @@ export const httpAgentApi: AgentApi = {
   },
   getUsage(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/usage`);
+  },
+  getSourceStats(id) {
+    return request(`/api/v1/sessions/${encodeURIComponent(id)}/source-stats`);
   },
   async listApprovals(id, pendingOnly = true) {
     const suffix = pendingOnly ? '?status=pending' : '';

@@ -11,6 +11,7 @@ type AgentName string
 
 const (
 	AgentCodex   AgentName = "codex"
+	AgentClaude  AgentName = "claude"
 	AgentCopilot AgentName = "copilot"
 )
 
@@ -188,11 +189,26 @@ type RunUsageEntry struct {
 	Usage *TokenUsage `json:"usage,omitempty"`
 }
 
+type SourceStatsLanguage struct {
+	Language string `json:"language"`
+	Files    int    `json:"files"`
+	Blank    int    `json:"blank"`
+	Comment  int    `json:"comment"`
+	Code     int    `json:"code"`
+}
+
+type SourceStats struct {
+	SessionID string                `json:"sessionId"`
+	Languages []SourceStatsLanguage `json:"languages"`
+	Total     SourceStatsLanguage   `json:"total"`
+}
+
 type EventSource string
 
 const (
 	EventSourceUser    EventSource = "user"
 	EventSourceCodex   EventSource = "codex"
+	EventSourceClaude  EventSource = "claude"
 	EventSourceCopilot EventSource = "copilot"
 	EventSourceManager EventSource = "manager"
 )

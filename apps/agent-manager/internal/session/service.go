@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ type Store interface {
 	CreateSession(ctx context.Context, session protocol.AgentSession) error
 	GetSession(ctx context.Context, id string) (protocol.AgentSession, error)
 	CloseSession(ctx context.Context, id string, closedAt time.Time) error
+	ReplaceSourceStats(ctx context.Context, stats protocol.SourceStats) error
 }
 
 type RepositoryManager interface {
@@ -31,19 +33,38 @@ type RepositoryManager interface {
 	CleanupSession(ctx context.Context, repository, sessionID string) error
 }
 
+// SourceStatsAnalyzer counts source lines per language for a repository. It
+// runs once, at Session creation, not on every Run.
+type SourceStatsAnalyzer interface {
+	Analyze(ctx context.Context, repository string) (protocol.SourceStats, error)
+}
+
 type Service struct {
 	store        Store
 	repositories RepositoryManager
+	analyzer     SourceStatsAnalyzer
 	now          func() time.Time
 	newID        func() (string, error)
 }
 
-func New(store Store, repositories RepositoryManager) *Service {
-	return &Service{store: store, repositories: repositories, now: time.Now, newID: generateID}
+type Option func(*Service)
+
+func WithSourceStatsAnalyzer(analyzer SourceStatsAnalyzer) Option {
+	return func(s *Service) { s.analyzer = analyzer }
+}
+
+func New(store Store, repositories RepositoryManager, options ...Option) *Service {
+	service := &Service{store: store, repositories: repositories, now: time.Now, newID: generateID}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSessionRequest) (protocol.AgentSession, error) {
-	if request.Agent != protocol.AgentCodex && request.Agent != protocol.AgentCopilot {
+	switch request.Agent {
+	case protocol.AgentCodex, protocol.AgentClaude, protocol.AgentCopilot:
+	default:
 		return protocol.AgentSession{}, ErrUnsupportedAgent
 	}
 	if strings.TrimSpace(request.Workspace) == "" {
@@ -64,7 +85,24 @@ func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSess
 	if err := s.store.CreateSession(ctx, created); err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("persist session: %w", err)
 	}
+	if s.analyzer != nil {
+		s.recordSourceStats(ctx, created.ID, repository)
+	}
 	return created, nil
+}
+
+// recordSourceStats counts source lines once, at Session creation. It is
+// best-effort: a failed count must not fail session creation.
+func (s *Service) recordSourceStats(ctx context.Context, sessionID, repository string) {
+	stats, err := s.analyzer.Analyze(ctx, repository)
+	if err != nil {
+		slog.Warn("source stats analysis failed", "session", sessionID, "error", err)
+		return
+	}
+	stats.SessionID = sessionID
+	if err := s.store.ReplaceSourceStats(ctx, stats); err != nil {
+		slog.Warn("save source stats failed", "session", sessionID, "error", err)
+	}
 }
 
 func (s *Service) CloseSession(ctx context.Context, id string) (protocol.AgentSession, error) {

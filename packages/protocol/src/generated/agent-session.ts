@@ -6,7 +6,7 @@
 
 export interface AgentSession {
   id: string;
-  agent: 'codex' | 'copilot';
+  agent: 'codex' | 'claude' | 'copilot';
   workspace: string;
   agentThreadId?: string;
   status: 'active' | 'closed';

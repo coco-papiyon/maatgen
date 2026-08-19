@@ -425,6 +425,36 @@ func TestGetChangeSetAPI(t *testing.T) {
 	}
 }
 
+func TestGetSourceStatsAPI(t *testing.T) {
+	session := protocol.AgentSession{ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repo", Status: protocol.SessionActive, CreatedAt: time.Now()}
+	sessions := &fakeSessionReader{sessions: []protocol.AgentSession{session}}
+	reader := &fakeSourceStatsReader{stats: protocol.SourceStats{
+		SessionID: "session-1",
+		Languages: []protocol.SourceStatsLanguage{{Language: "Go", Files: 3, Blank: 4, Comment: 1, Code: 100}},
+		Total:     protocol.SourceStatsLanguage{Files: 3, Blank: 4, Comment: 1, Code: 100},
+	}}
+	config := testConfig()
+	config.SourceStatsReader = reader
+	recorder := httptest.NewRecorder()
+	New(config, sessions, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/sessions/session-1/source-stats"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response protocol.SourceStats
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SessionID != "session-1" || len(response.Languages) != 1 || response.Total.Code != 100 || reader.sessionID != "session-1" {
+		t.Fatalf("response = %#v, requested = %q", response, reader.sessionID)
+	}
+
+	notFound := httptest.NewRecorder()
+	New(config, sessions, nil).Handler().ServeHTTP(notFound, authorizedRequest(http.MethodGet, "/api/v1/sessions/missing/source-stats"))
+	if notFound.Code != http.StatusNotFound {
+		t.Fatalf("not found status = %d", notFound.Code)
+	}
+}
+
 func TestRestoreAPI(t *testing.T) {
 	controller := &fakeRestoreController{changeSet: protocol.ChangeSet{SessionID: "session-1", CheckpointID: "checkpoint-1", Files: []protocol.FileChange{}}}
 	config := testConfig()
@@ -608,6 +638,19 @@ func (f *fakeChangeReader) GetChangeSet(_ context.Context, sessionID string) (pr
 }
 
 var _ ChangeReader = (*fakeChangeReader)(nil)
+
+type fakeSourceStatsReader struct {
+	sessionID string
+	stats     protocol.SourceStats
+	err       error
+}
+
+func (f *fakeSourceStatsReader) GetSourceStats(_ context.Context, sessionID string) (protocol.SourceStats, error) {
+	f.sessionID = sessionID
+	return f.stats, f.err
+}
+
+var _ SourceStatsReader = (*fakeSourceStatsReader)(nil)
 
 type fakeRestoreController struct {
 	operation    string

@@ -9,7 +9,7 @@ import type {
   SessionEvent,
   WsTicketResponse,
 } from '@maatgen/protocol';
-import type { AgentApi, SessionUsage } from '../api';
+import type { AgentApi, SessionUsage, SourceStats } from '../api';
 import type { EventStreamFactory } from '../event-stream';
 
 type EventListener = (event: SessionEvent) => void;
@@ -20,6 +20,7 @@ export class MockAgentApi implements AgentApi {
   private readonly sessions = new Map<string, AgentSession>();
   private readonly events = new Map<string, SessionEvent[]>();
   private readonly changes = new Map<string, ChangeSet>();
+  private readonly sourceStats = new Map<string, SourceStats>();
   private readonly listeners = new Map<string, Set<EventListener>>();
   private readonly runs = new Map<string, AgentRun>();
   private readonly runTimers = new Map<string, number[]>();
@@ -29,6 +30,7 @@ export class MockAgentApi implements AgentApi {
       this.sessions.set(scenario.session.id, scenario.session);
       this.events.set(scenario.session.id, scenario.events);
       this.changes.set(scenario.session.id, scenario.changes);
+      this.sourceStats.set(scenario.session.id, scenario.sourceStats);
     }
   }
 
@@ -37,7 +39,12 @@ export class MockAgentApi implements AgentApi {
   }
 
   async listProviders() {
-    return { providers: [{ id: 'codex' as const, label: 'Codex', models: ['gpt-5.6-sol'] }] };
+    return {
+      providers: [
+        { id: 'codex' as const, label: 'Codex', models: ['gpt-5.6-sol'] },
+        { id: 'claude' as const, label: 'Claude Code', models: ['claude-opus-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'] },
+      ],
+    };
   }
 
   async setProviderModel(_provider: string, _model: string) {
@@ -67,6 +74,7 @@ export class MockAgentApi implements AgentApi {
     this.sessions.set(id, session);
     this.events.set(id, []);
     this.changes.set(id, emptyChanges(id));
+    this.sourceStats.set(id, emptySourceStats(id));
     return clone(session);
   }
 
@@ -131,6 +139,11 @@ export class MockAgentApi implements AgentApi {
     const changeSet = this.changes.get(id);
     if (!changeSet) throw new Error('change set was not found');
     return clone(changeSet);
+  }
+
+  async getSourceStats(id: string): Promise<SourceStats> {
+    this.requireSession(id);
+    return clone(this.sourceStats.get(id) ?? emptySourceStats(id));
   }
 
   async getUsage(id: string): Promise<SessionUsage> {
@@ -267,25 +280,39 @@ function aggregateStatus(statuses: Array<'changed' | 'restored' | 'conflict'>): 
   return 'changed';
 }
 
-function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[]; changes: ChangeSet }> {
+function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[]; changes: ChangeSet; sourceStats: SourceStats }> {
   return [
     scenario('mock-success', 'C:/demo/success', [
       event('mock-success', 1, 'command_started', { command: 'npm test' }),
       event('mock-success', 2, 'file_change_reported', { text: 'file_change_reported' }),
       event('mock-success', 3, 'assistant_message', { text: '認証処理を確認し、テストを追加しました。' }),
       event('mock-success', 4, 'usage_reported', { totalTokens: 2400 }),
-    ], oneHunk('mock-success')),
+    ], oneHunk('mock-success'), 'codex', {
+      sessionId: 'mock-success',
+      languages: [
+        { language: 'TypeScript', files: 32, blank: 231, comment: 92, code: 2385 },
+        { language: 'Go', files: 61, blank: 851, comment: 60, code: 9894 },
+      ],
+      total: { language: '', files: 93, blank: 1082, comment: 152, code: 12279 },
+    }),
     scenario('mock-failure', 'C:/demo/failure', [event('mock-failure', 1, 'run_failed', { code: 'codex_unavailable', message: 'Mock: Codex CLI is unavailable' })], emptyChanges('mock-failure')),
     scenario('mock-copilot-failure', 'C:/demo/copilot-failure', [
       event('mock-copilot-failure', 1, 'usage_reported', { model: 'auto', actualModel: 'gpt-5.4', aiCredits: 0.125 }),
       event('mock-copilot-failure', 2, 'run_failed', { code: 'copilot_unavailable', message: 'Mock: GitHub Copilot CLI is unavailable' }),
     ], emptyChanges('mock-copilot-failure'), 'copilot'),
+    scenario('mock-claude-failure', 'C:/demo/claude-failure', [
+      event('mock-claude-failure', 1, 'usage_reported', { model: 'default', actualModel: 'claude-sonnet-5', inputTokens: 1000, cachedInputTokens: 850, outputTokens: 200, totalTokens: 1200, costUsd: 0.25 }),
+      event('mock-claude-failure', 2, 'run_failed', { code: 'claude_unavailable', message: 'Mock: Claude Code CLI is unavailable' }),
+    ], emptyChanges('mock-claude-failure'), 'claude'),
     scenario('mock-cancelled', 'C:/demo/cancelled', [event('mock-cancelled', 1, 'run_cancelled', {})], emptyChanges('mock-cancelled')),
     scenario('mock-multi-hunk', 'C:/demo/multi-hunk', [event('mock-multi-hunk', 1, 'assistant_message', { text: '2つのHunkを個別に戻せます。' })], multiHunk('mock-multi-hunk')),
   ];
 }
 
-function scenario(id: string, workspace: string, events: SessionEvent[], changes: ChangeSet, agent: AgentSession['agent'] = 'codex') {
+function scenario(
+  id: string, workspace: string, events: SessionEvent[], changes: ChangeSet,
+  agent: AgentSession['agent'] = 'codex', sourceStats: SourceStats = emptySourceStats(id),
+) {
   return {
     session: {
       id,
@@ -296,6 +323,7 @@ function scenario(id: string, workspace: string, events: SessionEvent[], changes
     },
     events,
     changes,
+    sourceStats,
   };
 }
 
@@ -305,6 +333,10 @@ function event(sessionId: string, sequence: number, type: SessionEvent['type'], 
 
 function emptyChanges(sessionId: string): ChangeSet {
   return { sessionId, runId: `${sessionId}-run`, checkpointId: `${sessionId}-checkpoint`, beforeTree: 'before', afterTree: 'after', files: [] };
+}
+
+function emptySourceStats(sessionId: string): SourceStats {
+  return { sessionId, languages: [], total: { language: '', files: 0, blank: 0, comment: 0, code: 0 } };
 }
 
 function oneHunk(sessionId: string): ChangeSet {

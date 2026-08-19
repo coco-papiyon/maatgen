@@ -12,6 +12,7 @@ interface WorkspaceState {
 // Default providers configuration matching Agent Manager configuration
 const DEFAULT_PROVIDERS: AgentProvider[] = [
   { id: 'codex', label: 'Codex', models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'], defaultModel: 'gpt-5.6-luna' },
+  { id: 'claude', label: 'Claude Code', models: ['claude-opus-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'] },
   { id: 'copilot', label: 'GitHub Copilot', models: ['auto', 'claude-sonnet-4.6', 'gpt-5.4', 'claude-haiku-4.5', 'gpt-5.3-codex', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.6-flash', 'mai-code-1-flash'], defaultModel: 'auto' },
 ];
 

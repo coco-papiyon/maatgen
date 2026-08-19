@@ -21,7 +21,7 @@
     "sequence": { "type": "integer", "minimum": 1 },
     "timestamp": { "type": "string", "format": "date-time" },
     "schemaVersion": { "const": 2 },
-    "source": { "enum": ["user", "codex", "copilot", "manager"] },
+    "source": { "enum": ["user", "codex", "claude", "copilot", "manager"] },
     "type": {
       "enum": [
         "user_prompt",

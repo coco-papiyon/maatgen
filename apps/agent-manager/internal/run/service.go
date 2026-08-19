@@ -265,7 +265,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		model = strings.TrimSpace(*request.Model)
 	}
 	requestedModel := model
-	if requestedModel == "" && session.Agent == protocol.AgentCodex {
+	if requestedModel == "" && (session.Agent == protocol.AgentCodex || session.Agent == protocol.AgentClaude) {
 		requestedModel = "default"
 	}
 	var timeout time.Duration
@@ -318,7 +318,9 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 				}
 				accumulatedUsage = usage
 			}
-			if s.pricing != nil && usage.ActualModel != nil {
+			// A CLI that prices the turn itself (Claude Code) is authoritative;
+			// only derive the cost from the stored rate table when it does not.
+			if s.pricing != nil && usage.CostUSD == nil && usage.ActualModel != nil {
 				if rates, pricingErr := s.pricing.GetModelPricing(ctx, string(session.Agent), *usage.ActualModel); pricingErr == nil {
 					cost := pricing.CostUSD(usage, rates, usage.AICredits)
 					usage.CostUSD = &cost
@@ -488,17 +490,25 @@ func (s *Service) persistRedactedRaw(ctx context.Context, sessionID, runID strin
 }
 
 func eventSource(agentName protocol.AgentName) protocol.EventSource {
-	if agentName == protocol.AgentCopilot {
+	switch agentName {
+	case protocol.AgentCopilot:
 		return protocol.EventSourceCopilot
+	case protocol.AgentClaude:
+		return protocol.EventSourceClaude
+	default:
+		return protocol.EventSourceCodex
 	}
-	return protocol.EventSourceCodex
 }
 
 func agentLabel(agentName protocol.AgentName) string {
-	if agentName == protocol.AgentCopilot {
+	switch agentName {
+	case protocol.AgentCopilot:
 		return "GitHub Copilot"
+	case protocol.AgentClaude:
+		return "Claude Code"
+	default:
+		return "Codex"
 	}
-	return "Codex"
 }
 
 func addUsage(total, next protocol.TokenUsage) protocol.TokenUsage {

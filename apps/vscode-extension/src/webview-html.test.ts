@@ -55,4 +55,11 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('data-approval-decision="allow_permanent"');
     expect(html).toContain("type: 'approval.decide'");
   });
+
+  it('shows the token grid unless the provider bills in AI credits', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain("const isCreditUsage = typeof summary.aiCredits === 'number';");
+    expect(html).toContain('id="usage-cost-credits"');
+    expect(html).not.toContain('data-copilot-usage');
+  });
 });

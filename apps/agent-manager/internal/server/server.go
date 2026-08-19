@@ -33,6 +33,7 @@ type Config struct {
 	Providers          []protocol.Provider
 	ModelSetter        ModelSetter
 	UsageReader        UsageReader
+	SourceStatsReader  SourceStatsReader
 	ApprovalController ApprovalController
 }
 
@@ -81,6 +82,10 @@ type ChangeReader interface {
 
 type UsageReader interface {
 	GetSessionUsage(ctx context.Context, sessionID string) (protocol.SessionUsage, error)
+}
+
+type SourceStatsReader interface {
+	GetSourceStats(ctx context.Context, sessionID string) (protocol.SourceStats, error)
 }
 
 type ApprovalController interface {
@@ -324,6 +329,23 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				usage.Runs = []protocol.RunUsageEntry{}
 			}
 			writeJSON(w, http.StatusOK, usage)
+		})))
+	}
+	if sessions != nil && config.SourceStatsReader != nil {
+		mux.Handle("GET /api/v1/sessions/{id}/source-stats", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			stats, err := config.SourceStatsReader.GetSourceStats(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			if stats.Languages == nil {
+				stats.Languages = []protocol.SourceStatsLanguage{}
+			}
+			writeJSON(w, http.StatusOK, stats)
 		})))
 	}
 	if config.ChangeReader != nil {
