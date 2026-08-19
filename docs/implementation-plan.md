@@ -717,6 +717,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-65 | Claude Code Usageとコストの記録 | CLIが報告するtoken数とUSDコストをそのまま保存する | `result.usage`から`inputTokens`（`input_tokens`＋cache write＋cache read）、`cachedInputTokens`（cache read）、`outputTokens`を保存し、`result.total_cost_usd`をコストとする。`claude` providerの料金表取得と再計算は行わない | Claude Adapter | 検討済み |
 | D-57 | Copilot CLIの出力・認証方式 | programmatic JSONLとCLI管理のログイン情報を使用 | `--output-format json`を正規化し、認証情報は保存せずCLIのログイン状態を利用する。Session IDは`agentThreadId`へ保存して`--resume`する | Copilot Adapter | 検討済み |
 | D-64 | Copilot Usageの記録単位 | 実動作モデルとAI credits | `assistant.usage.model`を保存し、`copilotUsage.totalNanoAiu / 1_000_000_000`をRun内で加算する。Copilotのtoken数とモデル倍率`cost`は共通Usageへ保存しない | Copilot Adapter | 検討済み |
+| D-67 | 未インストールProviderのUI表示 | 起動時に各CLIの`--version`実行可否を確認し、失敗したProviderは`/api/v1/providers`から除外する | `agent.AvailableProviders`が各AdapterのCheckを並行実行（5秒上限）し、成功したProviderだけをAPIレスポンスへ含める。設定ファイル（`providers.json`）自体は変更しないため、Model既定値の保存やコマンド許可ルールの永続化には影響しない | Provider選択UI | 検討済み |
 | D-66 | Session作成時のコード数計測 | cloc（`--vcs=git`）をSession作成時に一度だけ実行し結果を保存する | `cloc --vcs=git --json <workspace>`をSession作成のCreateSession内で同期実行し、`session_source_stats`テーブルへ言語別・合計行を保存する。Runごとの再計測は行わない。計測失敗（cloc未導入含む）はSession作成を失敗させず、コード数を未計測のまま扱う。UIはWeb版限定でUsage／Changesと並ぶ「コード数」Tabに表示する | Session作成／Web UI | 検討済み |
 | D-58 | GitHub Issue／PR連携方式 | — | — | GitHub連携 | 未 |
 | D-59 | Multi-Agent Sessionの分離単位 | — | — | 複数Agent実行 | 未 |

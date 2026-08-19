@@ -79,6 +79,18 @@ func run() error {
 	} else {
 		slog.Debug("using configured Codex models", "error", discoveryErr)
 	}
+	codexAdapter := codex.New("codex")
+	claudeAdapter := claude.New("claude")
+	copilotAdapter := copilot.New("copilot")
+	adapters := []agent.Adapter{codexAdapter, claudeAdapter, copilotAdapter}
+	availabilityCtx, cancelAvailability := context.WithTimeout(context.Background(), 5*time.Second)
+	availableProviders := agent.AvailableProviders(availabilityCtx, adapters)
+	cancelAvailability()
+	for name, available := range availableProviders {
+		if !available {
+			slog.Info("agent CLI is not installed; hiding it from the provider list", "provider", name)
+		}
+	}
 	modelConfigMu := sync.Mutex{}
 	if *runtimeFile == "" {
 		*runtimeFile = filepath.Join(*dataDir, "runtime.json")
@@ -178,7 +190,7 @@ func run() error {
 		},
 	})
 	defer approvals.Close()
-	runs := runservice.NewMulti(store, []agent.Adapter{codex.New("codex"), claude.New("claude"), copilot.New("copilot")}, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle))
+	runs := runservice.NewMulti(store, adapters, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle))
 	restores, err := restoreservice.New(store, checkpointManager)
 	if err != nil {
 		return err
@@ -220,7 +232,7 @@ func run() error {
 			RunController:     runs,
 			ChangeReader:      store,
 			RestoreController: restores,
-			Providers:         toolConfig.Providers,
+			Providers:         filterAvailableProviders(toolConfig.Providers, availableProviders),
 			ModelSetter: func(_ context.Context, provider protocol.AgentName, model string) error {
 				modelConfigMu.Lock()
 				defer modelConfigMu.Unlock()
@@ -260,6 +272,20 @@ func run() error {
 		}
 		return err
 	}
+}
+
+// filterAvailableProviders hides providers whose CLI was not found at
+// startup from the API response. The full, unfiltered list in toolConfig
+// itself is left untouched so config persistence (default model, allowed
+// commands) never drops a provider just because its CLI is missing right now.
+func filterAvailableProviders(providers []protocol.Provider, available map[protocol.AgentName]bool) []protocol.Provider {
+	filtered := make([]protocol.Provider, 0, len(providers))
+	for _, provider := range providers {
+		if available[provider.ID] {
+			filtered = append(filtered, provider)
+		}
+	}
+	return filtered
 }
 
 func splitNonEmpty(value string) []string {

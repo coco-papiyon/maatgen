@@ -160,7 +160,7 @@ Session作成時はGitリポジトリを指定します。dirtyなWorking Tree�
 
 選択したAgentへPromptを送るとRunが非同期で開始されます。同じSessionで実行中のRunがある場合は`409 Conflict`になります。`model`と`timeoutSeconds`は省略可能です。Copilotは`--output-format json --allow-all --no-ask-user`で、Claude Codeは`--print --output-format stream-json --verbose --permission-mode bypassPermissions`で実行し、保存したSession IDを`--resume`へ渡して継続します。Claude CodeへのPromptはstdinで渡します。
 
-Providerとモデル候補は`GET /api/v1/providers`で取得できます。ProviderはCodex、Claude Code、GitHub Copilotです。Codexは起動時に`codex debug models`を5秒の上限で実行し、失敗時は設定ファイルへフォールバックします。Claude CodeとCopilotは公式CLIのモデル名を設定ファイルから読みます。Claude Codeは既定で`defaultModel`を持たないため、Modelを選ばない場合は`--model`を渡さずCLI側の既定モデルを使用します。既定の相対パスは`config/providers.json`で、通常はAgent Manager実行ファイルのあるディレクトリ、`go run`では起動時のカレントディレクトリを基準にします。Web UIで変更したモデルは`defaultModel`として保存されます。
+Providerとモデル候補は`GET /api/v1/providers`で取得できます。ProviderはCodex、Claude Code、GitHub Copilotです。Agent Manager起動時に各CLIの`--version`実行有無を並行して確認し（5秒の上限）、実行ファイルが見つからないProviderは一覧から除外します。設定ファイル自体は変更しないため、後からCLIを導入して再起動すれば再び表示されます。Codexは起動時に`codex debug models`を5秒の上限で実行し、失敗時は設定ファイルへフォールバックします。Claude CodeとCopilotは公式CLIのモデル名を設定ファイルから読みます。Claude Codeは既定で`defaultModel`を持たないため、Modelを選ばない場合は`--model`を渡さずCLI側の既定モデルを使用します。既定の相対パスは`config/providers.json`で、通常はAgent Manager実行ファイルのあるディレクトリ、`go run`では起動時のカレントディレクトリを基準にします。Web UIで変更したモデルは`defaultModel`として保存されます。
 
 ```json
 {
