@@ -31,8 +31,8 @@ button { color: inherit; }
 
 .topbar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--line); background: rgba(12, 17, 13, .94); }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.02em; }
-.brand-mark { display: inline-block; width: 27px; height: 27px; border-radius: 7px 2px 7px 2px; overflow: hidden; background: transparent; }
-.brand-mark img, .brand-mark { width: 100%; height: 100%; display: block; object-fit: cover; }
+.brand-mark { display: inline-block; width: 27px; height: 27px; border-radius: 7px 2px 7px 2px; overflow: hidden; background: transparent; flex-shrink: 0; }
+.brand-mark img { width: 27px; height: 27px; display: block; object-fit: cover; }
 .topbar-status { display: flex; align-items: center; gap: 14px; }
 .system-message-setting { display: flex; align-items: center; gap: 6px; color: #7f8c81; font: 10px ui-monospace, monospace; cursor: pointer; }
 .system-message-setting input { width: auto; accent-color: var(--green-strong); cursor: pointer; }
