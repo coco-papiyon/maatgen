@@ -567,7 +567,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand"><span class="brand-mark">M</span><span>maatgen</span></div>
+      <div class="brand"><img src="/maat.png" class="brand-mark" alt="Maat"><span>maatgen</span></div>
       <div class="topbar-status">
         <label class="system-message-setting" title="コマンド実行やファイル編集のシステムメッセージを表示">
           <input v-model="showSystemMessages" type="checkbox" @change="toggleSystemMessages" />
@@ -727,7 +727,7 @@ onBeforeUnmount(() => {
           Changes <span class="tab-count">{{ changes.files.length }}</span>
         </button>
         <button id="source-stats-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'sourceStats'" :class="{ selected: activeSidePanel === 'sourceStats' }" @click="selectSidePanel('sourceStats')">
-          コード数 <span class="tab-count">{{ sourceStats.total.files }}</span>
+          Source <span class="tab-count">{{ sourceStats.total.files }}</span>
         </button>
       </div>
       <div v-if="activeSidePanel === 'usage'" id="usage-panel" class="usage-section" role="tabpanel" aria-labelledby="usage-tab">
@@ -800,7 +800,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-else id="source-stats-panel" class="source-stats-section" role="tabpanel" aria-labelledby="source-stats-tab">
         <div class="section-heading">
-          <span>コード数</span><span class="count accent">{{ sourceStats.total.files }}</span>
+         <span>Source</span><span class="count accent">{{ sourceStats.total.files }}</span>
         </div>
         <div v-if="sourceStats.languages.length" class="usage-summary">
           <div><span>Files</span><strong>{{ formatTokens(sourceStats.total.files) }}</strong></div>
@@ -813,7 +813,7 @@ onBeforeUnmount(() => {
             <span class="source-stats-code">{{ formatTokens(language.code) }} code</span>
           </div>
         </div>
-        <div v-else class="no-changes"><span>◇</span><p>コード数はまだ計測されていません</p><small>Git管理下のファイルをcloc未導入か、計測が完了していません。</small></div>
+        <div v-else class="no-changes"><span>◇</span><p>Source stats have not been measured yet</p><small>Files tracked by Git are not counted, or cloc is not installed, or measurement is still in progress.</small></div>
       </div>
     </aside>
 

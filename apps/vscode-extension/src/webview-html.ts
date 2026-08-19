@@ -6,6 +6,7 @@ export interface WebviewHtmlOptions {
 
 export function renderWebviewHtml(options: WebviewHtmlOptions): string {
   const { cspSource, nonce, styleUri } = options;
+  const imageUri = styleUri.replace(/webview\.css$/, 'maat.png');
   const csp = [
     "default-src 'none'",
     `img-src ${cspSource} https:`,
@@ -25,7 +26,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
   <body>
     <main class="extension-shell">
       <header class="extension-header">
-        <span class="brand-mark" aria-hidden="true">M</span>
+        <img class="brand-mark" src="${imageUri}" aria-hidden="true" alt="Maat">
         <div>
           <h1>Maatgen</h1>
           <p>Coding Agent Manager</p>

@@ -31,7 +31,8 @@ button { color: inherit; }
 
 .topbar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--line); background: rgba(12, 17, 13, .94); }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.02em; }
-.brand-mark { display: grid; place-items: center; width: 27px; height: 27px; color: #0b120d; background: var(--green); border-radius: 7px 2px 7px 2px; font: 700 15px ui-monospace, monospace; }
+.brand-mark { display: inline-block; width: 27px; height: 27px; border-radius: 7px 2px 7px 2px; overflow: hidden; background: transparent; }
+.brand-mark img, .brand-mark { width: 100%; height: 100%; display: block; object-fit: cover; }
 .topbar-status { display: flex; align-items: center; gap: 14px; }
 .system-message-setting { display: flex; align-items: center; gap: 6px; color: #7f8c81; font: 10px ui-monospace, monospace; cursor: pointer; }
 .system-message-setting input { width: auto; accent-color: var(--green-strong); cursor: pointer; }
@@ -46,7 +47,7 @@ button { color: inherit; }
 .sidebar, .changes-panel { min-height: 0; background: var(--panel); }
 .sidebar { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
 .changes-panel { border-left: 1px solid var(--line); overflow: auto; }
-.side-panel-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); background: #0f1610; }
+.side-panel-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; border-bottom: 1px solid var(--line); background: #0f1610; }
 .side-panel-tabs button { padding: 14px 8px 11px; border: 0; border-bottom: 2px solid transparent; color: #77847a; background: transparent; font: 700 10px ui-monospace, monospace; cursor: pointer; }
 .side-panel-tabs button:hover { color: #c7d4c9; background: #151e16; }
 .side-panel-tabs button.selected { border-bottom-color: var(--green); color: var(--green); }

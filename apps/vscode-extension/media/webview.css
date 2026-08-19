@@ -16,7 +16,8 @@ button { font: inherit; }
 .extension-header { display: flex; align-items: center; gap: 10px; }
 .extension-header h1 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
 .extension-header p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
-.brand-mark { display: grid; place-items: center; width: 27px; height: 27px; color: var(--vscode-sideBar-background); background: var(--green); border-radius: 7px 2px 7px 2px; font: 700 15px var(--vscode-editor-font-family); }
+.brand-mark { display: inline-block; width: 27px; height: 27px; border-radius: 7px 2px 7px 2px; overflow: hidden; background: transparent; }
+.brand-mark img, .brand-mark { width: 100%; height: 100%; display: block; object-fit: cover; }
 
 .top-panels { display: grid; gap: 4px; min-height: 0; overflow: auto; }
 .top-panels details { border: 1px solid var(--line); border-radius: 5px; background: var(--panel); }
