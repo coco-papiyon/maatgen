@@ -103,49 +103,10 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 			return agent.RunResult{}, err
 		}
 	}
-	if request.Approval != nil {
-		return a.runAppServer(ctx, info.Path, directory, request, emit)
+	if request.Approval == nil {
+		return agent.RunResult{}, errors.New("Codex run requires a command approval handler")
 	}
-
-	args := append([]string{}, a.prefixArgs...)
-	args = append(args,
-		"--ask-for-approval", "never",
-		"--sandbox", "workspace-write",
-		"--cd", directory,
-	)
-	if request.Model != "" {
-		args = append(args, "--model", request.Model)
-	}
-	args = append(args, "exec")
-	if request.ThreadID != "" {
-		args = append(args, "resume", "--json", request.ThreadID, "-")
-	} else {
-		args = append(args, "--json", "-")
-	}
-	timeout := request.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
-	result, err := a.runner.Run(ctx, process.Spec{
-		Path:    info.Path,
-		Args:    args,
-		Dir:     directory,
-		Stdin:   request.Prompt,
-		Timeout: timeout,
-	}, func(output process.Output) error {
-		if emit == nil {
-			return nil
-		}
-		stream := agent.OutputStdout
-		if output.Stream == process.Stderr {
-			stream = agent.OutputStderr
-		}
-		return emit(agent.Output{Stream: stream, Line: output.Line})
-	})
-	return agent.RunResult{
-		ExitCode: result.ExitCode, StartedAt: result.StartedAt, FinishedAt: result.FinishedAt,
-		Canceled: result.Canceled, TimedOut: result.TimedOut,
-	}, err
+	return a.runAppServer(ctx, info.Path, a.prefixArgs, directory, request, emit)
 }
 
 var _ agent.Adapter = (*Adapter)(nil)

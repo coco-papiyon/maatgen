@@ -273,10 +273,11 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		timeout = time.Duration(*request.TimeoutSeconds) * time.Second
 	}
 	var approvalHandler agent.ApprovalHandler
-	if s.approval != nil && session.Agent == protocol.AgentCodex {
+	if s.approval != nil {
 		approvalHandler = func(approvalCtx context.Context, approvalRequest agent.ApprovalRequest) (agent.ApprovalDecision, error) {
 			approvalRequest.SessionID = session.ID
 			approvalRequest.RunID = run.ID
+			approvalRequest.Provider = session.Agent
 			return s.approval(approvalCtx, approvalRequest)
 		}
 	}

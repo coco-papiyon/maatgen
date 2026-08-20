@@ -436,3 +436,14 @@ quote、nested command、pipeline、Shell展開による回避が容易なため
 2026-08-16にCodex向けの初期実装を完了した。`commandApproval`設定、argvルール照合、短命なCodex Diagnostic Reviewer、SQLite上のpending approval、decision API、Web／VS Codeの確認UI、Codex App Serverの双方向request／responseを実装した。CopilotはこのADRの方針どおり従来transportのままとし、Codex運用後に別途対応可否を判断する。
 
 初期実装のshell parserは、安全に静的評価できるquoteと制御演算子だけを許可する保守的なparserである。subshell、script block、redirectionなどの動的構文は設定承認せず、AIまたは利用者確認へ送る。実行ファイルの実体digestとshell別AST parserは、Providerが承認対象のdigestを返せるようになった時点で強化する。
+
+2026-08-20に、Codex以外のProviderへの適用を検討した。`agent.ApprovalRequest`に`Provider`を追加し、`run/service.go`の承認ゲート(`s.approval != nil`)をCodex限定からProvider非依存へ緩和した。あわせてCodex Adapterの旧`--ask-for-approval never`実行パス(Approval未設定時のフォールバック)を削除し、Codexは常にapp-server経由の双方向承認を要求するようにした。
+
+Claude CodeとGitHub Copilotについては、外部プロセスとしてCLIを起動する現行アーキテクチャ(Manager子プロセスとしてCLIを起動し、標準入出力を直接制御する方式)で承認をブロックできるかを実機検証した。
+
+- **Claude Code (CLI 2.1.235)**: ドキュメント化されている`--permission-prompt-tool`によるMCP権限ツール連携、および非公式に知られる`control_request`/`--permission-prompt-tool stdio`プロトコルの両方を実機で検証したが、`Bash`ツール実行時に外部フックが一切呼び出されないことを確認した(設定した承認用MCPサーバーは接続に成功するが`tools/call`を受け取らない)。比較のため`Write`ツールでも同条件で検証したところ、ファイルは作成されず`permission_denials`には記録されるが、これも外部MCPツールを経由しない内蔵のheadlessフォールバック(コールバック不在時にファイル編集系は拒否、Bashは素通り)によるものであり、外部から承認判定を注入する経路ではないと判明した。公式ドキュメント(`code.claude.com/docs/en/agent-sdk/permissions`)は`canUseTool`をTypeScript/Python Agent SDKの`query()`のin-processコールバックとしてのみ説明しており、素のCLIサブプロセス起動に対する契約としては文書化されていない。
+- **GitHub Copilot CLI (1.0.80)**: Agent Client Protocol (`--acp`)モードで`session/request_permission`を送出する経路が存在し、GitHub側のIssue #845(コマンド実行時に許可を求めず自動承認していた不具合)はクローズ済みだが、この機能自体が2026-08時点でpublic previewであり、本ADRのために実機での確証は取得していない。
+
+さらに、素のCLIサブプロセス起動だけでなく、公式のClaude Agent SDK(`@anthropic-ai/claude-agent-sdk` v0.3.237)を直接使う経路でも検証した。`query()`に実際の`canUseTool`コールバックを渡し(`permissionMode: "default"`、`settingSources: []`で設定ファイルの影響も排除)、`Bash`ツールを実行させたところ、コールバックは一度も呼び出されず(`sawCallback: false`)、コマンドは承認なしでそのまま実行された(`permission_denials: []`)。関連する環境変数をすべて除去し複数回再現したが結果は変わらなかった。ドキュメント上「stdio／SDK canUseTool」は正規の許可プロンプト経路として説明されているにもかかわらず、この環境・CLIバージョンでは機能しなかった。API個別キー(`ANTHROPIC_API_KEY`)認証での追加検証は、鍵の用意ができなかったため実施していない。
+
+これらの検証結果を踏まえ、Claude・Copilotについては「設定→AI診断→利用者確認」の三段階承認へ載せる実装を見送ることとした。外部から承認を確実にブロックできる手段が実証できない以上、無理に承認待ちUIを付けるより、Codex以外は本ADR適用前と同じ「承認なしでの実行」を維持する方が実態に即すると判断し、`claude/adapter.go`・`copilot/adapter.go`の`Run()`は引き続き旧来どおり`--permission-mode bypassPermissions`・`--allow-all --no-ask-user`で無制限に実行する。これは実装漏れではなく意図的な決定であり、Codexのみが本ADRの三段階承認(設定ルール、AI診断、利用者確認)の対象である。Claude・Copilotのコマンド実行に対する制御は、Checkpoint／Restoreによるロールバックにのみ依拠する。将来的にCLI／SDK側の挙動が変わった場合(§13のレビュートリガー参照)、このADRを見直しClaude・Copilotへの適用を再検討する。

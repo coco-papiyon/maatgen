@@ -50,7 +50,7 @@ type appServerConnection struct {
 	actualModel string
 }
 
-func (a *Adapter) runAppServer(ctx context.Context, binary, directory string, request agent.RunRequest, emit agent.Emitter) (agent.RunResult, error) {
+func (a *Adapter) runAppServer(ctx context.Context, binary string, prefixArgs []string, directory string, request agent.RunRequest, emit agent.Emitter) (agent.RunResult, error) {
 	startedAt := time.Now().UTC()
 	timeout := request.Timeout
 	if timeout <= 0 {
@@ -58,7 +58,7 @@ func (a *Adapter) runAppServer(ctx context.Context, binary, directory string, re
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	connection, err := startAppServer(runCtx, binary, directory, request, emit)
+	connection, err := startAppServer(runCtx, binary, prefixArgs, directory, request, emit)
 	if err != nil {
 		return agent.RunResult{ExitCode: -1, StartedAt: startedAt, FinishedAt: time.Now().UTC()}, err
 	}
@@ -78,9 +78,10 @@ func (a *Adapter) runAppServer(ctx context.Context, binary, directory string, re
 	return result, err
 }
 
-func startAppServer(ctx context.Context, binary, directory string, request agent.RunRequest, emit agent.Emitter) (*appServerConnection, error) {
+func startAppServer(ctx context.Context, binary string, prefixArgs []string, directory string, request agent.RunRequest, emit agent.Emitter) (*appServerConnection, error) {
 	processCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.Command(binary, "app-server", "--stdio")
+	args := append(append([]string{}, prefixArgs...), "app-server", "--stdio")
+	cmd := exec.Command(binary, args...)
 	cmd.Dir = directory
 	managerprocess.PrepareInteractive(cmd)
 	stdin, err := cmd.StdinPipe()

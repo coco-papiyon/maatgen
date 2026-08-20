@@ -30,6 +30,7 @@ type ApprovalRequest struct {
 	ProviderRequestID string
 	SessionID         string
 	RunID             string
+	Provider          protocol.AgentName
 	Command           string
 	Shell             string
 	WorkingDirectory  string
