@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
@@ -27,14 +30,20 @@ type Config struct {
 	EventSubscriber    EventSubscriber
 	SessionCreator     SessionCreator
 	SessionCloser      SessionCloser
+	SessionReopener    SessionReopener
 	RunController      RunController
 	ChangeReader       ChangeReader
 	RestoreController  RestoreController
 	Providers          []protocol.Provider
 	ModelSetter        ModelSetter
 	UsageReader        UsageReader
+	UsageSummaryReader UsageSummaryReader
 	SourceStatsReader  SourceStatsReader
 	ApprovalController ApprovalController
+	// StaticFS serves the built Web UI. Requests outside /api and /ws fall
+	// back to index.html so client-side routes resolve on a fresh load.
+	// Static serving is disabled when nil.
+	StaticFS fs.FS
 }
 
 type ModelSetter func(ctx context.Context, provider protocol.AgentName, model string) error
@@ -55,7 +64,7 @@ type RuntimeConfigResponse struct {
 }
 
 type SessionReader interface {
-	ListSessions(ctx context.Context, limit int, before *protocol.SessionCursor) ([]protocol.AgentSession, error)
+	ListSessions(ctx context.Context, limit int, before *protocol.SessionCursor, status protocol.SessionStatus) ([]protocol.AgentSession, error)
 	GetSession(ctx context.Context, id string) (protocol.AgentSession, error)
 }
 
@@ -65,6 +74,10 @@ type SessionCreator interface {
 
 type SessionCloser interface {
 	CloseSession(ctx context.Context, id string) (protocol.AgentSession, error)
+}
+
+type SessionReopener interface {
+	ReopenSession(ctx context.Context, id string) (protocol.AgentSession, error)
 }
 
 type RunController interface {
@@ -82,6 +95,12 @@ type ChangeReader interface {
 
 type UsageReader interface {
 	GetSessionUsage(ctx context.Context, sessionID string) (protocol.SessionUsage, error)
+}
+
+type UsageSummaryReader interface {
+	GetUsageSummary(ctx context.Context, granularity, provider, model string) (protocol.UsageSummary, error)
+	ListUsageProviders(ctx context.Context) ([]string, error)
+	ListUsageModels(ctx context.Context, provider string) ([]string, error)
 }
 
 type SourceStatsReader interface {
@@ -180,6 +199,16 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			writeJSON(w, http.StatusOK, closed)
 		})))
 	}
+	if config.SessionReopener != nil {
+		mux.Handle("POST /api/v1/sessions/{id}/reopen", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reopened, err := config.SessionReopener.ReopenSession(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeSessionCloseError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, reopened)
+		})))
+	}
 	if config.RunController != nil {
 		mux.Handle("POST /api/v1/sessions/{id}/messages", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var request protocol.SendMessageRequest
@@ -246,7 +275,11 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "cursor is invalid", nil)
 				return
 			}
-			items, err := sessions.ListSessions(r.Context(), limit+1, cursor)
+			status, ok := parseSessionStatusFilter(w, r)
+			if !ok {
+				return
+			}
+			items, err := sessions.ListSessions(r.Context(), limit+1, cursor, status)
 			if err != nil {
 				writeStorageError(w, err)
 				return
@@ -331,6 +364,49 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			writeJSON(w, http.StatusOK, usage)
 		})))
 	}
+	if config.UsageSummaryReader != nil {
+		mux.Handle("GET /api/v1/usage/summary", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			granularity := r.URL.Query().Get("granularity")
+			if granularity == "" {
+				granularity = "day"
+			}
+			if granularity != "day" && granularity != "week" && granularity != "month" {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "granularity must be day, week, or month", nil)
+				return
+			}
+			summary, err := config.UsageSummaryReader.GetUsageSummary(r.Context(), granularity, r.URL.Query().Get("provider"), r.URL.Query().Get("model"))
+			if err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			if summary.Periods == nil {
+				summary.Periods = []protocol.UsagePeriod{}
+			}
+			writeJSON(w, http.StatusOK, summary)
+		})))
+		mux.Handle("GET /api/v1/usage/providers", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			providers, err := config.UsageSummaryReader.ListUsageProviders(r.Context())
+			if err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			if providers == nil {
+				providers = []string{}
+			}
+			writeJSON(w, http.StatusOK, protocol.UsageProviderListResponse{Providers: providers})
+		})))
+		mux.Handle("GET /api/v1/usage/models", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			models, err := config.UsageSummaryReader.ListUsageModels(r.Context(), r.URL.Query().Get("provider"))
+			if err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			if models == nil {
+				models = []string{}
+			}
+			writeJSON(w, http.StatusOK, protocol.UsageModelListResponse{Models: models})
+		})))
+	}
 	if sessions != nil && config.SourceStatsReader != nil {
 		mux.Handle("GET /api/v1/sessions/{id}/source-stats", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
@@ -388,8 +464,13 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 		})))
 	}
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		writeAPIError(w, http.StatusNotFound, "not_found", "resource was not found", nil)
+	static := staticHandler(config.StaticFS)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ws" || strings.HasPrefix(r.URL.Path, "/api/") || static == nil {
+			writeAPIError(w, http.StatusNotFound, "not_found", "resource was not found", nil)
+			return
+		}
+		static.ServeHTTP(w, r)
 	})
 
 	return &Server{handler: mux}
@@ -397,6 +478,31 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 
 func (s *Server) Handler() http.Handler {
 	return s.handler
+}
+
+// staticHandler serves the built Web UI from fsys. Any GET/HEAD request for a
+// path that does not resolve to a file falls back to index.html, so
+// client-side routes (e.g. a deep link into a session) load correctly on a
+// fresh request. Returns nil when fsys is nil so callers can detect that
+// static serving is disabled.
+func staticHandler(fsys fs.FS) http.Handler {
+	if fsys == nil {
+		return nil
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name == "" || name == "." {
+			name = "index.html"
+		} else if info, err := fs.Stat(fsys, name); err != nil || info.IsDir() {
+			name = "index.html"
+		}
+		http.ServeFileFS(w, r, fsys, name)
+	})
 }
 
 func parseBoundedInt(w http.ResponseWriter, r *http.Request, name string, fallback, minimum, maximum int) (int, bool) {
@@ -423,6 +529,24 @@ func parseBoundedInt64(w http.ResponseWriter, r *http.Request, name string, fall
 		return 0, false
 	}
 	return parsed, true
+}
+
+// parseSessionStatusFilter reads the "status" query parameter used to filter
+// GET /api/v1/sessions. Closed sessions are hidden from the list by default
+// (they remain fully counted in usage summaries, which query runs directly)
+// but callers can pass status=all or status=closed to see them.
+func parseSessionStatusFilter(w http.ResponseWriter, r *http.Request) (protocol.SessionStatus, bool) {
+	switch r.URL.Query().Get("status") {
+	case "", "active":
+		return protocol.SessionActive, true
+	case "closed":
+		return protocol.SessionClosed, true
+	case "all":
+		return "", true
+	default:
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "status must be one of: active, closed, all", nil)
+		return "", false
+	}
 }
 
 func writeStorageError(w http.ResponseWriter, err error) {

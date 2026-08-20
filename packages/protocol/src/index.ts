@@ -16,6 +16,13 @@ import type { SendMessageRequest as GeneratedSendMessageRequest } from './genera
 import type { SessionEvent as GeneratedSessionEvent } from './generated/session-event.js';
 import type { SessionListResponse as GeneratedSessionListResponse } from './generated/session-list.js';
 import type { TokenUsage as GeneratedTokenUsage } from './generated/token-usage.js';
+import type { UsageModelListResponse as GeneratedUsageModelListResponse } from './generated/usage-model-list.js';
+import type { UsageProviderListResponse as GeneratedUsageProviderListResponse } from './generated/usage-provider-list.js';
+import type {
+  UsagePeriod as GeneratedUsagePeriod,
+  UsageSeriesPoint as GeneratedUsageSeriesPoint,
+  UsageSummary as GeneratedUsageSummary,
+} from './generated/usage-summary.js';
 import type { WsTicketResponse as GeneratedWsTicketResponse } from './generated/ws-ticket.js';
 
 export const SCHEMA_VERSION = 2 as const;
@@ -28,6 +35,11 @@ export type AgentRun = GeneratedAgentRun;
 export type RunStatus = AgentRun['status'];
 
 export type TokenUsage = GeneratedTokenUsage;
+export type UsageSummary = GeneratedUsageSummary;
+export type UsagePeriod = GeneratedUsagePeriod;
+export type UsageSeriesPoint = GeneratedUsageSeriesPoint;
+export type UsageModelListResponse = GeneratedUsageModelListResponse;
+export type UsageProviderListResponse = GeneratedUsageProviderListResponse;
 export type CommandApproval = GeneratedCommandApproval;
 export type ApprovalDecision = NonNullable<CommandApproval['decision']>;
 export interface ApprovalListResponse { approvals: CommandApproval[]; }

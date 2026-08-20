@@ -15,11 +15,17 @@ const (
 	AgentCopilot AgentName = "copilot"
 )
 
+type ModelPricingInfo struct {
+	InputPerMillion  float64 `json:"inputPerMillion"`
+	OutputPerMillion float64 `json:"outputPerMillion"`
+}
+
 type Provider struct {
-	ID           AgentName `json:"id"`
-	Label        string    `json:"label"`
-	Models       []string  `json:"models"`
-	DefaultModel string    `json:"defaultModel,omitempty"`
+	ID           AgentName                    `json:"id"`
+	Label        string                       `json:"label"`
+	Models       []string                     `json:"models"`
+	DefaultModel string                       `json:"defaultModel,omitempty"`
+	Pricing      map[string]*ModelPricingInfo `json:"pricing,omitempty"`
 }
 
 type ProviderListResponse struct {
@@ -187,6 +193,41 @@ type SessionUsage struct {
 type RunUsageEntry struct {
 	Run   AgentRun    `json:"run"`
 	Usage *TokenUsage `json:"usage,omitempty"`
+}
+
+type UsageSeriesPoint struct {
+	Key         string  `json:"key"`
+	CostUSD     float64 `json:"costUsd"`
+	AICredits   float64 `json:"aiCredits"`
+	TotalTokens int64   `json:"totalTokens"`
+}
+
+type UsagePeriod struct {
+	Period                string             `json:"period"`
+	CostUSD               float64            `json:"costUsd"`
+	AICredits             float64            `json:"aiCredits"`
+	TotalTokens           int64              `json:"totalTokens"`
+	InputTokens           int64              `json:"inputTokens"`
+	CachedInputTokens     int64              `json:"cachedInputTokens"`
+	OutputTokens          int64              `json:"outputTokens"`
+	ReasoningOutputTokens int64              `json:"reasoningOutputTokens"`
+	Series                []UsageSeriesPoint `json:"series"`
+}
+
+type UsageSummary struct {
+	Granularity string        `json:"granularity"`
+	Provider    *string       `json:"provider,omitempty"`
+	Model       *string       `json:"model,omitempty"`
+	SeriesBy    string        `json:"seriesBy"`
+	Periods     []UsagePeriod `json:"periods"`
+}
+
+type UsageModelListResponse struct {
+	Models []string `json:"models"`
+}
+
+type UsageProviderListResponse struct {
+	Providers []string `json:"providers"`
 }
 
 type SourceStatsLanguage struct {

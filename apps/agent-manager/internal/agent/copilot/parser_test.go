@@ -64,9 +64,39 @@ func TestParseCopilotThreadErrorAndMalformed(t *testing.T) {
 	if !malformed.Malformed || malformed.Events[0].Type != protocol.EventTypeError {
 		t.Fatalf("malformed = %#v", malformed)
 	}
+	var malformedData map[string]string
+	if err := json.Unmarshal(malformed.Events[0].Data, &malformedData); err != nil || malformedData["message"] != "not-json" {
+		t.Fatalf("malformed message = %#v, err = %v", malformedData, err)
+	}
 	unknown := ParseLine(`{"type":"session.context_changed","data":{"cwd":"/repo"}}`)
 	if !unknown.Ignored {
 		t.Fatalf("unknown = %#v", unknown)
+	}
+}
+
+func TestParseNonJSONLineShowsCleanedRawText(t *testing.T) {
+	// The Copilot CLI's interactive renderer sometimes leaks through despite
+	// --output-format json, wrapping plain narration in ANSI color codes.
+	line := "\x1b[38;2;145;152;161m│ \x1b[39m\x1b[1mSearch \x1b[22m\x1b[38;2;145;152;161m(grep)\x1b[39m"
+	parsed := ParseLine(line)
+	if !parsed.Malformed || len(parsed.Events) != 1 || parsed.Events[0].Type != protocol.EventTypeError {
+		t.Fatalf("parsed = %#v", parsed)
+	}
+	var data map[string]string
+	if err := json.Unmarshal(parsed.Events[0].Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["message"] != "│ Search (grep)" {
+		t.Fatalf("message = %q", data["message"])
+	}
+}
+
+func TestParseBlankLineIsIgnored(t *testing.T) {
+	for _, line := range []string{"", "   ", "\x1b[38;2;145;152;161m\x1b[39m"} {
+		parsed := ParseLine(line)
+		if !parsed.Ignored || len(parsed.Events) != 0 {
+			t.Fatalf("ParseLine(%q) = %#v", line, parsed)
+		}
 	}
 }
 

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maatgen.local/schema/usage-summary.schema.json",
+  "title": "UsageSummary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["granularity", "seriesBy", "periods"],
+  "properties": {
+    "granularity": { "enum": ["day", "week", "month"] },
+    "provider": { "enum": ["codex", "claude", "copilot"] },
+    "model": { "type": "string", "minLength": 1 },
+    "seriesBy": { "enum": ["provider", "model"] },
+    "periods": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/usagePeriod" }
+    }
+  },
+  "$defs": {
+    "usageSeriesPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "costUsd", "aiCredits", "totalTokens"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "aiCredits": { "type": "number", "minimum": 0 },
+        "totalTokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "usagePeriod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["period", "costUsd", "aiCredits", "totalTokens", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "series"],
+      "properties": {
+        "period": { "type": "string", "minLength": 1 },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "aiCredits": { "type": "number", "minimum": 0 },
+        "totalTokens": { "type": "integer", "minimum": 0 },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "cachedInputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "reasoningOutputTokens": { "type": "integer", "minimum": 0 },
+        "series": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/usageSeriesPoint" }
+        }
+      }
+    }
+  }
+}

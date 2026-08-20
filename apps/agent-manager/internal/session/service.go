@@ -25,6 +25,7 @@ type Store interface {
 	CreateSession(ctx context.Context, session protocol.AgentSession) error
 	GetSession(ctx context.Context, id string) (protocol.AgentSession, error)
 	CloseSession(ctx context.Context, id string, closedAt time.Time) error
+	ReopenSession(ctx context.Context, id string) error
 	ReplaceSourceStats(ctx context.Context, stats protocol.SourceStats) error
 }
 
@@ -122,6 +123,16 @@ func (s *Service) CloseSession(ctx context.Context, id string) (protocol.AgentSe
 	}
 	if err := s.repositories.CleanupSession(ctx, session.Workspace, session.ID); err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("%w: %v", ErrCleanupFailed, err)
+	}
+	return s.store.GetSession(ctx, id)
+}
+
+func (s *Service) ReopenSession(ctx context.Context, id string) (protocol.AgentSession, error) {
+	if strings.TrimSpace(id) == "" {
+		return protocol.AgentSession{}, fmt.Errorf("%w: session ID is required", ErrInvalidRequest)
+	}
+	if err := s.store.ReopenSession(ctx, id); err != nil {
+		return protocol.AgentSession{}, err
 	}
 	return s.store.GetSession(ctx, id)
 }

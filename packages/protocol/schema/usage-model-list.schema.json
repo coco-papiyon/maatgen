@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maatgen.local/schema/usage-model-list.schema.json",
+  "title": "UsageModelListResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["models"],
+  "properties": {
+    "models": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  }
+}

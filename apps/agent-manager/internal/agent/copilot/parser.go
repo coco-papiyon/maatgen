@@ -3,11 +3,17 @@ package copilot
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
+
+// ansiEscapePattern strips terminal color/cursor codes from stdout the
+// Copilot CLI sometimes writes outside its JSONL contract (its interactive
+// renderer leaking through despite --output-format json).
+var ansiEscapePattern = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]")
 
 type envelope struct {
 	Type      string          `json:"type"`
@@ -55,7 +61,7 @@ type resultUsage struct {
 func ParseLine(line string) agent.ParsedLine {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || !json.Valid([]byte(trimmed)) {
-		return malformedLine(line, "GitHub Copilot emitted an invalid JSONL line")
+		return malformedLine(line)
 	}
 	parsed := agent.ParsedLine{RawJSON: json.RawMessage(append([]byte(nil), trimmed...))}
 	var source envelope
@@ -180,9 +186,25 @@ func stringPointer(value string) *string {
 	return &value
 }
 
-func malformedLine(line, message string) agent.ParsedLine {
+// malformedLine handles stdout that never parsed as JSON at all: either a
+// blank separator line, or plain text the Copilot CLI printed outside its
+// JSONL contract. Rather than surfacing an opaque "invalid JSONL line"
+// error, show the cleaned raw text so the user can still see what Copilot
+// was doing. A line with nothing visible after stripping ANSI codes is
+// dropped instead of showing an empty error bubble.
+func malformedLine(line string) agent.ParsedLine {
 	raw, _ := json.Marshal(map[string]string{"unparsedLine": line})
-	return malformedJSON(raw, message)
+	text := strings.TrimSpace(ansiEscapePattern.ReplaceAllString(line, ""))
+	if text == "" {
+		return agent.ParsedLine{RawJSON: raw, Ignored: true}
+	}
+	return agent.ParsedLine{
+		RawJSON: raw,
+		Events: []agent.NormalizedEvent{newEvent(protocol.EventTypeError, map[string]any{
+			"code": "invalid_copilot_jsonl", "message": text,
+		})},
+		Malformed: true,
+	}
 }
 
 func malformedJSON(raw json.RawMessage, message string) agent.ParsedLine {

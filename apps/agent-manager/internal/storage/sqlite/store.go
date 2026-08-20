@@ -213,19 +213,27 @@ func (s *Store) GetSession(ctx context.Context, id string) (protocol.AgentSessio
 	return scanSession(row)
 }
 
-func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.SessionCursor) ([]protocol.AgentSession, error) {
+func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.SessionCursor, status protocol.SessionStatus) ([]protocol.AgentSession, error) {
 	if limit <= 0 || limit > 501 {
 		limit = 100
 	}
 	query := `
 		SELECT id, agent, workspace, agent_thread_id, status, created_at, closed_at
 		FROM sessions`
+	conditions := []string{}
 	args := []any{}
+	if status != "" {
+		conditions = append(conditions, "status = ?")
+		args = append(args, status)
+	}
 	if before != nil {
-		query += ` WHERE julianday(created_at) < julianday(?)
-			OR (julianday(created_at) = julianday(?) AND id < ?)`
+		conditions = append(conditions, `(julianday(created_at) < julianday(?)
+			OR (julianday(created_at) = julianday(?) AND id < ?))`)
 		formatted := formatTime(before.CreatedAt)
 		args = append(args, formatted, formatted, before.ID)
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	query += ` ORDER BY julianday(created_at) DESC, id DESC LIMIT ?`
 	args = append(args, limit)
@@ -285,6 +293,32 @@ func (s *Store) CloseSession(ctx context.Context, id string, closedAt time.Time)
 		if active > 0 {
 			return storage.ErrRunActive
 		}
+	}
+	return nil
+}
+
+func (s *Store) ReopenSession(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE sessions SET status = ?, closed_at = NULL
+		 WHERE id = ? AND status = ?`,
+		protocol.SessionActive, id, protocol.SessionClosed,
+	)
+	if err != nil {
+		return fmt.Errorf("reopen session: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE id = ?", id).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return storage.ErrNotFound
+		}
+		return fmt.Errorf("session is not closed or does not exist")
 	}
 	return nil
 }

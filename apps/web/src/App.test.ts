@@ -15,6 +15,7 @@ afterEach(() => {
   localStorage.removeItem('maatgen.showSystemMessages');
   localStorage.removeItem('maatgen.provider');
   localStorage.removeItem('maatgen.sidePanel');
+  localStorage.removeItem('maatgen.sessionStatusFilter');
   vi.restoreAllMocks();
 });
 
@@ -44,6 +45,51 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.text()).toContain('認証処理を確認し、テストを追加しました。');
     expect(mounted.wrapper.find('.stream-state').text()).toBe('Live');
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
+  });
+
+  it('hides a closed session from the list but keeps it available via the status filter', async () => {
+    const mounted = await mountApp();
+    const target = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('success'));
+    expect(target).toBeDefined();
+    await target!.trigger('click');
+    await flushPromises();
+
+    const closeButton = mounted.wrapper.findAll('button').find((button) => button.text() === 'Close session');
+    expect(closeButton).toBeDefined();
+    await closeButton!.trigger('click');
+    await flushPromises();
+
+    expect(mounted.wrapper.findAll('.session-item')).toHaveLength(5);
+    expect(mounted.wrapper.findAll('.session-item').some((item) => item.text().includes('success'))).toBe(false);
+
+    await mounted.wrapper.find('.session-filter select').setValue('all');
+    await flushPromises();
+    expect(mounted.wrapper.findAll('.session-item')).toHaveLength(6);
+    expect(mounted.wrapper.findAll('.session-item').some((item) => item.text().includes('success'))).toBe(true);
+  });
+
+  it('reopens a closed session', async () => {
+    const mounted = await mountApp();
+    const target = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('success'));
+    await target!.trigger('click');
+    await flushPromises();
+
+    const closeButton = mounted.wrapper.findAll('button').find((button) => button.text() === 'Close session');
+    await closeButton!.trigger('click');
+    await flushPromises();
+    expect(mounted.wrapper.find('.run-state').text()).toContain('終了済み');
+
+    await mounted.wrapper.find('.session-filter select').setValue('all');
+    await flushPromises();
+    const successInAll = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('success'));
+    await successInAll!.trigger('click');
+    await flushPromises();
+
+    const reopenButton = mounted.wrapper.findAll('button').find((button) => button.text() === 'Reopen session');
+    expect(reopenButton).toBeDefined();
+    await reopenButton!.trigger('click');
+    await flushPromises();
+    expect(mounted.wrapper.find('.run-state').text()).toContain('準備完了');
   });
 
   it('restores a pending command approval and submits a session rule', async () => {

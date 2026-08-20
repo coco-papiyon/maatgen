@@ -1,9 +1,26 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, SessionEvent, TokenUsage, ApprovalDecision } from '@maatgen/protocol';
-import { AgentApiError, httpAgentApi, type AgentApi, type SessionUsage, type SourceStats } from './api';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, SessionEvent, TokenUsage, ApprovalDecision, UsageSummary } from '@maatgen/protocol';
+import { AgentApiError, httpAgentApi, type AgentApi, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from './api';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import { renderMarkdown } from './markdown';
+import UsageBarChart, { type UsageSeriesDef, type UsageStackedPeriod } from './UsageBarChart.vue';
+
+const USAGE_PROVIDER_ORDER = ['codex', 'claude', 'copilot'] as const;
+const USAGE_PROVIDER_COLORS: Record<(typeof USAGE_PROVIDER_ORDER)[number], string> = {
+  codex: '#3987e5',
+  claude: '#d95926',
+  copilot: '#199e70',
+};
+const USAGE_MODEL_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#3f8f3f', '#9085e9', '#e66767'];
+const USAGE_OTHER_SERIES_KEY = '__other__';
+const USAGE_OTHER_SERIES_COLOR = '#6b7570';
+const USAGE_TOKEN_TYPE_SERIES: UsageSeriesDef[] = [
+  { key: 'input', label: 'Input', color: '#3987e5' },
+  { key: 'cache', label: 'Cache', color: '#199e70' },
+  { key: 'output', label: 'Output', color: '#d95926' },
+  { key: 'reasoning', label: 'Reasoning', color: '#9085e9' },
+];
 
 const props = defineProps<{
   agentApi?: AgentApi;
@@ -20,6 +37,11 @@ const newSessionProvider = ref<AgentSession['agent']>(storedProvider || 'codex')
 const selectedModel = ref('');
 const nextSessionCursor = ref('');
 const loadingMoreSessions = ref(false);
+const sessionStatusFilterKey = 'maatgen.sessionStatusFilter';
+const storedSessionStatusFilter = localStorage.getItem(sessionStatusFilterKey) as SessionStatusFilter | null;
+const sessionStatusFilter = ref<SessionStatusFilter>(
+  storedSessionStatusFilter === 'closed' || storedSessionStatusFilter === 'all' ? storedSessionStatusFilter : 'active',
+);
 const selected = ref<AgentSession>();
 const events = ref<SessionEvent[]>([]);
 const changes = ref<ChangeSet>(emptyChangeSet(''));
@@ -43,6 +65,17 @@ const activeSidePanel = ref<SidePanel>(
   storedSidePanel === 'usage' || storedSidePanel === 'sourceStats' ? storedSidePanel : 'changes',
 );
 const showSystemMessages = ref(localStorage.getItem('maatgen.showSystemMessages') === 'true');
+const usageSummaryOpen = ref(false);
+const usageSummaryGranularity = ref<UsageGranularity>('day');
+const usageSummaryProvider = ref('');
+const usageSummaryProviders = ref<string[]>([]);
+const usageSummaryModel = ref('');
+const usageSummaryModels = ref<string[]>([]);
+const usageSummaryData = ref<UsageSummary>({ granularity: 'day', seriesBy: 'provider', periods: [] });
+const usageSummaryLoading = ref(false);
+const usageSummaryError = ref('');
+const showAiCredits = ref(false);
+const showTokens = ref(false);
 let sessionPollTimer: number | undefined;
 let eventStream: EventStreamLike | undefined;
 const timelineElement = ref<HTMLElement>();
@@ -52,8 +85,52 @@ const visibleEvents = computed(() => showSystemMessages.value
   ? events.value
   : events.value.filter((event) => !['command_started', 'command_completed', 'file_change_reported'].includes(event.type)));
 const isActive = computed(() => selected.value?.status === 'active');
+const isClosed = computed(() => selected.value?.status === 'closed');
 const selectedChange = computed(() => changes.value.files.find((file) => file.id === selectedChangeId.value));
 const selectedRunEntry = computed(() => usage.value.runs.find((entry) => entry.run.id === selectedRunId.value));
+const usageSeries = computed<UsageSeriesDef[]>(() => {
+  if (usageSummaryData.value.seriesBy === 'model') {
+    const models = usageSummaryModels.value.slice(0, USAGE_MODEL_COLORS.length);
+    const series = models.map((model, index) => ({ key: model, label: model, color: USAGE_MODEL_COLORS[index]! }));
+    if (usageSummaryModels.value.length > USAGE_MODEL_COLORS.length) {
+      series.push({ key: USAGE_OTHER_SERIES_KEY, label: 'Other', color: USAGE_OTHER_SERIES_COLOR });
+    }
+    return series;
+  }
+  return USAGE_PROVIDER_ORDER.map((provider) => ({ key: provider, label: provider, color: USAGE_PROVIDER_COLORS[provider] }));
+});
+
+function usageStackedPeriods(metric: 'costUsd' | 'aiCredits' | 'totalTokens'): UsageStackedPeriod[] {
+  const knownKeys = new Set(usageSeries.value.map((item) => item.key));
+  return usageSummaryData.value.periods.map((period) => {
+    const values: Record<string, number> = {};
+    for (const point of period.series) {
+      const key = knownKeys.has(point.key) ? point.key : USAGE_OTHER_SERIES_KEY;
+      values[key] = (values[key] ?? 0) + point[metric];
+    }
+    return { period: period.period, values };
+  });
+}
+
+const usageSummaryCostPeriods = computed(() => usageStackedPeriods('costUsd'));
+const usageSummaryCreditsPeriods = computed(() => usageStackedPeriods('aiCredits'));
+const usageSummaryTokenPeriods = computed(() => usageStackedPeriods('totalTokens'));
+const usageSummaryHasCredits = computed(() => usageSummaryData.value.periods.some((period) => period.aiCredits > 0));
+const usageSummaryHasTokens = computed(() => usageSummaryData.value.periods.some((period) => period.totalTokens > 0));
+const tokenChartMode = ref<'series' | 'type'>('series');
+const usageSummaryTokenTypePeriods = computed<UsageStackedPeriod[]>(() =>
+  usageSummaryData.value.periods.map((period) => ({
+    period: period.period,
+    values: {
+      input: Math.max(0, period.inputTokens - period.cachedInputTokens),
+      cache: period.cachedInputTokens,
+      output: Math.max(0, period.outputTokens - period.reasoningOutputTokens),
+      reasoning: period.reasoningOutputTokens,
+    },
+  })),
+);
+const activeTokenSeries = computed(() => (tokenChartMode.value === 'type' ? USAGE_TOKEN_TYPE_SERIES : usageSeries.value));
+const activeTokenPeriods = computed(() => (tokenChartMode.value === 'type' ? usageSummaryTokenTypePeriods.value : usageSummaryTokenPeriods.value));
 const selectedRunEvents = computed(() => events.value.filter((event) => event.runId === selectedRunId.value));
 const selectedRunCommands = computed(() => {
   type Command = { id: string; command: string; status?: string; output?: string; error?: string; exitCode?: number };
@@ -77,6 +154,10 @@ const activeProvider = computed(() => selected.value?.agent ?? newSessionProvide
 const pendingApproval = computed(() => approvals.value.find((approval) => approval.status === 'pending'));
 const availableModels = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.models ?? []);
 const providerLabel = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.label ?? activeProvider.value);
+const selectedModelPricing = computed(() => {
+  if (!selectedModel.value) return null;
+  return providers.value.find((p) => p.id === activeProvider.value)?.pricing?.[selectedModel.value] ?? null;
+});
 const restorableChanges = computed(() => changes.value.files.reduce((total, file) => {
   if (file.restoreMode === 'file') return total + (file.status !== 'restored' ? 1 : 0);
   return total + file.hunks.filter((hunk) => hunk.status !== 'restored').length;
@@ -204,6 +285,30 @@ function formatTokens(value?: number): string {
   return value === undefined ? '—' : value.toLocaleString('en-US');
 }
 
+function formatRelativeTime(isoString: string, now: Date = new Date()): string {
+  const then = new Date(isoString);
+  const diff = now.getTime() - then.getTime();
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  if (minutes < 1) return '今';
+  if (minutes < 60) return `${minutes}分前`;
+  if (hours < 24) return `${hours}時間前`;
+  if (days < 7) return `${days}日前`;
+  return then.toLocaleDateString('ja-JP');
+}
+
+function formatSessionStatus(status: string): string {
+  return status === 'active' ? 'アクティブ' : 'クローズ';
+}
+
+function getSessionLastActivityTime(session: AgentSession, allRuns: Array<{ run: AgentRun }>): string | undefined {
+  const sessionRuns = allRuns.filter((item) => item.run.sessionId === session.id);
+  if (sessionRuns.length === 0) return undefined;
+  const lastRun = sessionRuns[sessionRuns.length - 1]?.run;
+  return lastRun?.finishedAt || lastRun?.startedAt;
+}
+
 function formatCredits(value?: number): string {
   return value === undefined ? '—' : value.toLocaleString('en-US', { maximumFractionDigits: 6 });
 }
@@ -246,13 +351,21 @@ function parseApprovalRule(value: string): string[] {
 }
 
 async function refreshSessions(reset = false) {
-  const page = await api.listSessions(undefined, 25);
+  const page = await api.listSessions(undefined, 25, sessionStatusFilter.value);
   if (reset || sessions.value.length === 0) {
     sessions.value = page.sessions;
     nextSessionCursor.value = page.nextCursor ?? '';
   } else {
+    // Sessions outside the refreshed window (loaded via "load more") are kept as-is;
+    // sessions within the window that are no longer returned (e.g. closed and now
+    // filtered out) are dropped instead of lingering in the sidebar.
     const newestIDs = new Set(page.sessions.map((session) => session.id));
-    sessions.value = [...page.sessions, ...sessions.value.filter((session) => !newestIDs.has(session.id))];
+    const oldestFetched = page.sessions.at(-1)?.createdAt;
+    const preserved = sessions.value.filter((session) => {
+      if (newestIDs.has(session.id)) return false;
+      return oldestFetched === undefined || session.createdAt < oldestFetched;
+    });
+    sessions.value = [...page.sessions, ...preserved];
   }
   if (selected.value) {
     selected.value = sessions.value.find((item) => item.id === selected.value?.id) ?? selected.value;
@@ -263,7 +376,7 @@ async function loadMoreSessions() {
   if (!nextSessionCursor.value || loadingMoreSessions.value) return;
   loadingMoreSessions.value = true;
   try {
-    const page = await api.listSessions(nextSessionCursor.value, 25);
+    const page = await api.listSessions(nextSessionCursor.value, 25, sessionStatusFilter.value);
     const known = new Set(sessions.value.map((session) => session.id));
     sessions.value.push(...page.sessions.filter((session) => !known.has(session.id)));
     nextSessionCursor.value = page.nextCursor ?? '';
@@ -272,6 +385,13 @@ async function loadMoreSessions() {
   } finally {
     loadingMoreSessions.value = false;
   }
+}
+
+async function changeSessionStatusFilter() {
+  localStorage.setItem(sessionStatusFilterKey, sessionStatusFilter.value);
+  await act(async () => {
+    await refreshSessions(true);
+  });
 }
 
 async function selectSession(session: AgentSession) {
@@ -435,7 +555,28 @@ async function closeSession() {
     selected.value = await api.closeSession(selected.value!.id);
     eventStream?.stop();
     eventStream = undefined;
+    if (sessionStatusFilter.value === 'active') {
+      sessions.value = sessions.value.filter((session) => session.id !== selected.value!.id);
+    } else {
+      const index = sessions.value.findIndex((session) => session.id === selected.value!.id);
+      if (index !== -1) sessions.value[index] = selected.value!;
+    }
     await refreshSessions();
+  });
+}
+
+async function reopenSession() {
+  if (!selected.value) return;
+  await act(async () => {
+    selected.value = await api.reopenSession(selected.value!.id);
+    const index = sessions.value.findIndex((session) => session.id === selected.value!.id);
+    if (index !== -1) sessions.value[index] = selected.value!;
+    if (sessionStatusFilter.value === 'active') {
+      if (sessions.value.findIndex((s) => s.id === selected.value!.id) !== -1) {
+        await refreshSessions();
+      }
+    }
+    startEventStream(selected.value!.id);
   });
 }
 
@@ -460,6 +601,47 @@ async function restoreAll() {
     changes.value = await api.restoreAllChanges(selected.value!.id, changes.value.checkpointId);
     selectedChangeId.value = '';
   });
+}
+
+async function openUsageSummary() {
+  usageSummaryOpen.value = true;
+  usageSummaryProvider.value = '';
+  usageSummaryModel.value = '';
+  showAiCredits.value = false;
+  showTokens.value = false;
+  await Promise.all([loadUsageSummaryProviders(), loadUsageSummaryModels(), loadUsageSummary()]);
+}
+
+function closeUsageSummary() {
+  usageSummaryOpen.value = false;
+}
+
+async function loadUsageSummaryProviders() {
+  try {
+    usageSummaryProviders.value = await api.getUsageProviders();
+  } catch (cause) {
+    usageSummaryError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+async function loadUsageSummaryModels() {
+  try {
+    usageSummaryModels.value = await api.getUsageModels(usageSummaryProvider.value || undefined);
+  } catch (cause) {
+    usageSummaryError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+async function loadUsageSummary() {
+  usageSummaryLoading.value = true;
+  usageSummaryError.value = '';
+  try {
+    usageSummaryData.value = await api.getUsageSummary(usageSummaryGranularity.value, usageSummaryProvider.value || undefined, usageSummaryModel.value || undefined);
+  } catch (cause) {
+    usageSummaryError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    usageSummaryLoading.value = false;
+  }
 }
 
 async function act(action: () => Promise<void>) {
@@ -562,6 +744,19 @@ onBeforeUnmount(() => {
   eventStream?.stop();
   window.clearInterval(sessionPollTimer);
 });
+
+watch(usageSummaryProvider, () => {
+  if (!usageSummaryOpen.value) return;
+  usageSummaryModel.value = '';
+  void loadUsageSummaryModels();
+});
+
+watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => {
+  if (!usageSummaryOpen.value) return;
+  showAiCredits.value = false;
+  showTokens.value = false;
+  void loadUsageSummary();
+});
 </script>
 
 <template>
@@ -569,6 +764,7 @@ onBeforeUnmount(() => {
     <header class="topbar">
       <div class="brand"><img src="/maat.png" class="brand-mark" alt="Maat"><span>maatgen</span></div>
       <div class="topbar-status">
+        <button type="button" class="quiet-button usage-summary-button" @click="openUsageSummary">Usage Summary</button>
         <label class="system-message-setting" title="コマンド実行やファイル編集のシステムメッセージを表示">
           <input v-model="showSystemMessages" type="checkbox" @change="toggleSystemMessages" />
           <span>System messages</span>
@@ -580,7 +776,15 @@ onBeforeUnmount(() => {
 
     <aside class="sidebar">
       <div class="section-heading">
-        <span>Sessions</span><span class="count">{{ sessions.length }}</span>
+        <span>Sessions</span>
+        <div class="session-filter">
+          <select v-model="sessionStatusFilter" aria-label="Session status filter" :disabled="busy" @change="changeSessionStatusFilter">
+            <option value="active">アクティブのみ</option>
+            <option value="closed">終了済みのみ</option>
+            <option value="all">すべて</option>
+          </select>
+          <span class="count">{{ sessions.length }}</span>
+        </div>
       </div>
       <form class="new-session" @submit.prevent="createSession">
         <div class="provider-fields">
@@ -603,9 +807,13 @@ onBeforeUnmount(() => {
           class="session-item"
           :class="{ selected: selected?.id === session.id }"
           @click="selectSession(session)"
+          :title="session.workspace"
         >
           <span class="session-title">{{ shortPath(session.workspace) }}</span>
-          <span class="session-meta"><span :class="['mini-dot', session.status]" />{{ session.agent }} · {{ session.status }}</span>
+          <span class="session-meta">
+            <span :class="['mini-dot', session.status]" />{{ formatSessionStatus(session.status) }} · {{ session.agent }}
+          </span>
+          <span class="session-time">{{ formatRelativeTime(session.createdAt) }}に作成</span>
         </button>
       </nav>
       <button v-if="nextSessionCursor" class="load-more" :disabled="loadingMoreSessions" @click="loadMoreSessions">
@@ -620,7 +828,10 @@ onBeforeUnmount(() => {
           <h1>{{ shortPath(selected.workspace) }}</h1>
           <p class="path" :title="selected.workspace">{{ selected.workspace }}</p>
         </div>
-        <button v-if="isActive" class="quiet-button" :disabled="busy || !!activeRun" @click="closeSession">Close session</button>
+        <div class="session-actions">
+          <button v-if="isActive" class="quiet-button" :disabled="busy || !!activeRun" @click="closeSession">Close session</button>
+          <button v-if="isClosed" class="quiet-button" :disabled="busy" @click="reopenSession">Reopen session</button>
+        </div>
       </div>
 
       <section v-if="diagnostic" class="diagnostic-card" :class="diagnostic.kind" role="alert">
@@ -711,6 +922,7 @@ onBeforeUnmount(() => {
               <option value="">Default model</option>
               <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
             </select>
+            <span v-if="selectedModelPricing" class="model-pricing">${{ selectedModelPricing.inputPerMillion % 1 === 0 ? selectedModelPricing.inputPerMillion.toFixed(0) : selectedModelPricing.inputPerMillion.toFixed(2) }}/${{ selectedModelPricing.outputPerMillion % 1 === 0 ? selectedModelPricing.outputPerMillion.toFixed(0) : selectedModelPricing.outputPerMillion.toFixed(2) }}/MTok</span>
           </div>
           <button v-if="activeRun" type="button" class="stop-button" :disabled="busy" aria-label="処理を停止" @click="cancelRun">停止</button>
           <button v-else type="submit" class="send-button" :disabled="busy || !prompt.trim()">Run {{ providerLabel }} <span>↗</span></button>
@@ -885,6 +1097,65 @@ onBeforeUnmount(() => {
           </article>
         </div>
       </section>
+    </div>
+  </div>
+
+  <div v-if="usageSummaryOpen" class="usage-summary-overlay" @click.self="closeUsageSummary">
+    <div class="usage-summary-modal" role="dialog" aria-modal="true" aria-label="Usage Summary">
+      <header class="usage-summary-modal-header">
+        <h2>Usage Summary</h2>
+        <button type="button" class="icon-button" aria-label="閉じる" @click="closeUsageSummary">×</button>
+      </header>
+      <div class="usage-summary-controls">
+        <div class="usage-summary-granularity" role="tablist" aria-label="集計期間">
+          <button
+            v-for="option in (['day', 'week', 'month'] as const)"
+            :key="option"
+            type="button"
+            role="tab"
+            :aria-selected="usageSummaryGranularity === option"
+            :class="{ selected: usageSummaryGranularity === option }"
+            @click="usageSummaryGranularity = option"
+          >{{ option === 'day' ? '日次' : option === 'week' ? '週次' : '月次' }}</button>
+        </div>
+        <div class="usage-summary-filters">
+          <label class="usage-summary-model-filter">
+            Provider
+            <select v-model="usageSummaryProvider">
+              <option value="">All providers</option>
+              <option v-for="provider in usageSummaryProviders" :key="provider" :value="provider">{{ provider }}</option>
+            </select>
+          </label>
+          <label class="usage-summary-model-filter">
+            Model
+            <select v-model="usageSummaryModel">
+              <option value="">All models</option>
+              <option v-for="model in usageSummaryModels" :key="model" :value="model">{{ model }}</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div v-if="usageSummaryError" class="error-banner" role="alert">{{ usageSummaryError }}</div>
+      <div v-else-if="usageSummaryLoading" class="usage-summary-loading">読み込み中…</div>
+      <div v-else class="usage-summary-charts">
+        <UsageBarChart title="Cost (USD)" :periods="usageSummaryCostPeriods" :series="usageSeries" :format-value="formatCost" />
+        <div v-if="usageSummaryHasCredits || usageSummaryHasTokens" class="usage-summary-secondary-toggles">
+          <button v-if="usageSummaryHasCredits" type="button" class="usage-summary-credits-toggle" @click="showAiCredits = !showAiCredits">
+            {{ showAiCredits ? 'AI Creditsを隠す' : 'AI Credits表示' }}
+          </button>
+          <button v-if="usageSummaryHasTokens" type="button" class="usage-summary-credits-toggle" @click="showTokens = !showTokens">
+            {{ showTokens ? 'トークン数を隠す' : 'トークン数表示' }}
+          </button>
+        </div>
+        <UsageBarChart v-if="showAiCredits" compact title="AI Credits" :periods="usageSummaryCreditsPeriods" :series="usageSeries" :format-value="formatCredits" />
+        <template v-if="showTokens">
+          <div class="usage-summary-token-mode" role="tablist" aria-label="トークン内訳の軸">
+            <button type="button" role="tab" :aria-selected="tokenChartMode === 'series'" :class="{ selected: tokenChartMode === 'series' }" @click="tokenChartMode = 'series'">Provider別</button>
+            <button type="button" role="tab" :aria-selected="tokenChartMode === 'type'" :class="{ selected: tokenChartMode === 'type' }" @click="tokenChartMode = 'type'">種別</button>
+          </div>
+          <UsageBarChart compact title="Tokens" :periods="activeTokenPeriods" :series="activeTokenSeries" :format-value="formatTokens" />
+        </template>
+      </div>
     </div>
   </div>
 </template>

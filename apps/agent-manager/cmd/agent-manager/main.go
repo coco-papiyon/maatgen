@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -38,6 +39,10 @@ import (
 
 var version = "dev"
 
+// sessionAutoCloseAge is how long a session may stay active before it is
+// closed automatically at the next manager startup.
+const sessionAutoCloseAge = 24 * time.Hour
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("agent manager stopped", "error", err)
@@ -61,11 +66,17 @@ func run() error {
 	authToken := flag.String("auth-token", "", "bearer token; generated when omitted")
 	allowedOrigins := flag.String("allowed-origins", "http://localhost:5173,http://127.0.0.1:5173", "comma-separated browser origins")
 	configFile := flag.String("config", toolconfig.DefaultRelativePath, "tool configuration path relative to the executable")
+	staticDir := flag.String("static-dir", "", "directory of built Web UI static assets to serve; auto-detected when omitted")
 	backfillCosts := flag.Bool("backfill-costs", false, "refresh pricing and recalculate historical run costs, then exit")
 	flag.Parse()
 	executablePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
+	}
+	resolvedStaticDir := resolveStaticDir(*staticDir, executablePath, defaultWorkspace)
+	var staticFS fs.FS
+	if resolvedStaticDir != "" {
+		staticFS = os.DirFS(resolvedStaticDir)
 	}
 	toolConfig, resolvedConfigPath, err := toolconfig.LoadFrom(executablePath, *configFile, defaultWorkspace)
 	if err != nil {
@@ -151,6 +162,24 @@ func run() error {
 	for _, value := range fetcher.Refresh(pricingCtx, pricingModels) {
 		_ = store.UpsertModelPricing(pricingCtx, value)
 	}
+	for _, value := range pricing.Static() {
+		_ = store.UpsertModelPricing(pricingCtx, value)
+	}
+	for i := range toolConfig.Providers {
+		for _, model := range toolConfig.Providers[i].Models {
+			p, pErr := store.GetModelPricing(pricingCtx, string(toolConfig.Providers[i].ID), model)
+			if pErr != nil {
+				continue
+			}
+			if toolConfig.Providers[i].Pricing == nil {
+				toolConfig.Providers[i].Pricing = make(map[string]*protocol.ModelPricingInfo)
+			}
+			toolConfig.Providers[i].Pricing[model] = &protocol.ModelPricingInfo{
+				InputPerMillion:  p.InputPerMillion,
+				OutputPerMillion: p.OutputPerMillion,
+			}
+		}
+	}
 	if backfilled, backfillErr := store.BackfillRunCosts(pricingCtx, fallbackModels); backfillErr != nil {
 		slog.Warn("historical run cost backfill failed", "error", backfillErr)
 	} else if backfilled > 0 {
@@ -165,6 +194,11 @@ func run() error {
 		return err
 	}
 	sessions := sessionservice.New(store, checkpointManager, sessionservice.WithSourceStatsAnalyzer(sourcestats.New("cloc")))
+	if closedCount, closeErr := closeExpiredSessions(context.Background(), store, sessions, now, sessionAutoCloseAge); closeErr != nil {
+		return fmt.Errorf("close expired sessions: %w", closeErr)
+	} else if closedCount > 0 {
+		slog.Info("closed expired sessions", "count", closedCount, "max_age", sessionAutoCloseAge)
+	}
 	changeDetector, err := changeset.New()
 	if err != nil {
 		return err
@@ -229,6 +263,7 @@ func run() error {
 			EventSubscriber:   broker,
 			SessionCreator:    sessions,
 			SessionCloser:     sessions,
+			SessionReopener:   sessions,
 			RunController:     runs,
 			ChangeReader:      store,
 			RestoreController: restores,
@@ -239,13 +274,18 @@ func run() error {
 				return toolconfig.SaveDefaultModel(resolvedConfigPath, &toolConfig, provider, model)
 			},
 			UsageReader:        store,
+			UsageSummaryReader: store,
 			SourceStatsReader:  store,
 			ApprovalController: approvals,
+			StaticFS:           staticFS,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	slog.Info("agent manager listening", "address", listener.Addr().String(), "version", version, "runtime_file", *runtimeFile, "config_file", resolvedConfigPath)
+	if resolvedStaticDir == "" {
+		slog.Info("no static Web UI assets found; serving API only", "static_dir", *staticDir)
+	}
+	slog.Info("agent manager listening", "address", listener.Addr().String(), "version", version, "runtime_file", *runtimeFile, "config_file", resolvedConfigPath, "static_dir", resolvedStaticDir)
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -274,6 +314,45 @@ func run() error {
 	}
 }
 
+// closeExpiredSessions closes active sessions created more than maxAge ago.
+// It runs once at startup, so a session left open across manager restarts
+// stops appearing in the active list and its checkpoint working copy gets
+// cleaned up the same way a manual close would. Sessions that still have an
+// active run are left alone; a future startup will retry them.
+func closeExpiredSessions(ctx context.Context, store *storesqlite.Store, sessions *sessionservice.Service, now time.Time, maxAge time.Duration) (int, error) {
+	cutoff := now.Add(-maxAge)
+	closed := 0
+	var cursor *protocol.SessionCursor
+	for {
+		page, err := store.ListSessions(ctx, 100, cursor, protocol.SessionActive)
+		if err != nil {
+			return closed, fmt.Errorf("list active sessions: %w", err)
+		}
+		if len(page) == 0 {
+			return closed, nil
+		}
+		for _, item := range page {
+			if !item.CreatedAt.Before(cutoff) {
+				continue
+			}
+			if _, closeErr := sessions.CloseSession(ctx, item.ID); closeErr != nil {
+				if errors.Is(closeErr, sessionservice.ErrRunActive) {
+					slog.Warn("skipped closing expired session with an active run", "session", item.ID)
+					continue
+				}
+				slog.Warn("failed to close expired session", "session", item.ID, "error", closeErr)
+				continue
+			}
+			closed++
+		}
+		if len(page) < 100 {
+			return closed, nil
+		}
+		last := page[len(page)-1]
+		cursor = &protocol.SessionCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+}
+
 // filterAvailableProviders hides providers whose CLI was not found at
 // startup from the API response. The full, unfiltered list in toolConfig
 // itself is left untouched so config persistence (default model, allowed
@@ -297,6 +376,31 @@ func splitNonEmpty(value string) []string {
 		}
 	}
 	return result
+}
+
+// resolveStaticDir locates the built Web UI static assets. When configured
+// explicitly the directory must exist. Otherwise it checks the packaged
+// production layout (a "web/dist" directory next to the executable) and the
+// monorepo development layout (apps/web/dist as a sibling of the
+// agent-manager working directory used by `go run`). It returns "" when no
+// assets are found, in which case the server runs API-only.
+func resolveStaticDir(configured, executablePath, workingDirectory string) string {
+	if configured != "" {
+		if info, err := os.Stat(configured); err == nil && info.IsDir() {
+			return configured
+		}
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(filepath.Dir(executablePath), "web", "dist"),
+		filepath.Join(workingDirectory, "..", "web", "dist"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func defaultDataDir() (string, error) {

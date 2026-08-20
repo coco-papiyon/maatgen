@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
@@ -105,6 +106,72 @@ func TestNotFoundUsesCommonErrorEnvelope(t *testing.T) {
 	}
 }
 
+func TestStaticServesKnownAsset(t *testing.T) {
+	config := testConfig()
+	config.StaticFS = fstest.MapFS{
+		"index.html":    &fstest.MapFile{Data: []byte("<html>index</html>")},
+		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('app')")},
+	}
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if recorder.Body.String() != "console.log('app')" {
+		t.Fatalf("body = %q", recorder.Body.String())
+	}
+}
+
+func TestStaticFallsBackToIndexForUnknownRoute(t *testing.T) {
+	config := testConfig()
+	config.StaticFS = fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<html>index</html>")},
+	}
+	handler := New(config, nil, nil).Handler()
+
+	for _, target := range []string{"/", "/sessions/abc"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("target %s: status = %d, want %d", target, recorder.Code, http.StatusOK)
+		}
+		if recorder.Body.String() != "<html>index</html>" {
+			t.Fatalf("target %s: body = %q", target, recorder.Body.String())
+		}
+	}
+}
+
+func TestStaticDisabledKeepsAPINotFoundBehavior(t *testing.T) {
+	handler := New(testConfig(), nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+}
+
+func TestStaticDoesNotShadowAPINotFound(t *testing.T) {
+	config := testConfig()
+	config.StaticFS = fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<html>index</html>")},
+	}
+	handler := New(config, nil, nil).Handler()
+
+	for _, target := range []string{"/api/v1/missing", "/ws"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("target %s: status = %d, want %d", target, recorder.Code, http.StatusNotFound)
+		}
+		if recorder.Body.String() == "<html>index</html>" {
+			t.Fatalf("target %s: served index.html instead of API not_found", target)
+		}
+	}
+}
+
 func TestSessionListAndDetail(t *testing.T) {
 	createdAt := time.Date(2026, 8, 15, 3, 0, 0, 0, time.UTC)
 	session := protocol.AgentSession{
@@ -129,6 +196,9 @@ func TestSessionListAndDetail(t *testing.T) {
 	if len(list.Sessions) != 1 || list.Sessions[0].ID != session.ID || reader.limit != 11 {
 		t.Fatalf("list = %#v, limit = %d", list, reader.limit)
 	}
+	if reader.status != protocol.SessionActive {
+		t.Fatalf("default status filter = %q, want active", reader.status)
+	}
 
 	detailRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(detailRecorder, authorizedRequest(http.MethodGet, "/api/v1/sessions/session-1"))
@@ -141,6 +211,37 @@ func TestSessionListAndDetail(t *testing.T) {
 	}
 	if detail.ID != session.ID || reader.requestedID != session.ID {
 		t.Fatalf("detail = %#v, requested id = %q", detail, reader.requestedID)
+	}
+}
+
+func TestSessionListStatusFilter(t *testing.T) {
+	reader := &fakeSessionReader{sessions: []protocol.AgentSession{}}
+	handler := New(testConfig(), reader, nil).Handler()
+
+	cases := []struct {
+		query      string
+		wantStatus protocol.SessionStatus
+	}{
+		{"", protocol.SessionActive},
+		{"?status=active", protocol.SessionActive},
+		{"?status=closed", protocol.SessionClosed},
+		{"?status=all", ""},
+	}
+	for _, tc := range cases {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/sessions"+tc.query))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("query %q status = %d", tc.query, recorder.Code)
+		}
+		if reader.status != tc.wantStatus {
+			t.Fatalf("query %q status filter = %q, want %q", tc.query, reader.status, tc.wantStatus)
+		}
+	}
+
+	invalidRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRecorder, authorizedRequest(http.MethodGet, "/api/v1/sessions?status=bogus"))
+	if invalidRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status = %d", invalidRecorder.Code)
 	}
 }
 
@@ -455,6 +556,69 @@ func TestGetSourceStatsAPI(t *testing.T) {
 	}
 }
 
+func TestGetUsageSummaryAPI(t *testing.T) {
+	reader := &fakeUsageSummaryReader{
+		summary: protocol.UsageSummary{
+			Granularity: "week",
+			SeriesBy:    "model",
+			Periods: []protocol.UsagePeriod{{
+				Period: "2026-W33", CostUSD: 4.5, AICredits: 1.25, TotalTokens: 12000,
+				Series: []protocol.UsageSeriesPoint{{Key: "claude-opus", CostUSD: 4.5, AICredits: 1.25, TotalTokens: 12000}},
+			}},
+		},
+		providers: []string{"claude", "copilot"},
+		models:    []string{"claude-opus", "gpt-5.1"},
+	}
+	config := testConfig()
+	config.UsageSummaryReader = reader
+	recorder := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/usage/summary?granularity=week&provider=claude&model=claude-opus"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response protocol.UsageSummary
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Periods) != 1 || response.Periods[0].CostUSD != 4.5 || response.Periods[0].TotalTokens != 12000 ||
+		len(response.Periods[0].Series) != 1 || response.Periods[0].Series[0].Key != "claude-opus" ||
+		reader.granularity != "week" || reader.provider != "claude" || reader.model != "claude-opus" {
+		t.Fatalf("response = %#v, requested granularity = %q provider = %q model = %q", response, reader.granularity, reader.provider, reader.model)
+	}
+
+	invalid := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(invalid, authorizedRequest(http.MethodGet, "/api/v1/usage/summary?granularity=year"))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid granularity status = %d", invalid.Code)
+	}
+
+	providersRecorder := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(providersRecorder, authorizedRequest(http.MethodGet, "/api/v1/usage/providers"))
+	if providersRecorder.Code != http.StatusOK {
+		t.Fatalf("providers status = %d, body = %s", providersRecorder.Code, providersRecorder.Body.String())
+	}
+	var providersResponse protocol.UsageProviderListResponse
+	if err := json.NewDecoder(providersRecorder.Body).Decode(&providersResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(providersResponse.Providers) != 2 || providersResponse.Providers[0] != "claude" {
+		t.Fatalf("providers response = %#v", providersResponse)
+	}
+
+	modelsRecorder := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(modelsRecorder, authorizedRequest(http.MethodGet, "/api/v1/usage/models?provider=claude"))
+	if modelsRecorder.Code != http.StatusOK {
+		t.Fatalf("models status = %d, body = %s", modelsRecorder.Code, modelsRecorder.Body.String())
+	}
+	var modelsResponse protocol.UsageModelListResponse
+	if err := json.NewDecoder(modelsRecorder.Body).Decode(&modelsResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(modelsResponse.Models) != 2 || modelsResponse.Models[0] != "claude-opus" {
+		t.Fatalf("models response = %#v", modelsResponse)
+	}
+}
+
 func TestRestoreAPI(t *testing.T) {
 	controller := &fakeRestoreController{changeSet: protocol.ChangeSet{SessionID: "session-1", CheckpointID: "checkpoint-1", Files: []protocol.FileChange{}}}
 	config := testConfig()
@@ -561,12 +725,14 @@ type fakeSessionReader struct {
 	err         error
 	limit       int
 	cursor      *protocol.SessionCursor
+	status      protocol.SessionStatus
 	requestedID string
 }
 
-func (f *fakeSessionReader) ListSessions(_ context.Context, limit int, cursor *protocol.SessionCursor) ([]protocol.AgentSession, error) {
+func (f *fakeSessionReader) ListSessions(_ context.Context, limit int, cursor *protocol.SessionCursor, status protocol.SessionStatus) ([]protocol.AgentSession, error) {
 	f.limit = limit
 	f.cursor = cursor
+	f.status = status
 	return f.sessions, f.err
 }
 
@@ -651,6 +817,33 @@ func (f *fakeSourceStatsReader) GetSourceStats(_ context.Context, sessionID stri
 }
 
 var _ SourceStatsReader = (*fakeSourceStatsReader)(nil)
+
+type fakeUsageSummaryReader struct {
+	granularity string
+	provider    string
+	model       string
+	summary     protocol.UsageSummary
+	providers   []string
+	models      []string
+	err         error
+}
+
+func (f *fakeUsageSummaryReader) GetUsageSummary(_ context.Context, granularity, provider, model string) (protocol.UsageSummary, error) {
+	f.granularity = granularity
+	f.provider = provider
+	f.model = model
+	return f.summary, f.err
+}
+
+func (f *fakeUsageSummaryReader) ListUsageProviders(_ context.Context) ([]string, error) {
+	return f.providers, f.err
+}
+
+func (f *fakeUsageSummaryReader) ListUsageModels(_ context.Context, _ string) ([]string, error) {
+	return f.models, f.err
+}
+
+var _ UsageSummaryReader = (*fakeUsageSummaryReader)(nil)
 
 type fakeRestoreController struct {
 	operation    string

@@ -20,7 +20,19 @@
             "items": { "type": "string", "minLength": 1 },
             "uniqueItems": true
           },
-          "defaultModel": { "type": "string", "minLength": 1 }
+          "defaultModel": { "type": "string", "minLength": 1 },
+          "pricing": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["inputPerMillion", "outputPerMillion"],
+              "properties": {
+                "inputPerMillion": { "type": "number" },
+                "outputPerMillion": { "type": "number" }
+              }
+            }
+          }
         }
       }
     }

@@ -35,7 +35,9 @@ npm run generate:check
 
 ## ビルドとインストール
 
-Web版の本番ビルド、Webパッケージの作成、VSCode版のビルドをまとめて実行するには、リポジトリルートで次を実行します。
+### 開発用フロントエンドビルド
+
+Web版のみをビルドしてWebパッケージやVSCode拡張機能を作成します（Agent Managerのバイナリは含みません）。
 
 ```bash
 npm run build:frontend
@@ -50,13 +52,28 @@ artifacts/maatgen-0.1.0.vsix           # VSCode拡張機能パッケージ
 apps/vscode-extension/dist/            # VSCode版のビルド成果物
 ```
 
-Webパッケージには本番用の静的サーバー起動スクリプトも含まれます。パッケージを展開したディレクトリで次を実行してください。
+### 本番用リリースビルド
+
+Web版とAgent Managerの両方をビルドして、プラットフォーム別配布パッケージを作成します。
 
 ```bash
-npm start
+npm run build:release
 ```
 
-既定では`http://127.0.0.1:5173/`で起動します。`PORT`または`MAATGEN_WEB_HOST`環境変数、あるいは`npm start -- --port 8080 --host 0.0.0.0`で変更できます。Agent Manager APIは別途起動し、Webサーバーから到達できるように配置してください。
+このコマンドは以下を生成します：
+
+```text
+artifacts/maatgen-web-0.1.0-win32-x64.zip    # Windows版（バイナリ+静的ファイル）
+artifacts/maatgen-web-0.1.0-linux-x64.zip    # Linux版（バイナリ+静的ファイル）
+artifacts/maatgen-web-0.1.0-darwin-arm64.zip # macOS版（バイナリ+静的ファイル）
+artifacts/maatgen-0.1.0.vsix                  # VS Code拡張機能
+```
+
+各ZIPにはAgent Managerバイナリ、Web UI静的ファイル（`web/dist`）、設定ファイルが含まれています。詳細は[本番配置ガイド](./docs/deploy.md)を参照してください。
+
+### 配置
+
+Web版は静的ファイルのみを出力し、単体のWebサーバー機能は持ちません。配信はAgent Managerが行います。本番配置ではZIPを展開して、Agent Managerバイナリをそのまま実行してください。Agent Managerは同じディレクトリの`web/dist`を自動検出して、`http://127.0.0.1:3100/`でAPIと静的ファイルの両方を配信します。
 
 Web版をローカルで確認する場合は、Agent Managerを起動したうえで開発サーバーを使用します。
 
@@ -64,7 +81,7 @@ Web版をローカルで確認する場合は、Agent Managerを起動したう�
 npm run dev
 ```
 
-ブラウザで`http://127.0.0.1:5173/`を開いてください。本番配置では`apps/web/dist`を静的ファイルとしてWebサーバーへ配置します。
+ブラウザで`http://127.0.0.1:5173/`を開いてください。このVite開発サーバーはHMR用のローカル開発ツールであり、`/api`と`/ws`をAgent Manager(`127.0.0.1:3100`)へProxyします。`apps/web/dist`をビルド済みの状態でAgent Managerを起動すると、`http://127.0.0.1:3100/`から直接Web版を確認できます（`--static-dir`の既定検出は下記「開発サーバー」を参照）。
 
 ### VS Code版（VSIX）のインストール
 
@@ -216,6 +233,8 @@ npm run dev:manager -- --data-dir ./.maatgen
 ```
 
 runtime metadataの出力先と許可するブラウザOriginは、それぞれ`--runtime-file`、`--allowed-origins`で変更できます。
+
+静的ファイルの配信先ディレクトリは`--static-dir`で明示的に指定できます。省略時は実行ファイルと同じ階層の`web/dist`、次いでカレントディレクトリの一つ上の`web/dist`（`npm run dev:manager`のようにリポジトリの`apps/agent-manager`をカレントディレクトリとして起動した場合は`apps/web/dist`）を自動検出します。いずれも見つからない場合はAPIのみを配信します。
 
 ## ドキュメント
 

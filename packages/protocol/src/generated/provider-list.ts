@@ -10,5 +10,11 @@ export interface ProviderListResponse {
     label: string;
     models: string[];
     defaultModel?: string;
+    pricing?: {
+      [k: string]: {
+        inputPerMillion: number;
+        outputPerMillion: number;
+      };
+    };
   }[];
 }

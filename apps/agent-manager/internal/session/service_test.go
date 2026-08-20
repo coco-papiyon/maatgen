@@ -112,6 +112,14 @@ func (f *fakeStore) CloseSession(_ context.Context, id string, at time.Time) err
 	f.session.ClosedAt = &at
 	return nil
 }
+func (f *fakeStore) ReopenSession(_ context.Context, id string) error {
+	if f.session.ID != id {
+		return storage.ErrNotFound
+	}
+	f.session.Status = protocol.SessionActive
+	f.session.ClosedAt = nil
+	return nil
+}
 func (f *fakeStore) ReplaceSourceStats(_ context.Context, stats protocol.SourceStats) error {
 	f.sourceStats = stats
 	return nil

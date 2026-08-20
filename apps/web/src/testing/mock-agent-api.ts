@@ -7,9 +7,10 @@ import type {
   RestoreStatus,
   SendMessageRequest,
   SessionEvent,
+  UsageSummary,
   WsTicketResponse,
 } from '@maatgen/protocol';
-import type { AgentApi, SessionUsage, SourceStats } from '../api';
+import type { AgentApi, SessionStatusFilter, SessionUsage, SourceStats, UsageGranularity } from '../api';
 import type { EventStreamFactory } from '../event-stream';
 
 type EventListener = (event: SessionEvent) => void;
@@ -51,9 +52,9 @@ export class MockAgentApi implements AgentApi {
     return undefined;
   }
 
-  async listSessions(cursor?: string, limit = 25) {
+  async listSessions(cursor?: string, limit = 25, status: SessionStatusFilter = 'active') {
     const offset = cursor ? Number.parseInt(cursor, 10) : 0;
-    const sessions = [...this.sessions.values()];
+    const sessions = [...this.sessions.values()].filter((session) => status === 'all' || session.status === status);
     const page = sessions.slice(offset, offset + limit);
     const nextOffset = offset + page.length;
     return clone({
@@ -86,6 +87,13 @@ export class MockAgentApi implements AgentApi {
     const session = this.requireSession(id);
     session.status = 'closed';
     session.closedAt = new Date().toISOString();
+    return clone(session);
+  }
+
+  async reopenSession(id: string): Promise<AgentSession> {
+    const session = this.requireSession(id);
+    session.status = 'active';
+    delete session.closedAt;
     return clone(session);
   }
 
@@ -171,6 +179,106 @@ export class MockAgentApi implements AgentApi {
       }
     }
     return clone({ sessionId: id, summary, runs });
+  }
+
+  async getUsageSummary(granularity: UsageGranularity, provider?: string, model?: string): Promise<UsageSummary> {
+    const seriesBy: 'provider' | 'model' = provider ? 'model' : 'provider';
+    type Bucket = {
+      costUsd: number;
+      aiCredits: number;
+      totalTokens: number;
+      inputTokens: number;
+      cachedInputTokens: number;
+      outputTokens: number;
+      reasoningOutputTokens: number;
+      series: Map<string, { costUsd: number; aiCredits: number; totalTokens: number }>;
+    };
+    const buckets = new Map<string, Bucket>();
+    for (const [sessionId, events] of this.events.entries()) {
+      const sessionAgent = this.sessions.get(sessionId)?.agent;
+      if (provider && sessionAgent !== provider) continue;
+      for (const evt of events) {
+        if (evt.type !== 'usage_reported') continue;
+        const data = evt.data as {
+          model?: string;
+          actualModel?: string;
+          costUsd?: number;
+          aiCredits?: number;
+          totalTokens?: number;
+          inputTokens?: number;
+          cachedInputTokens?: number;
+          outputTokens?: number;
+          reasoningOutputTokens?: number;
+        };
+        const usageModel = data.actualModel ?? data.model;
+        if (model && usageModel !== model) continue;
+        const seriesKey = seriesBy === 'provider' ? sessionAgent : usageModel;
+        if (!seriesKey) continue;
+        const period = usagePeriodKey(evt.timestamp, granularity);
+        const bucket = buckets.get(period) ?? { costUsd: 0, aiCredits: 0, totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, series: new Map() };
+        const cost = data.costUsd ?? 0;
+        const credits = data.aiCredits ?? 0;
+        const tokens = data.totalTokens ?? 0;
+        bucket.costUsd += cost;
+        bucket.aiCredits += credits;
+        bucket.totalTokens += tokens;
+        bucket.inputTokens += data.inputTokens ?? 0;
+        bucket.cachedInputTokens += data.cachedInputTokens ?? 0;
+        bucket.outputTokens += data.outputTokens ?? 0;
+        bucket.reasoningOutputTokens += data.reasoningOutputTokens ?? 0;
+        const point = bucket.series.get(seriesKey) ?? { costUsd: 0, aiCredits: 0, totalTokens: 0 };
+        point.costUsd += cost;
+        point.aiCredits += credits;
+        point.totalTokens += tokens;
+        bucket.series.set(seriesKey, point);
+        buckets.set(period, bucket);
+      }
+    }
+    const periods = [...buckets.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([period, bucket]) => ({
+        period,
+        costUsd: bucket.costUsd,
+        aiCredits: bucket.aiCredits,
+        totalTokens: bucket.totalTokens,
+        inputTokens: bucket.inputTokens,
+        cachedInputTokens: bucket.cachedInputTokens,
+        outputTokens: bucket.outputTokens,
+        reasoningOutputTokens: bucket.reasoningOutputTokens,
+        series: [...bucket.series.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, values]) => ({ key, ...values })),
+      }));
+    return clone({
+      granularity,
+      seriesBy,
+      ...(provider ? { provider: provider as NonNullable<UsageSummary['provider']> } : {}),
+      ...(model ? { model } : {}),
+      periods,
+    });
+  }
+
+  async getUsageProviders(): Promise<string[]> {
+    const providers = new Set<string>();
+    for (const [sessionId, events] of this.events.entries()) {
+      if (!events.some((evt) => evt.type === 'usage_reported')) continue;
+      const agent = this.sessions.get(sessionId)?.agent;
+      if (agent) providers.add(agent);
+    }
+    return [...providers].sort();
+  }
+
+  async getUsageModels(provider?: string): Promise<string[]> {
+    const models = new Set<string>();
+    for (const [sessionId, events] of this.events.entries()) {
+      const sessionAgent = this.sessions.get(sessionId)?.agent;
+      if (provider && sessionAgent !== provider) continue;
+      for (const evt of events) {
+        if (evt.type !== 'usage_reported') continue;
+        const data = evt.data as { model?: string; actualModel?: string };
+        const usageModel = data.actualModel ?? data.model;
+        if (usageModel) models.add(usageModel);
+      }
+    }
+    return [...models].sort();
   }
 
   async listApprovals(_id: string): Promise<CommandApproval[]> {
@@ -286,7 +394,7 @@ function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[];
       event('mock-success', 1, 'command_started', { command: 'npm test' }),
       event('mock-success', 2, 'file_change_reported', { text: 'file_change_reported' }),
       event('mock-success', 3, 'assistant_message', { text: '認証処理を確認し、テストを追加しました。' }),
-      event('mock-success', 4, 'usage_reported', { totalTokens: 2400 }),
+      event('mock-success', 4, 'usage_reported', { model: 'gpt-5.6-sol', totalTokens: 2400, costUsd: 0.4 }),
     ], oneHunk('mock-success'), 'codex', {
       sessionId: 'mock-success',
       languages: [
@@ -297,7 +405,7 @@ function mockScenarios(): Array<{ session: AgentSession; events: SessionEvent[];
     }),
     scenario('mock-failure', 'C:/demo/failure', [event('mock-failure', 1, 'run_failed', { code: 'codex_unavailable', message: 'Mock: Codex CLI is unavailable' })], emptyChanges('mock-failure')),
     scenario('mock-copilot-failure', 'C:/demo/copilot-failure', [
-      event('mock-copilot-failure', 1, 'usage_reported', { model: 'auto', actualModel: 'gpt-5.4', aiCredits: 0.125 }),
+      event('mock-copilot-failure', 1, 'usage_reported', { model: 'auto', actualModel: 'gpt-5.4', aiCredits: 0.125, costUsd: 0.15 }),
       event('mock-copilot-failure', 2, 'run_failed', { code: 'copilot_unavailable', message: 'Mock: GitHub Copilot CLI is unavailable' }),
     ], emptyChanges('mock-copilot-failure'), 'copilot'),
     scenario('mock-claude-failure', 'C:/demo/claude-failure', [
@@ -361,4 +469,18 @@ function multiHunk(sessionId: string): ChangeSet {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function usagePeriodKey(timestamp: string, granularity: UsageGranularity): string {
+  const date = new Date(timestamp);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  if (granularity === 'month') return `${year}-${month}`;
+  if (granularity === 'week') {
+    const startOfYear = Date.UTC(year, 0, 1);
+    const week = Math.ceil(((date.getTime() - startOfYear) / 86_400_000 + new Date(startOfYear).getUTCDay() + 1) / 7);
+    return `${year}-W${String(week).padStart(2, '0')}`;
+  }
+  return `${year}-${month}-${day}`;
 }

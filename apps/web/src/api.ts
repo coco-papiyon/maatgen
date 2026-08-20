@@ -10,7 +10,14 @@ import type {
   WsTicketResponse,
   CommandApproval,
   ApprovalDecisionRequest,
+  UsageSummary,
+  UsageModelListResponse,
+  UsageProviderListResponse,
 } from '@maatgen/protocol';
+
+export type UsageGranularity = 'day' | 'week' | 'month';
+
+export type SessionStatusFilter = 'active' | 'closed' | 'all';
 
 export interface SessionUsage {
   sessionId: string;
@@ -36,16 +43,20 @@ export interface AgentApi {
   getDefaultWorkspace(): Promise<string>;
   listProviders(): Promise<ProviderListResponse>;
   setProviderModel(provider: string, model: string): Promise<void>;
-  listSessions(cursor?: string, limit?: number): Promise<SessionListResponse>;
+  listSessions(cursor?: string, limit?: number, status?: SessionStatusFilter): Promise<SessionListResponse>;
   createSession(request: CreateSessionRequest): Promise<AgentSession>;
   getSession(id: string): Promise<AgentSession>;
   closeSession(id: string): Promise<AgentSession>;
+  reopenSession(id: string): Promise<AgentSession>;
   sendMessage(id: string, request: SendMessageRequest): Promise<AgentRun>;
   cancelRun(id: string): Promise<void>;
   getEvents(id: string, afterSequence?: number): Promise<SessionEvent[]>;
   issueWebSocketTicket(): Promise<WsTicketResponse>;
   getChanges(id: string): Promise<ChangeSet>;
   getUsage(id: string): Promise<SessionUsage>;
+  getUsageSummary(granularity: UsageGranularity, provider?: string, model?: string): Promise<UsageSummary>;
+  getUsageProviders(): Promise<string[]>;
+  getUsageModels(provider?: string): Promise<string[]>;
   getSourceStats(id: string): Promise<SourceStats>;
   listApprovals(id: string, pendingOnly?: boolean): Promise<CommandApproval[]>;
   decideApproval(sessionId: string, approvalId: string, request: ApprovalDecisionRequest): Promise<CommandApproval>;
@@ -105,8 +116,8 @@ export const httpAgentApi: AgentApi = {
       body: JSON.stringify({ model }),
     });
   },
-  listSessions(cursor, limit = 25) {
-    const query = new URLSearchParams({ limit: String(limit) });
+  listSessions(cursor, limit = 25, status = 'active') {
+    const query = new URLSearchParams({ limit: String(limit), status });
     if (cursor) query.set('cursor', cursor);
     return request(`/api/v1/sessions?${query}`);
   },
@@ -118,6 +129,9 @@ export const httpAgentApi: AgentApi = {
   },
   closeSession(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/close`, { method: 'POST' });
+  },
+  reopenSession(id) {
+    return request(`/api/v1/sessions/${encodeURIComponent(id)}/reopen`, { method: 'POST' });
   },
   sendMessage(id, requestBody) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/messages`, {
@@ -142,6 +156,21 @@ export const httpAgentApi: AgentApi = {
   },
   getUsage(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/usage`);
+  },
+  getUsageSummary(granularity, provider, model) {
+    const query = new URLSearchParams({ granularity });
+    if (provider) query.set('provider', provider);
+    if (model) query.set('model', model);
+    return request(`/api/v1/usage/summary?${query}`);
+  },
+  async getUsageProviders() {
+    const response = await request<UsageProviderListResponse>('/api/v1/usage/providers');
+    return response.providers;
+  },
+  async getUsageModels(provider) {
+    const query = provider ? `?provider=${encodeURIComponent(provider)}` : '';
+    const response = await request<UsageModelListResponse>(`/api/v1/usage/models${query}`);
+    return response.models;
   },
   getSourceStats(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/source-stats`);

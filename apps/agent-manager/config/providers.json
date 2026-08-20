@@ -11,7 +11,21 @@
         "gpt-5.4",
         "gpt-5.4-mini"
       ],
-      "defaultModel": "gpt-5.6-luna"
+      "defaultModel": "gpt-5.6-luna",
+      "pricing": {
+        "gpt-5.6-luna": {
+          "inputPerMillion": 0.2,
+          "outputPerMillion": 1.2
+        },
+        "gpt-5.6-sol": {
+          "inputPerMillion": 5,
+          "outputPerMillion": 2
+        },
+        "gpt-5.6-terra": {
+          "inputPerMillion": 2,
+          "outputPerMillion": 0.2
+        }
+      }
     },
     {
       "id": "claude",
@@ -22,7 +36,25 @@
         "claude-sonnet-4-6",
         "claude-haiku-4-5"
       ],
-      "defaultModel": "claude-sonnet-5"
+      "defaultModel": "claude-haiku-4-5",
+      "pricing": {
+        "claude-haiku-4-5": {
+          "inputPerMillion": 0.8,
+          "outputPerMillion": 4
+        },
+        "claude-opus-5": {
+          "inputPerMillion": 15,
+          "outputPerMillion": 75
+        },
+        "claude-sonnet-4-6": {
+          "inputPerMillion": 3,
+          "outputPerMillion": 15
+        },
+        "claude-sonnet-5": {
+          "inputPerMillion": 3,
+          "outputPerMillion": 15
+        }
+      }
     },
     {
       "id": "copilot",
@@ -38,7 +70,37 @@
         "gemini-3.6-flash",
         "mai-code-1-flash"
       ],
-      "defaultModel": "auto"
+      "defaultModel": "auto",
+      "pricing": {
+        "claude-haiku-4.5": {
+          "inputPerMillion": 1,
+          "outputPerMillion": 5
+        },
+        "claude-sonnet-4.6": {
+          "inputPerMillion": 3,
+          "outputPerMillion": 15
+        },
+        "gemini-3.5-flash": {
+          "inputPerMillion": 1.5,
+          "outputPerMillion": 0.75
+        },
+        "gemini-3.6-flash": {
+          "inputPerMillion": 0.75,
+          "outputPerMillion": 0.75
+        },
+        "gpt-5.3-codex": {
+          "inputPerMillion": 1.75,
+          "outputPerMillion": 2.5
+        },
+        "gpt-5.4": {
+          "inputPerMillion": 2.5,
+          "outputPerMillion": 5
+        },
+        "mai-code-1-flash": {
+          "inputPerMillion": 0.75,
+          "outputPerMillion": 0.2
+        }
+      }
     }
   ],
   "commandApproval": {

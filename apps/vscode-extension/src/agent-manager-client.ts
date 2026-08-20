@@ -47,7 +47,7 @@ export class AgentManagerClient {
     const sessions: AgentSession[] = [];
     let cursor = '';
     do {
-      const query = new URLSearchParams({ limit: '100' });
+      const query = new URLSearchParams({ limit: '100', status: 'all' });
       if (cursor) query.set('cursor', cursor);
       const response = await this.request<SessionListResponse>(`/api/v1/sessions?${query.toString()}`);
       sessions.push(...response.sessions);

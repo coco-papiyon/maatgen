@@ -75,15 +75,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         } else if (message.type === 'run.prompt') {
           void this.startRun(message.message);
         } else if (message.type === 'provider.select') {
-          // When the provider is switched, always start a new session with the selected provider.
-          this.selectedProvider = message.provider;
-          this.selectedModel = '';
-          // Clear any selected/active session so syncSession will create a new one for the chosen provider.
-          this.selectedSessionId = undefined;
-          this.session = undefined;
-          this.events = [];
-          this.activeRunId = undefined;
-          void this.syncSession();
+          void this.selectProvider(message.provider);
         } else if (message.type === 'model.select') {
           this.selectedModel = message.model;
         } else if (message.type === 'run.cancel' && this.activeRunId) {
@@ -152,6 +144,13 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         ?? this.session
         ?? this.sessions.find((candidate) => candidate.workspace === workspace.path && candidate.status === 'active')
         ?? await this.manager.createSession({ agent: this.selectedProvider, workspace: workspace.path });
+      if (!this.session) {
+        this.events = [];
+        this.activeRunId = undefined;
+        this.approvals = [];
+        await this.postState(undefined, [], undefined, undefined);
+        return;
+      }
       this.selectedProvider = this.session.agent;
       const provider = this.providers.find((candidate) => candidate.id === this.selectedProvider);
       if (previousSessionId !== this.session.id) {
@@ -204,6 +203,29 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
     } catch (error) {
       await this.view?.webview.postMessage({ type: 'manager.error', message: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  private async createSessionForSelectedProvider(): Promise<void> {
+    const workspace = this.getWorkspaceState();
+    if (!workspace || this.session || !this.selectedProvider || this.syncBusy) return;
+    try {
+      await this.manager.createSession({ agent: this.selectedProvider, workspace: workspace.path });
+      await this.syncSession();
+    } catch (error) {
+      await this.view?.webview.postMessage({ type: 'manager.error', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async selectProvider(provider: string): Promise<void> {
+    if (!provider || this.activeRunId || this.syncBusy) return;
+    this.selectedProvider = provider;
+    this.selectedModel = '';
+    this.selectedSessionId = undefined;
+    this.session = undefined;
+    this.events = [];
+    this.activeRunId = undefined;
+    this.approvals = [];
+    await this.createSessionForSelectedProvider();
   }
 
   private async decideApproval(message: Extract<WebviewMessage, { type: 'approval.decide' }>): Promise<void> {

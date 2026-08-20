@@ -19,6 +19,9 @@ const schemas = [
   'session-event',
   'session-list',
   'token-usage',
+  'usage-model-list',
+  'usage-provider-list',
+  'usage-summary',
   'ws-ticket',
 ];
 const checkOnly = process.argv.includes('--check');

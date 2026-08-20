@@ -33,7 +33,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         </div>
       </header>
       <div class="top-panels">
-        <details class="session-history" open>
+        <details class="session-history">
           <summary><span>SESSION HISTORY</span><span class="panel-chevron" aria-hidden="true">⌄</span></summary>
           <div id="session-history-list" class="session-history-list"></div>
         </details>
@@ -232,17 +232,20 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           option.selected = provider.id === selectedProvider;
           providerSelect.append(option);
         });
-        providerSelect.disabled = hasSession || !!activeRun || !(providers || []).length;
+        providerSelect.disabled = !!activeRun || !(providers || []).length;
         modelSelect.replaceChildren();
         const provider = (providers || []).find((item) => item.id === selectedProvider);
+        const effectiveModel = provider?.models?.includes(selectedModel)
+          ? selectedModel
+          : (provider?.defaultModel && provider.models.includes(provider.defaultModel) ? provider.defaultModel : '');
         promptInput.placeholder = (provider?.label || 'Agent') + 'に指示する…';
         const defaultOption = document.createElement('option');
         defaultOption.value = ''; defaultOption.textContent = 'Default model';
-        defaultOption.selected = !selectedModel; modelSelect.append(defaultOption);
+        defaultOption.selected = !effectiveModel; modelSelect.append(defaultOption);
         (provider?.models || []).forEach((model) => {
           const option = document.createElement('option');
           option.value = model; option.textContent = model;
-          option.selected = model === selectedModel;
+          option.selected = model === effectiveModel;
           modelSelect.append(option);
         });
         modelSelect.disabled = !!activeRun || !(provider?.models || []).length;

@@ -87,7 +87,7 @@ func TestSessionAndRunLifecycle(t *testing.T) {
 		t.Fatalf("closed session = %#v, err = %v", gotSession, err)
 	}
 
-	sessions, err := store.ListSessions(ctx, 10, nil)
+	sessions, err := store.ListSessions(ctx, 10, nil, "")
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("sessions = %#v, err = %v", sessions, err)
 	}
@@ -155,13 +155,50 @@ func TestListSessionsWithKeysetCursor(t *testing.T) {
 		}
 	}
 
-	first, err := store.ListSessions(ctx, 2, nil)
+	first, err := store.ListSessions(ctx, 2, nil, "")
 	if err != nil || len(first) != 2 || first[0].ID != "session-3" || first[1].ID != "session-2" {
 		t.Fatalf("first page = %#v, err = %v", first, err)
 	}
-	second, err := store.ListSessions(ctx, 2, &protocol.SessionCursor{CreatedAt: first[1].CreatedAt, ID: first[1].ID})
+	second, err := store.ListSessions(ctx, 2, &protocol.SessionCursor{CreatedAt: first[1].CreatedAt, ID: first[1].ID}, "")
 	if err != nil || len(second) != 1 || second[0].ID != "session-1" {
 		t.Fatalf("second page = %#v, err = %v", second, err)
+	}
+}
+
+func TestListSessionsFiltersByStatus(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	base := time.Date(2026, 8, 15, 1, 0, 0, 0, time.UTC)
+	active := protocol.AgentSession{ID: "session-active", Agent: protocol.AgentCodex, Workspace: "C:/workspace", Status: protocol.SessionActive, CreatedAt: base}
+	closed := protocol.AgentSession{ID: "session-closed", Agent: protocol.AgentCodex, Workspace: "C:/workspace", Status: protocol.SessionActive, CreatedAt: base.Add(time.Minute)}
+	if err := store.CreateSession(ctx, active); err != nil {
+		t.Fatalf("create active session: %v", err)
+	}
+	if err := store.CreateSession(ctx, closed); err != nil {
+		t.Fatalf("create closed session: %v", err)
+	}
+	if err := store.CloseSession(ctx, closed.ID, base.Add(2*time.Minute)); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	activeOnly, err := store.ListSessions(ctx, 10, nil, protocol.SessionActive)
+	if err != nil || len(activeOnly) != 1 || activeOnly[0].ID != active.ID {
+		t.Fatalf("active only = %#v, err = %v", activeOnly, err)
+	}
+
+	closedOnly, err := store.ListSessions(ctx, 10, nil, protocol.SessionClosed)
+	if err != nil || len(closedOnly) != 1 || closedOnly[0].ID != closed.ID {
+		t.Fatalf("closed only = %#v, err = %v", closedOnly, err)
+	}
+
+	all, err := store.ListSessions(ctx, 10, nil, "")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all = %#v, err = %v", all, err)
 	}
 }
 

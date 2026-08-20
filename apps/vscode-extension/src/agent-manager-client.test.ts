@@ -32,7 +32,7 @@ describe('AgentManagerClient session integration', () => {
     const sessions = await new AgentManagerClient('http://127.0.0.1:3100', 'shared-token').listSessions();
 
     expect(sessions.map((session) => session.id)).toEqual(['vscode-session', 'older-session']);
-    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:3100/api/v1/sessions?limit=100', expect.objectContaining({
+    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:3100/api/v1/sessions?limit=100&status=all', expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'Bearer shared-token' }),
     }));
     expect(String(fetch.mock.calls[1]?.[0])).toContain('cursor=next');

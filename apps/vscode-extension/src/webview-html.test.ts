@@ -32,7 +32,7 @@ describe('renderWebviewHtml', () => {
   it('includes session execution, history, usage, and change surfaces', () => {
     const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
     expect(html).toContain('<div class="top-panels">');
-    expect(html).toContain('<details class="session-history" open>');
+    expect(html).toContain('<details class="session-history">');
     expect(html).toContain('<details class="usage-result">');
     expect(html).toContain('id="usage-model"');
     expect(html).toContain('id="usage-credits"');
@@ -47,7 +47,11 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('changes-list');
     expect(html).toContain("type: 'run.prompt'");
     expect(html).toContain('id="provider-select"');
+    expect(html).toContain('providerSelect.disabled = !!activeRun');
+    expect(html).not.toContain('Start a session');
+    expect(html).not.toContain('start-provider-select');
     expect(html).toContain('id="model-select"');
+    expect(html).toContain('const effectiveModel = provider?.models?.includes(selectedModel)');
     expect(html).toContain("type: 'model.select'");
     expect(html).toContain("session.agent + ' · ' + session.status");
     expect(html).toContain("(provider?.label || 'Agent') + 'に指示する…'");
