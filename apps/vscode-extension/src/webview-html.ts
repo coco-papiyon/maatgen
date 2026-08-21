@@ -89,8 +89,11 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           </section>
           <div id="event-list" class="event-list"></div>
           <form id="prompt-form" class="prompt-form">
-            <textarea id="prompt-input" rows="2" placeholder="Agentに指示する…"></textarea>
-            <div class="prompt-actions"><button id="close-session" type="button" class="quiet-action">Close</button><button id="run-button" type="submit">Run</button><button id="cancel-button" type="button" hidden>Stop</button></div>
+            <div class="prompt-input-wrap">
+              <textarea id="prompt-input" rows="2" placeholder="Agentに指示する… (@でファイルを指定)"></textarea>
+              <ul id="mention-list" class="mention-list" hidden></ul>
+            </div>
+            <div class="prompt-actions"><button id="new-session" type="button" class="quiet-action">New</button><button id="close-session" type="button" class="quiet-action">Close</button><button id="run-button" type="submit">Run</button><button id="cancel-button" type="button" hidden>Stop</button></div>
           </form>
         </section>
         <p id="manager-error" class="manager-error" role="alert" hidden></p>
@@ -120,6 +123,8 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const eventList = document.getElementById('event-list');
       const promptForm = document.getElementById('prompt-form');
       const promptInput = document.getElementById('prompt-input');
+      const mentionList = document.getElementById('mention-list');
+      const newSessionButton = document.getElementById('new-session');
       const runButton = document.getElementById('run-button');
       const cancelButton = document.getElementById('cancel-button');
       const closeSessionButton = document.getElementById('close-session');
@@ -339,7 +344,110 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         return html;
       };
 
+      let mentionRange = null;
+      let mentionFiles = [];
+      let mentionActiveIndex = 0;
+      let mentionRequestSeq = 0;
+      let latestMentionRequestId = '';
+      let mentionDebounceTimer;
+      const closeMention = () => {
+        mentionRange = null;
+        mentionFiles = [];
+        mentionActiveIndex = 0;
+        mentionList.hidden = true;
+        mentionList.replaceChildren();
+      };
+      const currentMentionRange = () => {
+        const value = promptInput.value;
+        const caret = promptInput.selectionStart;
+        const uptoCaret = value.slice(0, caret);
+        const at = uptoCaret.lastIndexOf('@');
+        if (at === -1) return null;
+        const query = uptoCaret.slice(at + 1);
+        if (/\s/.test(query)) return null;
+        return { start: at, end: caret, query };
+      };
+      const renderMentionList = () => {
+        mentionList.replaceChildren();
+        if (!mentionRange) return;
+        if (!mentionFiles.length) {
+          const empty = document.createElement('li');
+          empty.className = 'mention-empty';
+          empty.textContent = '一致するファイルがありません';
+          mentionList.append(empty);
+          mentionList.hidden = false;
+          return;
+        }
+        mentionFiles.forEach((file, index) => {
+          const item = document.createElement('li');
+          item.className = 'mention-item' + (index === mentionActiveIndex ? ' active' : '');
+          item.textContent = file;
+          item.addEventListener('mousedown', (event) => { event.preventDefault(); applyMention(file); });
+          mentionList.append(item);
+        });
+        mentionList.hidden = false;
+      };
+      const applyMention = (file) => {
+        if (!mentionRange) return;
+        const { start, end } = mentionRange;
+        const value = promptInput.value;
+        const insertion = '@' + file + ' ';
+        promptInput.value = value.slice(0, start) + insertion + value.slice(end);
+        const caret = start + insertion.length;
+        closeMention();
+        promptInput.focus();
+        promptInput.setSelectionRange(caret, caret);
+      };
+      const updateMention = () => {
+        const range = currentMentionRange();
+        if (!range) { closeMention(); return; }
+        if (!mentionRange || mentionRange.query !== range.query) mentionActiveIndex = 0;
+        mentionRange = range;
+        clearTimeout(mentionDebounceTimer);
+        mentionDebounceTimer = setTimeout(() => {
+          const requestId = String(++mentionRequestSeq);
+          latestMentionRequestId = requestId;
+          vscode.postMessage({ type: 'workspace.searchFiles', query: range.query, requestId });
+        }, 120);
+      };
+      promptInput.addEventListener('input', updateMention);
+      promptInput.addEventListener('click', updateMention);
+      promptInput.addEventListener('keyup', (event) => {
+        if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) updateMention();
+      });
+      promptInput.addEventListener('keydown', (event) => {
+        if (!mentionRange || mentionList.hidden) return;
+        if (event.key === 'ArrowDown') {
+          if (!mentionFiles.length) return;
+          event.preventDefault();
+          mentionActiveIndex = (mentionActiveIndex + 1) % mentionFiles.length;
+          renderMentionList();
+        } else if (event.key === 'ArrowUp') {
+          if (!mentionFiles.length) return;
+          event.preventDefault();
+          mentionActiveIndex = (mentionActiveIndex - 1 + mentionFiles.length) % mentionFiles.length;
+          renderMentionList();
+        } else if (event.key === 'Enter' || event.key === 'Tab') {
+          if (!mentionFiles.length) return;
+          event.preventDefault();
+          applyMention(mentionFiles[mentionActiveIndex]);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          closeMention();
+        }
+      });
+      document.addEventListener('mousedown', (event) => {
+        if (mentionRange && !event.target.closest('.prompt-input-wrap')) closeMention();
+      });
+
       window.addEventListener('message', (event) => {
+        if (event.data?.type === 'workspace.files') {
+          if (!mentionRange || event.data.requestId !== latestMentionRequestId) return;
+          mentionFiles = event.data.files || [];
+          mentionActiveIndex = 0;
+          renderMentionList();
+          return;
+        }
         if (event.data?.type === 'session.state') {
           const workspace = event.data.workspace;
           nameElement.textContent = workspace?.name ?? 'No workspace open';
@@ -350,6 +458,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           sessionSection.hidden = !event.data.session;
           sessionStatus.textContent = event.data.approvals?.length ? 'Approval required' : (event.data.activeRunId ? 'Running' : (event.data.session?.status ?? 'Offline'));
           renderProviderOptions(event.data.providers, event.data.selectedProvider, event.data.selectedModel, Boolean(event.data.session), Boolean(event.data.activeRunId));
+          newSessionButton.disabled = Boolean(event.data.activeRunId);
           runButton.hidden = Boolean(event.data.activeRunId);
           cancelButton.hidden = !event.data.activeRunId;
           closeSessionButton.disabled = Boolean(event.data.activeRunId);
@@ -395,10 +504,12 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         followLatestEvent = true;
         scrollEventListToLatest();
         promptInput.value = '';
+        closeMention();
         vscode.postMessage({ type: 'run.prompt', message });
       });
       providerSelect.addEventListener('change', () => vscode.postMessage({ type: 'provider.select', provider: providerSelect.value }));
       modelSelect.addEventListener('change', () => vscode.postMessage({ type: 'model.select', model: modelSelect.value }));
+      newSessionButton.addEventListener('click', () => vscode.postMessage({ type: 'session.new' }));
       cancelButton.addEventListener('click', () => vscode.postMessage({ type: 'run.cancel' }));
       closeSessionButton.addEventListener('click', () => vscode.postMessage({ type: 'session.close' }));
       document.querySelectorAll('[data-approval-decision]').forEach((button) => {

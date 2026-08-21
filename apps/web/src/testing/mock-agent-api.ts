@@ -359,6 +359,10 @@ export class MockAgentApi implements AgentApi {
     if (!changeSet) throw new Error('change set was not found');
     return changeSet;
   }
+
+  async searchWorkspaceFiles(): Promise<string[]> {
+    return [];
+  }
 }
 
 export function createMockEnvironment(): { agentApi: AgentApi; eventStreamFactory: EventStreamFactory } {

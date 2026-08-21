@@ -63,6 +63,7 @@ export interface AgentApi {
   restoreHunk(sessionId: string, checkpointId: string, hunkId: string): Promise<ChangeSet>;
   restoreFile(sessionId: string, checkpointId: string, fileId: string): Promise<ChangeSet>;
   restoreAllChanges(sessionId: string, checkpointId: string): Promise<ChangeSet>;
+  searchWorkspaceFiles(sessionId: string, query: string): Promise<string[]>;
 }
 
 interface ApiErrorEnvelope {
@@ -193,5 +194,11 @@ export const httpAgentApi: AgentApi = {
   },
   restoreAllChanges(sessionId, checkpointId) {
     return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: 'POST' });
+  },
+  async searchWorkspaceFiles(sessionId, query) {
+    const response = await request<{ files: string[] }>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/workspace-files?query=${encodeURIComponent(query)}`,
+    );
+    return response.files;
   },
 };

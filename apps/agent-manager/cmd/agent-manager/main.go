@@ -277,6 +277,7 @@ func run() error {
 			UsageSummaryReader: store,
 			SourceStatsReader:  store,
 			ApprovalController: approvals,
+			WorkspaceReader:    sessions,
 			StaticFS:           staticFS,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,

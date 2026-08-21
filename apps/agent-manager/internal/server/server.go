@@ -40,6 +40,7 @@ type Config struct {
 	UsageSummaryReader UsageSummaryReader
 	SourceStatsReader  SourceStatsReader
 	ApprovalController ApprovalController
+	WorkspaceReader    WorkspaceReader
 	// StaticFS serves the built Web UI. Requests outside /api and /ws fall
 	// back to index.html so client-side routes resolve on a fresh load.
 	// Static serving is disabled when nil.
@@ -78,6 +79,10 @@ type SessionCloser interface {
 
 type SessionReopener interface {
 	ReopenSession(ctx context.Context, id string) (protocol.AgentSession, error)
+}
+
+type WorkspaceReader interface {
+	SearchWorkspaceFiles(ctx context.Context, sessionID string, query string) ([]string, error)
 }
 
 type RunController interface {
@@ -133,6 +138,10 @@ type sessionListResponse struct {
 
 type eventListResponse struct {
 	Events []protocol.SessionEvent `json:"events"`
+}
+
+type workspaceFilesResponse struct {
+	Files []string `json:"files"`
 }
 
 func New(config Config, sessions SessionReader, events EventReader) *Server {
@@ -346,6 +355,24 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 		mux.HandleFunc("GET /ws", func(w http.ResponseWriter, r *http.Request) {
 			serveEventWebSocket(w, r, config, tickets, sessions, events, config.EventSubscriber)
 		})
+	}
+	if sessions != nil && config.WorkspaceReader != nil {
+		mux.Handle("GET /api/v1/sessions/{id}/workspace-files", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			query := r.URL.Query().Get("query")
+			files, err := config.WorkspaceReader.SearchWorkspaceFiles(r.Context(), r.PathValue("id"), query)
+			if err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "search_failed", "failed to search workspace files", nil)
+				return
+			}
+			if files == nil {
+				files = []string{}
+			}
+			writeJSON(w, http.StatusOK, workspaceFilesResponse{Files: files})
+		})))
 	}
 	if sessions != nil && config.UsageReader != nil {
 		mux.Handle("GET /api/v1/sessions/{id}/usage", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

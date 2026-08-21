@@ -66,4 +66,16 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('id="usage-cost-credits"');
     expect(html).not.toContain('data-copilot-usage');
   });
+
+  it('wires up an @-mention file picker for the prompt textarea', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain('id="mention-list"');
+    expect(html).toContain('class="prompt-input-wrap"');
+    expect(html).toContain("const at = uptoCaret.lastIndexOf('@');");
+    expect(html).toContain("type: 'workspace.searchFiles'");
+    expect(html).toContain("event.data?.type === 'workspace.files'");
+    expect(html).toContain("value.slice(0, start) + insertion + value.slice(end)");
+    expect(html).toContain("event.key === 'ArrowDown'");
+    expect(html).toContain("event.key === 'Escape'");
+  });
 });

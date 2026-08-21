@@ -25,7 +25,13 @@ type WebviewMessage =
   | { type: 'run.cancel' }
   | { type: 'approval.decide'; approvalId: string; decision: 'allow_once' | 'allow_session' | 'allow_permanent' | 'deny'; ruleArgv?: string[] }
   | { type: 'session.select'; sessionId: string }
-  | { type: 'session.close' };
+  | { type: 'session.new' }
+  | { type: 'session.close' }
+  | { type: 'workspace.searchFiles'; query: string; requestId: string };
+
+const FILE_SEARCH_EXCLUDE = '**/{node_modules,.git,dist,out,build,.next,coverage,.venv,__pycache__}/**';
+const FILE_SEARCH_MAX_CANDIDATES = 2000;
+const FILE_SEARCH_MAX_RESULTS = 20;
 
 export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'maatgen.sessions';
@@ -85,6 +91,12 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         } else if (message.type === 'session.select') {
           this.selectedSessionId = message.sessionId;
           void this.syncSession();
+        } else if (message.type === 'session.new') {
+          void this.createSessionForSelectedProvider();
+        } else if (message.type === 'workspace.searchFiles') {
+          void this.searchWorkspaceFiles(message.query).then((files) => {
+            void this.view?.webview.postMessage({ type: 'workspace.files', requestId: message.requestId, files });
+          });
         } else if (message.type === 'session.close' && this.session) {
           void this.manager.closeSession(this.session.id).then(async () => {
             this.stopPolling();
@@ -251,6 +263,30 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   private findActiveRunId(events: SessionEvent[]): string | undefined {
     const terminal = new Set(events.filter((event) => ['run_completed', 'run_failed', 'run_cancelled'].includes(event.type)).map((event) => event.runId).filter(Boolean));
     return [...events].reverse().find((event) => event.type === 'run_started' && event.runId && !terminal.has(event.runId))?.runId;
+  }
+
+  private async searchWorkspaceFiles(query: string): Promise<string[]> {
+    if (!this.getWorkspaceState()) return [];
+    const uris = await vscode.workspace.findFiles('**/*', FILE_SEARCH_EXCLUDE, FILE_SEARCH_MAX_CANDIDATES);
+    const files = uris.map((uri) => vscode.workspace.asRelativePath(uri, false));
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) return [...files].sort().slice(0, FILE_SEARCH_MAX_RESULTS);
+    return files
+      .map((file) => ({ file, score: this.scoreFileMatch(file, trimmed) }))
+      .filter((entry): entry is { file: string; score: number } => entry.score !== undefined)
+      .sort((a, b) => a.score - b.score || a.file.length - b.file.length)
+      .slice(0, FILE_SEARCH_MAX_RESULTS)
+      .map((entry) => entry.file);
+  }
+
+  private scoreFileMatch(file: string, query: string): number | undefined {
+    const lower = file.toLowerCase();
+    const basename = lower.slice(lower.lastIndexOf('/') + 1);
+    if (basename === query) return 0;
+    if (basename.startsWith(query)) return 1;
+    if (basename.includes(query)) return 2;
+    if (lower.includes(query)) return 3;
+    return undefined;
   }
 
   private getWorkspaceState(): WorkspaceState | undefined {

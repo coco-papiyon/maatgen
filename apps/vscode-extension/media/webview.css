@@ -62,6 +62,12 @@ button { font: inherit; }
 .event-item { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 7px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 11px; }
 .event-label { color: var(--muted); font: 9px var(--vscode-editor-font-family); text-transform: uppercase; }.event-content { overflow-wrap: anywhere; }
 .event-item.error, .event-item.run-failed { color: var(--vscode-errorForeground); }.prompt-form textarea { width: 100%; resize: vertical; padding: 7px; border: 1px solid var(--line); color: var(--vscode-input-foreground); background: var(--vscode-input-background); }
+.prompt-input-wrap { position: relative; }
+.mention-list { position: absolute; z-index: 20; left: 0; right: 0; bottom: calc(100% + 4px); max-height: 160px; overflow: auto; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--line); border-radius: 5px; background: var(--vscode-editorWidget-background); box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+.mention-list[hidden] { display: none; }
+.mention-item { padding: 5px 7px; border-radius: 3px; font: 11px var(--vscode-editor-font-family); overflow-wrap: anywhere; cursor: pointer; }
+.mention-item.active, .mention-item:hover { color: var(--vscode-list-activeSelectionForeground); background: var(--vscode-list-activeSelectionBackground); }
+.mention-empty { padding: 5px 7px; color: var(--muted); font-size: 10px; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }.prompt-actions button { padding: 5px 9px; border: 0; border-radius: 3px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }.prompt-actions .quiet-action { color: var(--vscode-foreground); background: transparent; border: 1px solid var(--line); }.prompt-actions button[hidden] { display: none; }
 .manager-error { margin: 0; padding: 8px; border: 1px solid var(--vscode-inputValidation-errorBorder); color: var(--vscode-errorForeground); background: var(--vscode-inputValidation-errorBackground); font-size: 10px; }
 .assistant-result { padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }

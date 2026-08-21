@@ -76,9 +76,15 @@ const usageSummaryLoading = ref(false);
 const usageSummaryError = ref('');
 const showAiCredits = ref(false);
 const showTokens = ref(false);
+const mentionFiles = ref<string[]>([]);
+const mentionActiveIndex = ref(0);
+const mentionQuery = ref('');
+const mentionVisible = ref(false);
+const mentionDebounceTimer = ref<number>();
 let sessionPollTimer: number | undefined;
 let eventStream: EventStreamLike | undefined;
 const timelineElement = ref<HTMLElement>();
+const textareaElement = ref<HTMLTextAreaElement>();
 
 const lastSequence = computed(() => events.value.at(-1)?.sequence ?? 0);
 const visibleEvents = computed(() => showSystemMessages.value
@@ -532,6 +538,7 @@ async function sendPrompt() {
   if (!selected.value || !prompt.value.trim()) return;
   const message = prompt.value.trim();
   prompt.value = '';
+  closeMentionList();
   await act(async () => {
     activeRun.value = await api.sendMessage(selected.value!.id, {
       message,
@@ -540,6 +547,76 @@ async function sendPrompt() {
     await refreshSelected();
     scrollTimelineToBottom();
   });
+}
+
+function getCurrentMentionRange() {
+  if (!textareaElement.value) return null;
+  const value = textareaElement.value.value;
+  const caret = textareaElement.value.selectionStart;
+  const uptoCaret = value.slice(0, caret);
+  const at = uptoCaret.lastIndexOf('@');
+  if (at === -1) return null;
+  const query = uptoCaret.slice(at + 1);
+  if (/\s/.test(query)) return null;
+  return { start: at, end: caret, query };
+}
+
+async function updateMentionList() {
+  const range = getCurrentMentionRange();
+  if (!range) { closeMentionList(); return; }
+  if (mentionQuery.value !== range.query) mentionActiveIndex.value = 0;
+  mentionQuery.value = range.query;
+  if (mentionDebounceTimer.value) clearTimeout(mentionDebounceTimer.value);
+  mentionDebounceTimer.value = window.setTimeout(async () => {
+    if (!selected.value) return;
+    try {
+      mentionFiles.value = await api.searchWorkspaceFiles(selected.value.id, range.query);
+      mentionVisible.value = true;
+    } catch {
+      mentionFiles.value = [];
+      mentionVisible.value = false;
+    }
+  }, 120);
+}
+
+function closeMentionList() {
+  mentionFiles.value = [];
+  mentionActiveIndex.value = 0;
+  mentionVisible.value = false;
+  if (mentionDebounceTimer.value) clearTimeout(mentionDebounceTimer.value);
+}
+
+function applyMention(file: string) {
+  if (!textareaElement.value) return;
+  const range = getCurrentMentionRange();
+  if (!range) return;
+  const value = textareaElement.value.value;
+  const insertion = '@' + file + ' ';
+  textareaElement.value.value = value.slice(0, range.start) + insertion + value.slice(range.end);
+  const caret = range.start + insertion.length;
+  closeMentionList();
+  nextTick(() => {
+    textareaElement.value?.focus();
+    textareaElement.value?.setSelectionRange(caret, caret);
+  });
+  prompt.value = textareaElement.value.value;
+}
+
+function handleMentionKeydown(event: KeyboardEvent) {
+  if (!mentionVisible.value || !mentionFiles.value.length) return;
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    mentionActiveIndex.value = (mentionActiveIndex.value + 1) % mentionFiles.value.length;
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    mentionActiveIndex.value = (mentionActiveIndex.value - 1 + mentionFiles.value.length) % mentionFiles.value.length;
+  } else if (event.key === 'Enter' || event.key === 'Tab') {
+    event.preventDefault();
+    applyMention(mentionFiles.value[mentionActiveIndex.value]!);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeMentionList();
+  }
 }
 
 async function cancelRun() {
@@ -914,7 +991,13 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
       </section>
 
        <form v-if="selected && isActive && !selectedRunId" class="composer" @submit.prevent="sendPrompt">
-        <textarea v-model="prompt" rows="1" :placeholder="`${providerLabel}に変更内容を伝える…`" :disabled="busy || !!activeRun" @keydown.ctrl.enter="sendPrompt" />
+        <div class="textarea-wrapper">
+          <textarea ref="textareaElement" v-model="prompt" rows="1" :placeholder="`${providerLabel}に変更内容を伝える… (@でファイルを指定)`" :disabled="busy || !!activeRun" @keydown.ctrl.enter="sendPrompt" @input="updateMentionList" @click="updateMentionList" @keyup="(e) => ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) && updateMentionList()" @keydown="handleMentionKeydown" />
+          <ul v-if="mentionVisible" class="mention-list">
+            <li v-if="!mentionFiles.length" class="mention-empty">一致するファイルがありません</li>
+            <li v-for="(file, index) in mentionFiles" :key="file" :class="['mention-item', { active: index === mentionActiveIndex }]" @mousedown.prevent="applyMention(file)">{{ file }}</li>
+          </ul>
+        </div>
         <div class="composer-actions">
           <div class="run-options">
             <span>{{ providerLabel }}</span>
