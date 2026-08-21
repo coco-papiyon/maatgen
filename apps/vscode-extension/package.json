@@ -24,10 +24,18 @@
       "panel": [
         {
           "id": "maatgen",
-          "title": "Maatgen",
-          "icon": "media/maat.svg"
+          "title": "Maatgen"
         }
       ]
+    },
+    "icons": {
+      "maatgen-icon": {
+        "description": "Maatgen icon",
+        "default": {
+          "fontPath": "media/maat.svg",
+          "fontCharacter": "M"
+        }
+      }
     },
     "configuration": {
       "title": "Maatgen",
@@ -49,8 +57,28 @@
       {
         "command": "maatgen.refresh",
         "title": "Maatgen: Refresh"
+      },
+      {
+        "command": "maatgen.focusPanel",
+        "title": "Maatgen: Focus Panel",
+        "icon": "$(maatgen-icon)"
       }
     ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "maatgen.focusPanel",
+          "when": "true"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "maatgen.focusPanel",
+          "group": "navigation",
+          "when": "resourceScheme == file"
+        }
+      ]
+    },
     "views": {
       "maatgen": [
         {

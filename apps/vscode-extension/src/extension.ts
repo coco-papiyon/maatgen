@@ -7,6 +7,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(MaatgenWebviewViewProvider.viewType, provider),
     vscode.commands.registerCommand('maatgen.refresh', () => provider.refresh()),
+    vscode.commands.registerCommand('maatgen.focusPanel', () => {
+      vscode.commands.executeCommand('maatgen.sessions.focus');
+    }),
     { dispose: () => provider.dispose() },
   );
 }
