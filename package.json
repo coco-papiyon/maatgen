@@ -18,7 +18,7 @@
     "build": "corepack pnpm -r build && go -C apps/agent-manager build ./...",
     "test": "corepack pnpm -r test && go -C apps/agent-manager test ./...",
     "test:go": "go -C apps/agent-manager test ./...",
-    "typecheck": "corepack pnpm -r typecheck"
+    "typecheck": "corepack pnpm --filter @maatgen/protocol build && corepack pnpm -r typecheck"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

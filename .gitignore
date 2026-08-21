@@ -11,6 +11,7 @@ artifacts/
 bin/
 *.test
 .gocache/
+/apps/agent-manager/agent-manager
 
 # Runtime data
 .maatgen/
