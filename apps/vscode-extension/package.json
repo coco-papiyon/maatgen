@@ -20,6 +20,15 @@
     "onCommand:maatgen.refresh"
   ],
   "contributes": {
+    "viewContainers": {
+      "panel": [
+        {
+          "id": "maatgen",
+          "title": "Maatgen",
+          "icon": "media/maat.svg"
+        }
+      ]
+    },
     "configuration": {
       "title": "Maatgen",
       "properties": {
@@ -43,11 +52,11 @@
       }
     ],
     "views": {
-      "explorer": [
+      "maatgen": [
         {
           "type": "webview",
           "id": "maatgen.sessions",
-          "name": "Maatgen"
+          "name": "Sessions"
         }
       ]
     }
