@@ -376,6 +376,8 @@ Browser
 - `vscode.diff`
 - CodeLens／Decoration
 - ChangeSetのbefore／after本文を提供する読み取り専用仮想ドキュメント
+- Assistant messageを中央EditorのMarkdown Previewへ開く読み取り専用仮想ドキュメント
+- Agent回答の任意の`.md`ファイルへの保存
 - Changes一覧からのFile／Run全体Restoreと、Diff Editor CodeLensからのHunk Restore
 - Restore前の未保存VS Codeバッファ検査、およびRun実行中のRestore抑止
 - ChangeSetはSession切替、Run終了、`change_restored`時のみ再取得し、通常ポーリングではキャッシュを利用
@@ -857,6 +859,7 @@ docs/decisions/
 - [x] Explorer内の`WebviewViewProvider`
 - [x] `default-src 'none'`とnonceによるWebview CSP
 - [x] AgentのMarkdown結果をWeb UI／VS Code Webviewの表示密度に応じてレンダリング
+- [x] Agent回答を中央EditorのMarkdown Previewで表示し、通常の`.md`ファイルへ保存
 - [x] Workspace名／pathのExtension-Webviewメッセージ連携
 - [x] VS Codeテーマ変数に対応した初期UI
 - [ ] Web UI componentと`AgentApi`契約の再利用

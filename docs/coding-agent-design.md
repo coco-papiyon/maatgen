@@ -125,9 +125,11 @@ VS Code 拡張機能自身は AI 推論を行わず、Coding Agent の実行・�
 
 ### 4.4 Markdown出力の表示責務
 
-Agent ManagerはAgentが返したMarkdownをHTMLへ変換せず、`assistant_message`／`reasoning_summary`の本文として保存する。表示側はイベント種別に応じてMarkdown rendererを選択し、Web UIでは見出し・リスト・コードブロック等を含む全文を表示する。VS Code Webviewではサイドバーに適したコンパクトな最新結果を表示し、リンクは外部リンクとして扱う。
+Agent ManagerはAgentが返したMarkdownをHTMLへ変換せず、`assistant_message`／`reasoning_summary`の本文として保存する。表示側はイベント種別に応じてMarkdown rendererを選択し、Web UIでは見出し・リスト・コードブロック等を含む全文を表示する。VS Code Webviewではサイドバーに適したコンパクトな結果を表示し、各Assistant messageから読み取り専用の仮想Markdownドキュメントを中央Editorへ開けるようにする。中央EditorはVS Code標準のMarkdown Previewを使用し、利用者は回答原文を任意の`.md`ファイルへ保存できる。
 
 Markdown rendererはHTMLタグ、`javascript:` URL、任意スクリプトを許可しない。Web UIとVS Code Webviewは同じ安全方針を使い、システムイベントやコマンド結果はMarkdown本文として扱わず、専用のログ表示とする。
+
+VS Codeの回答ドキュメントは`maatgen-response` schemeで提供し、対象Session／Run／EventをURIで識別する。同じProvider itemが複数の`assistant_message` text blockへ分割された場合は、同一Runかつ同一`itemId`のblockだけをEvent sequence順に結合する。保存は仮想ドキュメントを直接変更せず、Save dialogで選択した通常ファイルへMarkdown原文を書き出す。
 
 ---
 

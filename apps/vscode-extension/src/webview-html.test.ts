@@ -48,6 +48,10 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain("type: 'change.openDiff'");
     expect(html).toContain("type: 'change.restoreFile'");
     expect(html).toContain("type: 'change.restoreAll'");
+    expect(html).toContain("type: 'response.open'");
+    expect(html).toContain("type: 'response.save'");
+    expect(html).toContain("openButton.textContent = 'Open in Editor'");
+    expect(html).toContain("saveButton.textContent = 'Save Markdown'");
     expect(html).toContain("event.data?.type === 'changes.state'");
     expect(html).toContain("type: 'run.prompt'");
     expect(html).toContain('id="provider-select"');
@@ -62,6 +66,7 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('id="approval-card"');
     expect(html).toContain('data-approval-decision="allow_permanent"');
     expect(html).toContain("type: 'approval.decide'");
+    expect(html).not.toContain('LATEST AGENT RESULT');
   });
 
   it('shows provider-specific usage fields with one shared cost', () => {

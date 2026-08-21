@@ -17,7 +17,8 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onView:maatgen.sessions",
-    "onCommand:maatgen.refresh"
+    "onCommand:maatgen.refresh",
+    "onCommand:maatgen.saveResponse"
   ],
   "contributes": {
     "viewContainers": {
@@ -64,6 +65,12 @@
         "command": "maatgen.restoreFile",
         "title": "Maatgen: Restore File to Checkpoint",
         "enablement": "resourceScheme == maatgen-checkpoint"
+      },
+      {
+        "command": "maatgen.saveResponse",
+        "title": "Maatgen: Save Agent Response as Markdown",
+        "icon": "$(save-as)",
+        "enablement": "resourceScheme == maatgen-response"
       }
     ],
     "menus": {
@@ -78,6 +85,11 @@
           "command": "maatgen.focusPanel",
           "group": "navigation",
           "when": "resourceScheme == file"
+        },
+        {
+          "command": "maatgen.saveResponse",
+          "group": "navigation",
+          "when": "resourceScheme == maatgen-response"
         }
       ]
     },

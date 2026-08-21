@@ -5,6 +5,8 @@ import { renderWebviewHtml } from './webview-html.js';
 import { AgentManagerClient, AgentManagerError, type AgentProvider, type ReasoningEffort, type SessionUsage } from './agent-manager-client.js';
 import type { AgentSession, ChangeFile, ChangeSet, CommandApproval, SessionEvent } from './agent-manager-client.js';
 import { CheckpointDocumentProvider } from './checkpoint-document-provider.js';
+import { AgentResponseDocumentProvider } from './agent-response-document-provider.js';
+import { selectAssistantResponse } from './assistant-response.js';
 
 interface WorkspaceState {
   name: string;
@@ -33,6 +35,8 @@ type WebviewMessage =
   | { type: 'change.openDiff'; fileId: string }
   | { type: 'change.restoreFile'; fileId: string }
   | { type: 'change.restoreAll' }
+  | { type: 'response.open'; eventId: string }
+  | { type: 'response.save'; eventId: string }
   | { type: 'workspace.searchFiles'; query: string; requestId: string };
 
 const FILE_SEARCH_EXCLUDE = '**/{node_modules,.git,dist,out,build,.next,coverage,.venv,__pycache__}/**';
@@ -61,7 +65,11 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   private approvals: CommandApproval[] = [];
   private providerUsage: import('./agent-manager-client.js').ProviderUsage | undefined;
 
-  constructor(private readonly extensionUri: vscode.Uri, private readonly checkpointDocuments: CheckpointDocumentProvider) {
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly checkpointDocuments: CheckpointDocumentProvider,
+    private readonly responseDocuments: AgentResponseDocumentProvider,
+  ) {
     const config = vscode.workspace.getConfiguration('maatgen');
     this.manager = new AgentManagerClient(
       config.get('managerUrl', 'http://127.0.0.1:3100').replace(/\/$/, ''),
@@ -112,6 +120,10 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
           void this.restoreFile(message.fileId, true);
         } else if (message.type === 'change.restoreAll') {
           void this.restoreAllChanges();
+        } else if (message.type === 'response.open') {
+          void this.openResponse(message.eventId);
+        } else if (message.type === 'response.save') {
+          void this.saveResponse(message.eventId);
         } else if (message.type === 'workspace.searchFiles') {
           void this.searchWorkspaceFiles(message.query).then((files) => {
             void this.view?.webview.postMessage({ type: 'workspace.files', requestId: message.requestId, files });
@@ -372,6 +384,38 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
     this.changes = changeSet;
     this.checkpointDocuments.updateChangeSet(changeSet);
     await this.view?.webview.postMessage({ type: 'changes.state', changes: changeSet });
+  }
+
+  private async openResponse(eventId: string): Promise<void> {
+    const response = selectAssistantResponse(this.events, eventId);
+    if (!response || !this.session) {
+      await vscode.window.showWarningMessage('The selected Agent response is not available.');
+      return;
+    }
+    try {
+      await this.responseDocuments.open(response, this.session.agent, this.session.workspace);
+    } catch (error) {
+      await this.reportResponseError(error);
+    }
+  }
+
+  private async saveResponse(eventId: string): Promise<void> {
+    const response = selectAssistantResponse(this.events, eventId);
+    if (!response || !this.session) {
+      await vscode.window.showWarningMessage('The selected Agent response is not available.');
+      return;
+    }
+    try {
+      await this.responseDocuments.saveResponse(response, this.session.agent, this.session.workspace);
+    } catch (error) {
+      await this.reportResponseError(error);
+    }
+  }
+
+  private async reportResponseError(error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    await vscode.window.showErrorMessage(`Unable to use the Agent response: ${message}`);
+    await this.view?.webview.postMessage({ type: 'manager.error', message });
   }
 
   private async ensureRestorable(files: ChangeFile[]): Promise<boolean> {

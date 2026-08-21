@@ -96,10 +96,6 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           </form>
         </section>
         <p id="manager-error" class="manager-error" role="alert" hidden></p>
-        <section class="assistant-result" aria-live="polite" hidden>
-          <p class="eyebrow">LATEST AGENT RESULT</p>
-          <div id="assistant-output" class="markdown-body"></div>
-        </section>
       </section>
       <section class="status-card" aria-live="polite">
         <span class="status-dot" id="workspace-status"></span>
@@ -137,8 +133,6 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const approvalSummary = document.getElementById('approval-summary');
       const approvalRule = document.getElementById('approval-rule');
       const managerError = document.getElementById('manager-error');
-      const resultSection = document.querySelector('.assistant-result');
-      const outputElement = document.getElementById('assistant-output');
       const usageCount = document.getElementById('usage-count');
       const usageElements = {
         input: document.getElementById('usage-input'), cached: document.getElementById('usage-cached'), output: document.getElementById('usage-output'), total: document.getElementById('usage-total'), model: document.getElementById('usage-model'), credits: document.getElementById('usage-credits'), cost: document.getElementById('usage-cost'),
@@ -207,8 +201,15 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           item.className = 'event-item ' + event.type;
           const label = document.createElement('span'); label.className = 'event-label'; label.textContent = event.type === 'user_prompt' ? 'U' : event.type === 'assistant_message' ? 'A' : event.type.startsWith('run_') ? 'R' : 'E';
           const body = document.createElement('div'); body.className = 'event-content';
-          if (event.type === 'assistant_message') body.innerHTML = renderMarkdown(eventText(event));
-          else body.textContent = eventText(event);
+          if (event.type === 'assistant_message') {
+            body.innerHTML = renderMarkdown(eventText(event));
+            const actions = document.createElement('div'); actions.className = 'response-actions';
+            const openButton = document.createElement('button'); openButton.type = 'button'; openButton.textContent = 'Open in Editor';
+            openButton.addEventListener('click', () => vscode.postMessage({ type: 'response.open', eventId: event.id }));
+            const saveButton = document.createElement('button'); saveButton.type = 'button'; saveButton.textContent = 'Save Markdown';
+            saveButton.addEventListener('click', () => vscode.postMessage({ type: 'response.save', eventId: event.id }));
+            actions.append(openButton, saveButton); body.append(actions);
+          } else body.textContent = eventText(event);
           item.append(label, body); eventList.append(item);
         });
         scrollEventListToLatest();
@@ -541,11 +542,6 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         }
         if (event.data?.type === 'provider-usage.state') {
           renderProviderUsage(event.data.usage);
-          return;
-        }
-        if (event.data?.type === 'assistant.message') {
-          outputElement.innerHTML = renderMarkdown(String(event.data.markdown || ''));
-          resultSection.hidden = false;
           return;
         }
         if (event.data?.type === 'usage.summary') {

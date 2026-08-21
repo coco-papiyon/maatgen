@@ -70,7 +70,6 @@ button { font: inherit; }
 .mention-empty { padding: 5px 7px; color: var(--muted); font-size: 10px; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }.prompt-actions button { padding: 5px 9px; border: 0; border-radius: 3px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }.prompt-actions .quiet-action { color: var(--vscode-foreground); background: transparent; border: 1px solid var(--line); }.prompt-actions button[hidden] { display: none; }.prompt-actions #new-session { margin-right: auto; }
 .manager-error { margin: 0; padding: 8px; border: 1px solid var(--vscode-inputValidation-errorBorder); color: var(--vscode-errorForeground); background: var(--vscode-inputValidation-errorBackground); font-size: 10px; }
-.assistant-result { padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
 .markdown-body { overflow-wrap: anywhere; font-size: 11px; line-height: 1.55; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: .8em 0 .35em; font-size: 1.1em; }
 .markdown-body p { margin: .45em 0; }.markdown-body ul { margin: .45em 0; padding-left: 1.4em; }
@@ -78,6 +77,9 @@ button { font: inherit; }
 .markdown-body pre { overflow: auto; padding: 8px; background: var(--vscode-textCodeBlock-background); }
 .markdown-body pre code { padding: 0; }.markdown-body a { color: var(--vscode-textLink-foreground); }
 .markdown-body img { display: block; max-width: 100%; height: auto; margin: 6px 0; }
+.response-actions { display: flex; gap: 5px; margin-top: 7px; }
+.response-actions button { padding: 3px 6px; border: 1px solid var(--line); border-radius: 3px; color: var(--vscode-foreground); background: transparent; font-size: 9px; cursor: pointer; }
+.response-actions button:hover { color: var(--vscode-textLink-foreground); background: var(--vscode-list-hoverBackground); }
 .usage-content, .changes-content { padding: 0 8px 8px; }
 .usage-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; color: var(--muted); font: 9px var(--vscode-editor-font-family); text-transform: uppercase; }
 .usage-grid [hidden] { display: none; }
