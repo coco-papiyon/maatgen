@@ -18,12 +18,13 @@ type Info struct {
 }
 
 type RunRequest struct {
-	Directory string
-	Prompt    string
-	ThreadID  string
-	Model     string
-	Timeout   time.Duration
-	Approval  ApprovalHandler
+	Directory       string
+	Prompt          string
+	ThreadID        string
+	Model           string
+	ReasoningEffort string
+	Timeout         time.Duration
+	Approval        ApprovalHandler
 }
 
 type ApprovalRequest struct {
@@ -86,4 +87,10 @@ type Adapter interface {
 	Check(ctx context.Context) (Info, error)
 	Run(ctx context.Context, request RunRequest, emit Emitter) (RunResult, error)
 	ParseLine(line string) ParsedLine
+}
+
+// UsageReader is implemented by providers that expose account-level usage
+// through their CLI or app-server protocol.
+type UsageReader interface {
+	GetUsage(ctx context.Context, directory string) (protocol.ProviderUsage, error)
 }

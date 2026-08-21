@@ -21,6 +21,26 @@ func TestParseSystemInitCarriesThreadAndModel(t *testing.T) {
 	}
 }
 
+func TestParseUsageWindows(t *testing.T) {
+	windows, err := parseUsageWindows("Current session: 100% used · resets Aug 22, 1:40am (Asia/Tokyo)\n" +
+		"Current week (all models): 29% used · resets Aug 24, 1pm (Asia/Tokyo)")
+	if err != nil {
+		t.Fatalf("parse usage: %v", err)
+	}
+	if len(windows) != 2 {
+		t.Fatalf("windows = %#v", windows)
+	}
+	if windows[0].Name != "session" || windows[0].UsedPercent != 100 || windows[0].RemainingPercent != 0 {
+		t.Fatalf("session window = %#v", windows[0])
+	}
+	if windows[1].Name != "week" || windows[1].UsedPercent != 29 || windows[1].RemainingPercent != 71 {
+		t.Fatalf("week window = %#v", windows[1])
+	}
+	if windows[1].ResetLabel != "Aug 24, 1pm (Asia/Tokyo)" {
+		t.Fatalf("reset label = %q", windows[1].ResetLabel)
+	}
+}
+
 func TestParseAssistantSplitsContentBlocks(t *testing.T) {
 	parsed := ParseLine(`{"type":"assistant","session_id":"s1","parent_tool_use_id":null,"message":{"id":"msg_1","role":"assistant","content":[` +
 		`{"type":"thinking","thinking":"checking auth.ts"},` +

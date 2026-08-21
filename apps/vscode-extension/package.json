@@ -54,6 +54,16 @@
         "command": "maatgen.focusPanel",
         "title": "Maatgen: Focus Panel",
         "icon": "media/maat.png"
+      },
+      {
+        "command": "maatgen.restoreHunk",
+        "title": "Maatgen: Restore Hunk to Checkpoint",
+        "enablement": "resourceScheme == maatgen-checkpoint"
+      },
+      {
+        "command": "maatgen.restoreFile",
+        "title": "Maatgen: Restore File to Checkpoint",
+        "enablement": "resourceScheme == maatgen-checkpoint"
       }
     ],
     "menus": {

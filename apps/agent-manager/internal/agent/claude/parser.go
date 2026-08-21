@@ -2,13 +2,40 @@ package claude
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
+
+var usageWindowPattern = regexp.MustCompile(`(?m)^Current (session|week \(all models\)):\s*(\d+)% used\s*[·•|]\s*resets\s+(.+)$`)
+var usageANSIPattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+func parseUsageWindows(text string) ([]protocol.ProviderUsageWindow, error) {
+	text = usageANSIPattern.ReplaceAllString(text, "")
+	matches := usageWindowPattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil, errors.New("Claude Code usage output did not contain supported usage windows")
+	}
+	windows := make([]protocol.ProviderUsageWindow, 0, len(matches))
+	for _, match := range matches {
+		used, err := strconv.Atoi(match[2])
+		if err != nil || used < 0 || used > 100 {
+			return nil, fmt.Errorf("Claude Code usage contains invalid percentage %q", match[2])
+		}
+		name := match[1]
+		if name == "week (all models)" {
+			name = "week"
+		}
+		windows = append(windows, protocol.ProviderUsageWindow{Name: name, UsedPercent: used, RemainingPercent: 100 - used, ResetLabel: strings.TrimSpace(match[3])})
+	}
+	return windows, nil
+}
 
 // envelope covers the `--output-format stream-json` line shapes emitted by
 // Claude Code in print mode: `system`, `assistant`, `user`, and `result`.

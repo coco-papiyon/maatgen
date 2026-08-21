@@ -6,12 +6,23 @@ export interface ChangeFile {
   id: string;
   oldPath?: string;
   newPath?: string;
-  kind: string;
-  status: string;
-  restoreMode: string;
-  hunks: Array<{ id: string; oldStart?: number; newStart?: number }>;
+  kind: 'modify' | 'add' | 'delete' | 'rename' | 'binary' | 'mode_change';
+  original?: string;
+  modified?: string;
+  status: 'changed' | 'partially_restored' | 'restored' | 'conflict';
+  restoreMode: 'hunk' | 'file';
+  hunks: Array<{
+    id: string;
+    oldStart: number;
+    oldLines: number;
+    newStart: number;
+    newLines: number;
+    originalText: string;
+    modifiedText: string;
+    status: 'changed' | 'restored' | 'conflict';
+  }>;
 }
-export interface ChangeSet { sessionId: string; checkpointId: string; files: ChangeFile[]; }
+export interface ChangeSet { sessionId: string; runId?: string; checkpointId: string; beforeTree?: string; afterTree?: string; files: ChangeFile[]; }
 export interface CommandApproval {
   id: string;
   sessionId: string;
@@ -25,12 +36,22 @@ export interface CommandApproval {
 }
 export interface ApprovalDecisionRequest { decision: 'allow_once' | 'allow_session' | 'allow_permanent' | 'deny'; ruleArgv?: string[]; }
 interface CreateSessionRequest { agent: string; workspace: string; }
-interface SendMessageRequest { message: string; model?: string; timeoutSeconds?: number; }
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+interface SendMessageRequest { message: string; model?: string; reasoningEffort?: ReasoningEffort; timeoutSeconds?: number; }
 
 export interface SessionUsage {
   sessionId: string;
   summary: Record<string, number | string | undefined>;
   runs: Array<{ run: AgentRun; usage?: Record<string, number | string | undefined> }>;
+}
+export interface ProviderUsageWindow { name: string; usedPercent: number; remainingPercent: number; resetLabel?: string; }
+export interface ProviderUsage { provider: string; windows: ProviderUsageWindow[]; fetchedAt: string; }
+
+export class AgentManagerError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'AgentManagerError';
+  }
 }
 
 interface SessionListResponse { sessions: AgentSession[]; nextCursor?: string; }
@@ -74,8 +95,24 @@ export class AgentManagerClient {
     return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/changes`);
   }
 
+  restoreHunk(sessionId: string, checkpointId: string, hunkId: string): Promise<ChangeSet> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/hunks/${encodeURIComponent(hunkId)}/restore`, { method: 'POST' });
+  }
+
+  restoreFile(sessionId: string, checkpointId: string, fileId: string): Promise<ChangeSet> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/files/${encodeURIComponent(fileId)}/restore`, { method: 'POST' });
+  }
+
+  restoreAllChanges(sessionId: string, checkpointId: string): Promise<ChangeSet> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: 'POST' });
+  }
+
   getUsage(id: string): Promise<SessionUsage> {
     return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/usage`);
+  }
+
+  getProviderUsage(id: string): Promise<ProviderUsage> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/provider-usage`);
   }
 
   listApprovals(id: string): Promise<CommandApproval[]> {
@@ -111,11 +148,13 @@ export class AgentManagerClient {
     });
     if (!response.ok) {
       let message = `${response.status} ${response.statusText}`;
+      let code: string | undefined;
       try {
-        const body = await response.json() as { error?: { message?: string } };
+        const body = await response.json() as { error?: { code?: string; message?: string } };
         message = body.error?.message ?? message;
+        code = body.error?.code;
       } catch { /* retain HTTP status */ }
-      throw new Error(message);
+      throw new AgentManagerError(message, response.status, code);
     }
     if (response.status === 204) return undefined as T;
     return await response.json() as T;

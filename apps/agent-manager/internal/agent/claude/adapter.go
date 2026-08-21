@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -115,6 +116,9 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 	if request.Model != "" {
 		args = append(args, "--model", request.Model)
 	}
+	if request.ReasoningEffort != "" {
+		args = append(args, "--effort", request.ReasoningEffort)
+	}
 	if request.ThreadID != "" {
 		args = append(args, "--resume", request.ThreadID)
 	}
@@ -140,4 +144,59 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 	}, err
 }
 
+func (a *Adapter) GetUsage(ctx context.Context, directory string) (protocol.ProviderUsage, error) {
+	directory, err := filepath.Abs(directory)
+	if err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("resolve Claude Code usage directory: %w", err)
+	}
+	if file, err := os.Stat(directory); err != nil || !file.IsDir() {
+		return protocol.ProviderUsage{}, errors.New("Claude Code usage directory must be an existing directory")
+	}
+	a.mu.RLock()
+	info := a.info
+	a.mu.RUnlock()
+	if info.Path == "" {
+		if info, err = a.Check(ctx); err != nil {
+			return protocol.ProviderUsage{}, err
+		}
+	}
+	var outputLines []string
+	args := append([]string{}, a.prefixArgs...)
+	args = append(args, "--print", "/usage", "--output-format", "json")
+	result, err := a.runner.Run(ctx, process.Spec{Path: info.Path, Args: args, Dir: directory, Timeout: 15 * time.Second}, func(item process.Output) error {
+		if item.Stream == process.Stdout {
+			outputLines = append(outputLines, item.Line)
+		}
+		return nil
+	})
+	if err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("Claude Code usage: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return protocol.ProviderUsage{}, fmt.Errorf("Claude Code usage exited with code %d", result.ExitCode)
+	}
+	var response struct {
+		IsError bool   `json:"is_error"`
+		Result  string `json:"result"`
+	}
+	rawOutput := strings.Join(outputLines, "\n")
+	if err := json.Unmarshal([]byte(rawOutput), &response); err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("decode Claude Code usage: %w", err)
+	}
+	if response.IsError {
+		return protocol.ProviderUsage{}, errors.New("Claude Code usage command failed")
+	}
+	windows, err := parseUsageWindows(response.Result)
+	if err != nil {
+		// Some Claude Code versions place the human-readable usage text outside
+		// result. Keep the parser tolerant of that output shape.
+		windows, err = parseUsageWindows(rawOutput)
+		if err != nil {
+			return protocol.ProviderUsage{}, err
+		}
+	}
+	return protocol.ProviderUsage{Provider: protocol.AgentClaude, Windows: windows, FetchedAt: time.Now().UTC()}, nil
+}
+
 var _ agent.Adapter = (*Adapter)(nil)
+var _ agent.UsageReader = (*Adapter)(nil)

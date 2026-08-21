@@ -56,6 +56,19 @@ export interface SessionUsage {
   runs: RunUsageEntry[];
 }
 
+export interface ProviderUsageWindow {
+  name: string;
+  usedPercent: number;
+  remainingPercent: number;
+  resetLabel?: string;
+}
+
+export interface ProviderUsage {
+  provider: AgentName;
+  windows: ProviderUsageWindow[];
+  fetchedAt: string;
+}
+
 export type EventSource = GeneratedSessionEvent['source'];
 export type SessionEventType = GeneratedSessionEvent['type'];
 export type SessionEvent<TData = unknown> = Omit<GeneratedSessionEvent, 'data'> & { data: TData };

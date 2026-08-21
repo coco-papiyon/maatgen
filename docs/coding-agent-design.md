@@ -1,6 +1,7 @@
 # Coding Agent VS Code Extension 設計書
 
 > 2026-08-20更新: Session作成時に一度だけclocでGit管理下のコード数を計測し、Web版のUsage／Changesと並ぶ「コード数」Tabで表示する（13章）。Runごとの再計測は行わない。
+> 2026-08-22更新: Sessionオープン時とRun完了時に、選択Providerのアカウント使用量を取得する。CodexはApp Serverの`account/rateLimits/read`、Copilotは公式SDKの`account.getQuota`、Claude CodeはCLIの`/usage`を利用し、Web版とVS Code版のヘッダーへ残量を表示する。
 
 > 2026-08-19更新: Claude Code Adapterを追加する。Claude CodeはCLIがRunごとのtoken数とUSDコストを返すため、Managerは料金表からコストを再計算せず、CLIが報告した金額をそのまま保存する。
 
@@ -776,6 +777,10 @@ Monaco Editor の Diff Editor を利用する。
 
 VS Code 固有 UI は Extension 側に実装し、差分データ自体は Web 版と共通化する。
 
+ExtensionはChangeSetの`original`／`modified`から読み取り専用の仮想ドキュメントを生成し、`vscode.diff`でRun前後の固定スナップショットを表示する。modified側にはCodeLensを表示し、HunkまたはFileをcheckpointへ戻せるようにする。WebviewのChanges一覧からもFile／Run全体のRestoreを実行できる。Restore前に対象ファイルの未保存VS Codeバッファを検査し、未保存編集がある場合とRun実行中は復元しない。
+
+ChangeSetはSession切替、Run終了、`change_restored`検出時に再取得し、通常のポーリングではキャッシュを利用する。
+
 ---
 
 ## 19. Agent Workspace
@@ -905,6 +910,7 @@ finished_at
 ```
 
 Providerのモデル選択はブラウザだけに保持せず、Managerのツール設定に`defaultModel`として保存する。通常の実行ファイルでは設定パスを実行ファイル基準で解決し、`go run`の一時実行ファイルでは起動時のカレントディレクトリ基準に切り替える。
+Web／VS CodeのRun設定ではModelの隣にReasoning Effort（Default、low、medium、high、xhigh、max）を表示する。未指定時は各CLIの既定値に委譲し、指定値はProtocolの`reasoningEffort`としてAgent ManagerからCodex App Serverの`effort`、Claude Code／Copilot CLIの`--effort`へ渡す。
 
 ### prompts
 

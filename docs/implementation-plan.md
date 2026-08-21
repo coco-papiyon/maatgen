@@ -242,6 +242,7 @@ packages/
 - pnpm workspace、TypeScript、Vue、Vite、Vitestを設定
 - Go module、lint、test設定
 - `SessionEvent`、`AgentSession`、`AgentRun`、`ChangeSet`、`TokenUsage`を定義
+- Provider別アカウント使用量を取得する`provider-usage` APIを追加し、Codex／Copilot／Claude Codeの残量をWeb版・VS Code版へ表示する
 - HTTP APIとWebSocket EventのJSON fixtureを作成
 - TypeScript／Go双方でfixture互換テストを追加
 - 共通エラー形式とHTTP statusを確定
@@ -374,6 +375,10 @@ Browser
 - Manager URL／Bearer tokenのExtension設定
 - `vscode.diff`
 - CodeLens／Decoration
+- ChangeSetのbefore／after本文を提供する読み取り専用仮想ドキュメント
+- Changes一覧からのFile／Run全体Restoreと、Diff Editor CodeLensからのHunk Restore
+- Restore前の未保存VS Codeバッファ検査、およびRun実行中のRestore抑止
+- ChangeSetはSession切替、Run終了、`change_restored`時のみ再取得し、通常ポーリングではキャッシュを利用
 - Extension終了時のManager cleanup（checkpointは保持期限に従う）
 
 ExtensionにはCodex固有の実行ロジックを持たせない。
@@ -870,6 +875,7 @@ docs/decisions/
 - [x] Agent別Adapter選択、Agent Thread ID、Raw Event sourceの共通化
 - [x] Protocol／SQLite schemaのCodex＋Copilot対応
 - [x] Web／VS CodeのProvider／Model選択とCLI診断表示
+- [x] Web／VS CodeのModel横Reasoning Effort選択と各CLIへの伝播
 - [x] fake Copilot CLI、parser、複数Adapter統合テスト
 
 ### Phase 10：Codexコマンド承認

@@ -172,7 +172,7 @@ func (c *appServerConnection) runTurn(ctx context.Context, prompt, model string)
 			ID string `json:"id"`
 		} `json:"turn"`
 	}
-	params := map[string]any{"threadId": c.request.ThreadID, "input": []map[string]string{{"type": "text", "text": prompt}}, "model": emptyNil(model)}
+	params := map[string]any{"threadId": c.request.ThreadID, "input": []map[string]string{{"type": "text", "text": prompt}}, "model": emptyNil(model), "effort": emptyNil(c.request.ReasoningEffort)}
 	// thread/start emits thread/started before turn/start. The parser persists it,
 	// and the app-server accepts the returned thread id from the response. If this
 	// is a new thread, use the ID observed by the run service on that event.

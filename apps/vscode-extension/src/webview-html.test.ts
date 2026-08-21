@@ -45,6 +45,10 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('session-history-list');
     expect(html).toContain("type: 'session.select'");
     expect(html).toContain('changes-list');
+    expect(html).toContain("type: 'change.openDiff'");
+    expect(html).toContain("type: 'change.restoreFile'");
+    expect(html).toContain("type: 'change.restoreAll'");
+    expect(html).toContain("event.data?.type === 'changes.state'");
     expect(html).toContain("type: 'run.prompt'");
     expect(html).toContain('id="provider-select"');
     expect(html).toContain('providerSelect.disabled = !!activeRun');
@@ -60,11 +64,27 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain("type: 'approval.decide'");
   });
 
-  it('shows the token grid unless the provider bills in AI credits', () => {
+  it('shows provider-specific usage fields with one shared cost', () => {
     const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
-    expect(html).toContain("const isCreditUsage = typeof summary.aiCredits === 'number';");
-    expect(html).toContain('id="usage-cost-credits"');
-    expect(html).not.toContain('data-copilot-usage');
+    expect(html).toContain("const isCopilot = provider === 'copilot';");
+    expect(html).toContain('data-copilot-usage hidden>AI credits');
+    expect(html.match(/id="usage-cost"/g)).toHaveLength(1);
+    expect(html).not.toContain('usage-cost-credits');
+    expect(html).not.toContain('data-credit-usage');
+    expect(html).toContain('renderUsage(event.data.usage.summary, event.data.selectedProvider)');
+  });
+
+  it('shows the provider usage percentage rather than the remaining percentage', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain("window.name + ' ' + window.usedPercent + '%'");
+    expect(html).not.toContain("window.name + ' ' + window.remainingPercent + '%'");
+  });
+
+  it('keeps the generated webview script syntactically valid', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    const script = html.match(/<script nonce="n">([\s\S]*)<\/script>/)?.[1];
+    expect(script).toBeDefined();
+    expect(() => new Function(script!)).not.toThrow();
   });
 
   it('wires up an @-mention file picker for the prompt textarea', () => {

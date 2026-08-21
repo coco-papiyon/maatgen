@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
@@ -21,26 +22,27 @@ import (
 )
 
 type Config struct {
-	Version            string
-	SchemaVersion      int
-	DefaultWorkspace   string
-	AuthToken          string
-	AllowedOrigins     []string
-	TicketTTL          time.Duration
-	EventSubscriber    EventSubscriber
-	SessionCreator     SessionCreator
-	SessionCloser      SessionCloser
-	SessionReopener    SessionReopener
-	RunController      RunController
-	ChangeReader       ChangeReader
-	RestoreController  RestoreController
-	Providers          []protocol.Provider
-	ModelSetter        ModelSetter
-	UsageReader        UsageReader
-	UsageSummaryReader UsageSummaryReader
-	SourceStatsReader  SourceStatsReader
-	ApprovalController ApprovalController
-	WorkspaceReader    WorkspaceReader
+	Version             string
+	SchemaVersion       int
+	DefaultWorkspace    string
+	AuthToken           string
+	AllowedOrigins      []string
+	TicketTTL           time.Duration
+	EventSubscriber     EventSubscriber
+	SessionCreator      SessionCreator
+	SessionCloser       SessionCloser
+	SessionReopener     SessionReopener
+	RunController       RunController
+	ChangeReader        ChangeReader
+	RestoreController   RestoreController
+	Providers           []protocol.Provider
+	ModelSetter         ModelSetter
+	UsageReader         UsageReader
+	ProviderUsageReader ProviderUsageReader
+	UsageSummaryReader  UsageSummaryReader
+	SourceStatsReader   SourceStatsReader
+	ApprovalController  ApprovalController
+	WorkspaceReader     WorkspaceReader
 	// StaticFS serves the built Web UI. Requests outside /api and /ws fall
 	// back to index.html so client-side routes resolve on a fresh load.
 	// Static serving is disabled when nil.
@@ -100,6 +102,10 @@ type ChangeReader interface {
 
 type UsageReader interface {
 	GetSessionUsage(ctx context.Context, sessionID string) (protocol.SessionUsage, error)
+}
+
+type ProviderUsageReader interface {
+	GetProviderUsage(ctx context.Context, provider protocol.AgentName, directory string) (protocol.ProviderUsage, error)
 }
 
 type UsageSummaryReader interface {
@@ -387,6 +393,22 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			}
 			if usage.Runs == nil {
 				usage.Runs = []protocol.RunUsageEntry{}
+			}
+			writeJSON(w, http.StatusOK, usage)
+		})))
+	}
+	if sessions != nil && config.ProviderUsageReader != nil {
+		mux.Handle("GET /api/v1/sessions/{id}/provider-usage", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			session, err := sessions.GetSession(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			usage, err := config.ProviderUsageReader.GetProviderUsage(r.Context(), session.Agent, session.Workspace)
+			if err != nil {
+				slog.Warn("failed to fetch provider usage", "provider", session.Agent, "session", session.ID, "error", err)
+				writeAPIError(w, http.StatusServiceUnavailable, "provider_usage_unavailable", "provider usage is unavailable", nil)
+				return
 			}
 			writeJSON(w, http.StatusOK, usage)
 		})))

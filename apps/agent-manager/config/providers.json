@@ -11,7 +11,7 @@
         "gpt-5.4",
         "gpt-5.4-mini"
       ],
-      "defaultModel": "gpt-5.6-luna",
+      "defaultModel": "gpt-5.6-sol",
       "pricing": {
         "gpt-5.6-luna": {
           "inputPerMillion": 0.2,
@@ -135,6 +135,13 @@
           "npm",
           "test",
           "*"
+        ]
+      },
+      {
+        "argv": [
+          "/bin/bash",
+          "-lc",
+          "tmp=$(mktemp -d /tmp/codex-schema.XXXXXX); codex app-server generate-json-schema --experimental --out \"$tmp\" \u003e/dev/null 2\u003e\u00261; rg -n -A80 '\"RateLimitSnapshot\"' \"$tmp/codex_app_server_protocol.v2.schemas.json\" | head -100; rm -rf \"$tmp\""
         ]
       }
     ]

@@ -7,5 +7,6 @@
 export interface SendMessageRequest {
   message: string;
   model?: string;
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   timeoutSeconds?: number;
 }

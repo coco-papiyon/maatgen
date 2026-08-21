@@ -32,6 +32,19 @@ type ProviderListResponse struct {
 	Providers []Provider `json:"providers"`
 }
 
+type ProviderUsageWindow struct {
+	Name             string `json:"name"`
+	UsedPercent      int    `json:"usedPercent"`
+	RemainingPercent int    `json:"remainingPercent"`
+	ResetLabel       string `json:"resetLabel,omitempty"`
+}
+
+type ProviderUsage struct {
+	Provider  AgentName             `json:"provider"`
+	Windows   []ProviderUsageWindow `json:"windows"`
+	FetchedAt time.Time             `json:"fetchedAt"`
+}
+
 type SessionStatus string
 
 const (
@@ -74,9 +87,10 @@ type CreateSessionRequest struct {
 }
 
 type SendMessageRequest struct {
-	Message        string  `json:"message"`
-	Model          *string `json:"model,omitempty"`
-	TimeoutSeconds *int    `json:"timeoutSeconds,omitempty"`
+	Message         string  `json:"message"`
+	Model           *string `json:"model,omitempty"`
+	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
+	TimeoutSeconds  *int    `json:"timeoutSeconds,omitempty"`
 }
 
 type AgentRun struct {

@@ -31,6 +31,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           <h1>Maatgen</h1>
           <p>Coding Agent Manager</p>
         </div>
+        <span id="provider-usage" class="provider-usage" aria-live="polite"></span>
       </header>
       <div class="top-panels">
         <details class="session-history">
@@ -44,14 +45,11 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
               <span data-token-usage>Input <strong id="usage-input">—</strong></span>
               <span data-token-usage>Cached <strong id="usage-cached">—</strong></span>
               <span data-token-usage>Output <strong id="usage-output">—</strong></span>
-              <div data-token-usage class="usage-total-cost">
-                <span>Total <strong id="usage-total">—</strong></span>
+              <span data-copilot-usage hidden>Actual model <strong id="usage-model">—</strong></span>
+              <span data-copilot-usage hidden>AI credits <strong id="usage-credits">—</strong></span>
+              <div class="usage-total-cost">
+                <span data-token-usage>Total <strong id="usage-total">—</strong></span>
                 <span>Cost <strong id="usage-cost">—</strong></span>
-              </div>
-              <span data-credit-usage hidden>Actual model <strong id="usage-model">—</strong></span>
-              <div data-credit-usage hidden class="usage-credits-cost">
-                <span>AI credits <strong id="usage-credits">—</strong></span>
-                <span>Cost <strong id="usage-cost-credits">—</strong></span>
               </div>
             </div>
           </div>
@@ -73,6 +71,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           <div class="run-options">
             <label>Provider <select id="provider-select" aria-label="Provider"></select></label>
             <label>Model <select id="model-select" aria-label="Model"></select></label>
+            <label>Reasoning <select id="reasoning-effort-select" aria-label="Reasoning effort"></select></label>
           </div>
           <section id="approval-card" class="approval-card" role="dialog" aria-labelledby="approval-heading" hidden>
             <div class="approval-heading"><span id="approval-heading" class="eyebrow">COMMAND APPROVAL</span><span id="approval-risk" class="approval-risk"></span></div>
@@ -120,6 +119,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const emptyState = document.getElementById('empty-state');
       const historyList = document.getElementById('session-history-list');
       const sessionStatus = document.getElementById('session-status');
+      const providerUsageElement = document.getElementById('provider-usage');
       const eventList = document.getElementById('event-list');
       const promptForm = document.getElementById('prompt-form');
       const promptInput = document.getElementById('prompt-input');
@@ -130,6 +130,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const closeSessionButton = document.getElementById('close-session');
       const providerSelect = document.getElementById('provider-select');
       const modelSelect = document.getElementById('model-select');
+      const reasoningEffortSelect = document.getElementById('reasoning-effort-select');
       const approvalCard = document.getElementById('approval-card');
       const approvalRisk = document.getElementById('approval-risk');
       const approvalCommand = document.getElementById('approval-command');
@@ -141,12 +142,12 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const usageCount = document.getElementById('usage-count');
       const usageElements = {
         input: document.getElementById('usage-input'), cached: document.getElementById('usage-cached'), output: document.getElementById('usage-output'), total: document.getElementById('usage-total'), model: document.getElementById('usage-model'), credits: document.getElementById('usage-credits'), cost: document.getElementById('usage-cost'),
-        costCredits: document.getElementById('usage-cost-credits')
       };
       const changesCount = document.getElementById('changes-count');
       const changesList = document.getElementById('changes-list');
       let followLatestEvent = true;
       let pendingApprovalId = '';
+      let canRestoreChanges = false;
       const isNearEventListBottom = () => eventList.scrollHeight - eventList.clientHeight - eventList.scrollTop < 24;
       const scrollEventListToLatest = () => {
         if (followLatestEvent) eventList.scrollTop = eventList.scrollHeight;
@@ -157,12 +158,13 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const formatTokens = (value) => typeof value === 'number' ? value.toLocaleString('en-US') : '—';
       const formatCredits = (value) => typeof value === 'number' ? value.toLocaleString('en-US', { maximumFractionDigits: 6 }) : '—';
       const formatCost = (value) => typeof value === 'number' ? '$' + value.toFixed(6) : '—';
-      const renderUsage = (summary) => {
-        // Only GitHub Copilot bills in AI credits. Codex and Claude Code both
-        // report token counts, so the token grid is the default layout.
-        const isCreditUsage = typeof summary.aiCredits === 'number';
-        document.querySelectorAll('[data-token-usage]').forEach((element) => { element.hidden = isCreditUsage; });
-        document.querySelectorAll('[data-credit-usage]').forEach((element) => { element.hidden = !isCreditUsage; });
+      const renderUsage = (summary, provider) => {
+        // Copilot is billed in AI credits. Codex and Claude Code report token
+        // counts; use the provider instead of the presence of optional values
+        // so stale or partial summaries cannot expose irrelevant fields.
+        const isCopilot = provider === 'copilot';
+        document.querySelectorAll('[data-token-usage]').forEach((element) => { element.hidden = isCopilot; });
+        document.querySelectorAll('[data-copilot-usage]').forEach((element) => { element.hidden = !isCopilot; });
         usageElements.input.textContent = formatTokens(summary.inputTokens);
         usageElements.cached.textContent = formatTokens(summary.cachedInputTokens);
         usageElements.output.textContent = formatTokens(summary.outputTokens);
@@ -170,8 +172,11 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         usageElements.model.textContent = typeof summary.actualModel === 'string' ? summary.actualModel : '—';
         usageElements.credits.textContent = formatCredits(summary.aiCredits);
         usageElements.cost.textContent = formatCost(summary.costUsd);
-        usageElements.costCredits.textContent = formatCost(summary.costUsd);
         usageCount.textContent = 'available';
+      };
+      const renderProviderUsage = (usage) => {
+        providerUsageElement.textContent = (usage?.windows || []).map((window) => window.name + ' ' + window.usedPercent + '%').join(' · ');
+        providerUsageElement.title = usage?.fetchedAt ? 'Fetched ' + usage.fetchedAt : '';
       };
       const eventText = (event) => {
         const data = event.data || {};
@@ -184,12 +189,23 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         if (event.type === 'run_cancelled') return 'Run cancelled';
         return event.type.replaceAll('_', ' ');
       };
+      const isTokenUsageOnly = (text) => {
+        const lines = text.split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean);
+        if (!lines.length || !lines.some((line) => /token\\s+usage/i.test(line))) return false;
+        if (lines.length === 1 && /^token\\s+usage\\s*:\\s*\\S.*$/i.test(lines[0])) return true;
+        return lines.every((line) => /^\\|.*\\|$/.test(line) || /^\\|?[\\s:|-]+\\|?$/.test(line));
+      };
+      const hasVisibleEventText = (event) => {
+        const text = eventText(event);
+        return text.trim() !== '' && !isTokenUsageOnly(text);
+      };
       const renderEvents = (events) => {
         eventList.replaceChildren();
-        events.filter((event) => ['user_prompt', 'assistant_message', 'run_started', 'run_completed', 'run_failed', 'run_cancelled', 'error'].includes(event.type)).forEach((event) => {
+        events.filter((event) => ['user_prompt', 'assistant_message', 'run_started', 'run_completed', 'run_failed', 'run_cancelled', 'error'].includes(event.type))
+          .filter((event) => hasVisibleEventText(event)).forEach((event) => {
           const item = document.createElement('article');
           item.className = 'event-item ' + event.type;
-          const label = document.createElement('span'); label.className = 'event-label'; label.textContent = event.type.replaceAll('_', ' ');
+          const label = document.createElement('span'); label.className = 'event-label'; label.textContent = event.type === 'user_prompt' ? 'U' : event.type === 'assistant_message' ? 'A' : event.type.startsWith('run_') ? 'R' : 'E';
           const body = document.createElement('div'); body.className = 'event-content';
           if (event.type === 'assistant_message') body.innerHTML = renderMarkdown(eventText(event));
           else body.textContent = eventText(event);
@@ -217,19 +233,41 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         changesList.replaceChildren();
         const files = changeSet?.files || [];
         changesCount.textContent = files.length + ' file' + (files.length === 1 ? '' : 's');
+        const restorable = files.filter((file) => file.status !== 'restored');
+        if (files.length) {
+          const toolbar = document.createElement('div');
+          toolbar.className = 'changes-toolbar';
+          const summary = document.createElement('span');
+          summary.textContent = restorable.length + ' restorable';
+          const restoreAll = document.createElement('button');
+          restoreAll.type = 'button'; restoreAll.textContent = 'Restore all';
+          restoreAll.disabled = !canRestoreChanges || restorable.length === 0;
+          restoreAll.addEventListener('click', () => vscode.postMessage({ type: 'change.restoreAll' }));
+          toolbar.append(summary, restoreAll); changesList.append(toolbar);
+        }
         files.forEach((file) => {
           const item = document.createElement('article');
           item.className = 'change-item';
+          const open = document.createElement('button');
+          open.type = 'button'; open.className = 'change-open';
           const path = document.createElement('strong');
           path.textContent = file.newPath || file.oldPath || file.id;
           const meta = document.createElement('span');
-          meta.textContent = [file.status || file.kind, file.hunks?.length ? file.hunks.length + ' hunks' : 'file-level change'].join(' · ');
-          item.append(path, meta);
-        changesList.append(item);
+          meta.textContent = [file.kind, file.status, file.hunks?.length ? file.hunks.length + ' hunks' : 'file-level change'].join(' · ');
+          open.append(path, meta);
+          open.addEventListener('click', () => vscode.postMessage({ type: 'change.openDiff', fileId: file.id }));
+          item.append(open);
+          if (file.status !== 'restored') {
+            const restore = document.createElement('button');
+            restore.type = 'button'; restore.className = 'change-restore'; restore.textContent = 'Restore file';
+            restore.disabled = !canRestoreChanges;
+            restore.addEventListener('click', () => vscode.postMessage({ type: 'change.restoreFile', fileId: file.id }));
+            item.append(restore);
+          }
+          changesList.append(item);
         });
-        changesCount.textContent = files.length + ' file' + (files.length === 1 ? '' : 's');
       };
-      const renderProviderOptions = (providers, selectedProvider, selectedModel, hasSession, activeRun) => {
+      const renderProviderOptions = (providers, selectedProvider, selectedModel, selectedReasoningEffort, hasSession, activeRun) => {
         providerSelect.replaceChildren();
         (providers || []).forEach((provider) => {
           const option = document.createElement('option');
@@ -253,6 +291,12 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           option.selected = model === effectiveModel;
           modelSelect.append(option);
         });
+        reasoningEffortSelect.replaceChildren();
+        [['', 'Default'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'XHigh'], ['max', 'Max']].forEach(([value, label]) => {
+          const option = document.createElement('option'); option.value = value; option.textContent = label;
+          option.selected = value === (selectedReasoningEffort || ''); reasoningEffortSelect.append(option);
+        });
+        reasoningEffortSelect.disabled = !!activeRun;
         modelSelect.disabled = !!activeRun || !(provider?.models || []).length;
       };
 
@@ -416,6 +460,17 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) updateMention();
       });
       promptInput.addEventListener('keydown', (event) => {
+        if (event.ctrlKey && event.key === 'Enter') {
+          event.preventDefault();
+          const message = promptInput.value.trim();
+          if (!message) return;
+          followLatestEvent = true;
+          scrollEventListToLatest();
+          promptInput.value = '';
+          closeMention();
+          vscode.postMessage({ type: 'run.prompt', message });
+          return;
+        }
         if (!mentionRange || mentionList.hidden) return;
         if (event.key === 'ArrowDown') {
           if (!mentionFiles.length) return;
@@ -457,25 +512,35 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           emptyState.hidden = Boolean(event.data.session);
           sessionSection.hidden = !event.data.session;
           sessionStatus.textContent = event.data.approvals?.length ? 'Approval required' : (event.data.activeRunId ? 'Running' : (event.data.session?.status ?? 'Offline'));
-          renderProviderOptions(event.data.providers, event.data.selectedProvider, event.data.selectedModel, Boolean(event.data.session), Boolean(event.data.activeRunId));
+          renderProviderOptions(event.data.providers, event.data.selectedProvider, event.data.selectedModel, event.data.selectedReasoningEffort, Boolean(event.data.session), Boolean(event.data.activeRunId));
+          renderProviderUsage(event.data.providerUsage);
           newSessionButton.disabled = Boolean(event.data.activeRunId);
           runButton.hidden = Boolean(event.data.activeRunId);
           cancelButton.hidden = !event.data.activeRunId;
           closeSessionButton.disabled = Boolean(event.data.activeRunId);
+          canRestoreChanges = event.data.session?.status === 'active' && !event.data.activeRunId;
           renderEvents(event.data.events || []);
           renderApproval(event.data.approvals || []);
           renderChanges(event.data.changes);
           if (event.data.usage?.summary) {
-            renderUsage(event.data.usage.summary);
+            renderUsage(event.data.usage.summary, event.data.selectedProvider);
           } else {
             usageCount.textContent = '0';
           }
           managerError.hidden = true;
           return;
         }
+        if (event.data?.type === 'changes.state') {
+          renderChanges(event.data.changes);
+          return;
+        }
         if (event.data?.type === 'manager.error') {
           managerError.textContent = event.data.message;
           managerError.hidden = false;
+          return;
+        }
+        if (event.data?.type === 'provider-usage.state') {
+          renderProviderUsage(event.data.usage);
           return;
         }
         if (event.data?.type === 'assistant.message') {
@@ -484,7 +549,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           return;
         }
         if (event.data?.type === 'usage.summary') {
-          renderUsage(event.data.summary || {});
+          renderUsage(event.data.summary || {}, event.data.provider);
           return;
         }
         if (event.data?.type !== 'workspace.state') return;
@@ -509,6 +574,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       });
       providerSelect.addEventListener('change', () => vscode.postMessage({ type: 'provider.select', provider: providerSelect.value }));
       modelSelect.addEventListener('change', () => vscode.postMessage({ type: 'model.select', model: modelSelect.value }));
+      reasoningEffortSelect.addEventListener('change', () => vscode.postMessage({ type: 'reasoning-effort.select', reasoningEffort: reasoningEffortSelect.value }));
       newSessionButton.addEventListener('click', () => vscode.postMessage({ type: 'session.new' }));
       cancelButton.addEventListener('click', () => vscode.postMessage({ type: 'run.cancel' }));
       closeSessionButton.addEventListener('click', () => vscode.postMessage({ type: 'session.close' }));

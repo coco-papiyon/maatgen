@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
+	copilotsdk "github.com/github/copilot-sdk/go"
 )
 
 const DefaultTimeout = 30 * time.Minute
@@ -120,6 +123,9 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 	if request.Model != "" {
 		args = append(args, "--model", request.Model)
 	}
+	if request.ReasoningEffort != "" {
+		args = append(args, "--effort="+request.ReasoningEffort)
+	}
 	timeout := request.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -142,4 +148,57 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 	}, err
 }
 
+func (a *Adapter) GetUsage(ctx context.Context, directory string) (protocol.ProviderUsage, error) {
+	directory, err := filepath.Abs(directory)
+	if err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("resolve GitHub Copilot usage directory: %w", err)
+	}
+	if file, err := os.Stat(directory); err != nil || !file.IsDir() {
+		return protocol.ProviderUsage{}, errors.New("GitHub Copilot usage directory must be an existing directory")
+	}
+	a.mu.RLock()
+	info := a.info
+	a.mu.RUnlock()
+	if info.Path == "" {
+		if info, err = a.Check(ctx); err != nil {
+			return protocol.ProviderUsage{}, err
+		}
+	}
+	client := copilotsdk.NewClient(&copilotsdk.ClientOptions{
+		Connection:       copilotsdk.StdioConnection{Path: info.Path, Args: append([]string{}, a.prefixArgs...)},
+		WorkingDirectory: directory,
+	})
+	if err := client.Start(ctx); err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("start GitHub Copilot SDK: %w", err)
+	}
+	defer client.Stop()
+	quota, err := client.RPC.Account.GetQuota(ctx, nil)
+	if err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("read GitHub Copilot quota: %w", err)
+	}
+	windows := make([]protocol.ProviderUsageWindow, 0, len(quota.QuotaSnapshots))
+	for name, snapshot := range quota.QuotaSnapshots {
+		remaining := int(math.Round(snapshot.RemainingPercentage))
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > 100 {
+			remaining = 100
+		}
+		resetLabel := ""
+		if snapshot.ResetDate != nil {
+			resetLabel = snapshot.ResetDate.Local().Format(time.RFC3339)
+		}
+		windows = append(windows, protocol.ProviderUsageWindow{
+			Name: name, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetLabel: resetLabel,
+		})
+	}
+	if len(windows) == 0 {
+		return protocol.ProviderUsage{}, errors.New("GitHub Copilot quota response contained no usage windows")
+	}
+	slices.SortFunc(windows, func(left, right protocol.ProviderUsageWindow) int { return strings.Compare(left.Name, right.Name) })
+	return protocol.ProviderUsage{Provider: protocol.AgentCopilot, Windows: windows, FetchedAt: time.Now().UTC()}, nil
+}
+
 var _ agent.Adapter = (*Adapter)(nil)
+var _ agent.UsageReader = (*Adapter)(nil)

@@ -84,6 +84,20 @@ func TestRunAppServerApproval(t *testing.T) {
 	}
 }
 
+func TestGetUsageCodex(t *testing.T) {
+	t.Setenv("MAATGEN_CODEX_HELPER", "1")
+	adapter := New(os.Args[0])
+	adapter.prefixArgs = []string{"-test.run=TestCodexHelper", "--"}
+
+	usage, err := adapter.GetUsage(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("get Codex usage: %v", err)
+	}
+	if len(usage.Windows) != 2 || usage.Windows[0].Name != "primary" || usage.Windows[0].UsedPercent != 25 || usage.Windows[0].RemainingPercent != 75 || usage.Windows[1].Name != "secondary" || usage.Windows[1].UsedPercent != 60 || usage.Windows[1].RemainingPercent != 40 {
+		t.Fatalf("usage = %#v", usage)
+	}
+}
+
 func TestCodexHelper(t *testing.T) {
 	if os.Getenv("MAATGEN_CODEX_HELPER") != "1" {
 		return
@@ -126,6 +140,13 @@ func runFakeAppServer() {
 			write(map[string]any{"id": message.ID, "result": map[string]any{}})
 		case "initialized":
 			// notification, no response
+		case "account/rateLimits/read":
+			write(map[string]any{"id": message.ID, "result": map[string]any{
+				"rateLimits": map[string]any{
+					"primary":   map[string]any{"usedPercent": 25, "resetsAt": 4102444800},
+					"secondary": map[string]any{"usedPercent": 60, "resetsAt": 4102444800},
+				},
+			}})
 		case "thread/start":
 			write(map[string]any{"id": message.ID, "result": map[string]any{
 				"model": "test-model", "thread": map[string]any{"id": "thread-abc"},

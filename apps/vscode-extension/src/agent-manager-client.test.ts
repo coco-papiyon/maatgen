@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AgentManagerClient } from './agent-manager-client.js';
+import { AgentManagerClient, AgentManagerError } from './agent-manager-client.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -53,5 +53,33 @@ describe('AgentManagerClient session integration', () => {
     expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:3100/api/v1/sessions/session-1/approvals/approval-1/decision', expect.objectContaining({
       method: 'POST', body: JSON.stringify({ decision: 'allow_session', ruleArgv: ['go', 'test', '*'] }),
     }));
+  });
+
+  it('restores hunk, file, and Run changes through checkpoint endpoints', async () => {
+    const changeSet = { sessionId: 'session-1', checkpointId: 'checkpoint-1', files: [] };
+    const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify(changeSet), { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const client = new AgentManagerClient('http://127.0.0.1:3100', 'shared-token');
+
+    await client.restoreHunk('session-1', 'checkpoint-1', 'hunk-1');
+    await client.restoreFile('session-1', 'checkpoint-1', 'file-1');
+    await client.restoreAllChanges('session-1', 'checkpoint-1');
+
+    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:3100/api/v1/sessions/session-1/checkpoints/checkpoint-1/hunks/hunk-1/restore', expect.objectContaining({ method: 'POST' }));
+    expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:3100/api/v1/sessions/session-1/checkpoints/checkpoint-1/files/file-1/restore', expect.objectContaining({ method: 'POST' }));
+    expect(fetch).toHaveBeenNthCalledWith(3, 'http://127.0.0.1:3100/api/v1/sessions/session-1/checkpoints/checkpoint-1/restore', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('retains the Manager error code for restore conflicts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 'checkpoint_conflict', message: 'current content changed' },
+    }), { status: 409 })));
+
+    const error = await new AgentManagerClient('http://127.0.0.1:3100', 'shared-token')
+      .restoreFile('session-1', 'checkpoint-1', 'file-1')
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(AgentManagerError);
+    expect(error).toMatchObject({ status: 409, code: 'checkpoint_conflict', message: 'current content changed' });
   });
 });

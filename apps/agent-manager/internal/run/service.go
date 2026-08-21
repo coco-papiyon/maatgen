@@ -283,7 +283,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	}
 	result, runErr := adapter.Run(ctx, agent.RunRequest{
 		Directory: session.Workspace, Prompt: run.Prompt, ThreadID: stringValue(session.AgentThreadID),
-		Model: model, Timeout: timeout, Approval: approvalHandler,
+		Model: model, ReasoningEffort: stringValue(request.ReasoningEffort), Timeout: timeout, Approval: approvalHandler,
 	}, func(output agent.Output) error {
 		if output.Stream == agent.OutputStderr {
 			return s.persistRaw(ctx, session.ID, run.ID, session.Agent, map[string]any{"stream": "stderr", "line": output.Line})

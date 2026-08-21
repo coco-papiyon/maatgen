@@ -47,6 +47,21 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
   });
 
+  it('shows the provider usage percentage rather than the remaining percentage', async () => {
+    class ProviderUsageApi extends MockAgentApi {
+      override async getProviderUsage() {
+        return {
+          provider: 'codex' as const,
+          windows: [{ name: 'primary', usedPercent: 3, remainingPercent: 97 }],
+          fetchedAt: '2026-08-21T17:32:54Z',
+        };
+      }
+    }
+    wrapper = mount(App, { props: { agentApi: new ProviderUsageApi(), eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+    expect(wrapper.find('.provider-usage-summary').text()).toBe('primary 3%');
+  });
+
   it('hides a closed session from the list but keeps it available via the status filter', async () => {
     const mounted = await mountApp();
     const target = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('success'));

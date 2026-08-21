@@ -109,4 +109,92 @@ func (a *Adapter) Run(ctx context.Context, request agent.RunRequest, emit agent.
 	return a.runAppServer(ctx, info.Path, a.prefixArgs, directory, request, emit)
 }
 
+func (a *Adapter) GetUsage(ctx context.Context, directory string) (protocol.ProviderUsage, error) {
+	directory, err := filepath.Abs(directory)
+	if err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("resolve Codex usage directory: %w", err)
+	}
+	if file, err := os.Stat(directory); err != nil || !file.IsDir() {
+		return protocol.ProviderUsage{}, errors.New("Codex usage directory must be an existing directory")
+	}
+	a.mu.RLock()
+	info := a.info
+	a.mu.RUnlock()
+	if info.Path == "" {
+		if info, err = a.Check(ctx); err != nil {
+			return protocol.ProviderUsage{}, err
+		}
+	}
+	connection, err := startAppServer(ctx, info.Path, a.prefixArgs, directory, agent.RunRequest{Directory: directory}, nil)
+	if err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("start Codex app-server for usage: %w", err)
+	}
+	defer connection.close()
+	var response codexRateLimitsResponse
+	if err := connection.call(ctx, "account/rateLimits/read", map[string]any{}, &response); err != nil {
+		return protocol.ProviderUsage{}, fmt.Errorf("read Codex rate limits: %w", err)
+	}
+	windows := response.windows()
+	if len(windows) == 0 {
+		return protocol.ProviderUsage{}, errors.New("Codex rate limits response contained no usage windows")
+	}
+	return protocol.ProviderUsage{Provider: protocol.AgentCodex, Windows: windows, FetchedAt: time.Now().UTC()}, nil
+}
+
+type codexRateLimitsResponse struct {
+	RateLimits          *codexRateLimitSnapshot            `json:"rateLimits"`
+	RateLimitsByLimitID map[string]*codexRateLimitSnapshot `json:"rateLimitsByLimitId"`
+}
+
+type codexRateLimitSnapshot struct {
+	Primary   *codexRateLimitWindow `json:"primary"`
+	Secondary *codexRateLimitWindow `json:"secondary"`
+}
+
+type codexRateLimitWindow struct {
+	UsedPercent      int   `json:"usedPercent"`
+	RemainingPercent *int  `json:"remainingPercent"`
+	ResetsAt         int64 `json:"resetsAt"`
+}
+
+func (r codexRateLimitsResponse) windows() []protocol.ProviderUsageWindow {
+	snapshot := r.RateLimits
+	if snapshot == nil {
+		for _, candidate := range r.RateLimitsByLimitID {
+			snapshot = candidate
+			break
+		}
+	}
+	if snapshot == nil {
+		return nil
+	}
+	windows := make([]protocol.ProviderUsageWindow, 0, 2)
+	for _, item := range []struct {
+		name   string
+		window *codexRateLimitWindow
+	}{
+		{name: "primary", window: snapshot.Primary},
+		{name: "secondary", window: snapshot.Secondary},
+	} {
+		if item.window == nil {
+			continue
+		}
+		resetLabel := ""
+		if item.window.ResetsAt > 0 {
+			resetLabel = time.Unix(item.window.ResetsAt, 0).Local().Format(time.RFC3339)
+		}
+		usedPercent := min(100, max(0, item.window.UsedPercent))
+		remainingPercent := 100 - usedPercent
+		if item.window.RemainingPercent != nil {
+			remainingPercent = min(100, max(0, *item.window.RemainingPercent))
+		}
+		windows = append(windows, protocol.ProviderUsageWindow{
+			Name: item.name, UsedPercent: usedPercent,
+			RemainingPercent: remainingPercent, ResetLabel: resetLabel,
+		})
+	}
+	return windows
+}
+
 var _ agent.Adapter = (*Adapter)(nil)
+var _ agent.UsageReader = (*Adapter)(nil)

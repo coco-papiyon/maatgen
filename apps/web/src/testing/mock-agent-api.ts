@@ -4,6 +4,7 @@ import type {
   ChangeSet,
   CommandApproval,
   CreateSessionRequest,
+  ProviderUsage,
   RestoreStatus,
   SendMessageRequest,
   SessionEvent,
@@ -179,6 +180,10 @@ export class MockAgentApi implements AgentApi {
       }
     }
     return clone({ sessionId: id, summary, runs });
+  }
+
+  async getProviderUsage(_id: string): Promise<ProviderUsage | undefined> {
+    return undefined;
   }
 
   async getUsageSummary(granularity: UsageGranularity, provider?: string, model?: string): Promise<UsageSummary> {

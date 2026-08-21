@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, SessionEvent, TokenUsage, ApprovalDecision, UsageSummary } from '@maatgen/protocol';
-import { AgentApiError, httpAgentApi, type AgentApi, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from './api';
+import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, ProviderUsage, SessionEvent, TokenUsage, ApprovalDecision, UsageSummary } from '@maatgen/protocol';
+import { AgentApiError, httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from './api';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import { renderMarkdown } from './markdown';
 import UsageBarChart, { type UsageSeriesDef, type UsageStackedPeriod } from './UsageBarChart.vue';
@@ -35,6 +35,11 @@ const providerStorageKey = 'maatgen.provider';
 const storedProvider = localStorage.getItem(providerStorageKey) as AgentSession['agent'] | null;
 const newSessionProvider = ref<AgentSession['agent']>(storedProvider || 'codex');
 const selectedModel = ref('');
+const reasoningEffort = ref<ReasoningEffort | ''>('');
+const reasoningEffortOptions: Array<{ value: ReasoningEffort | ''; label: string }> = [
+  { value: '', label: 'Default' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' }, { value: 'xhigh', label: 'XHigh' }, { value: 'max', label: 'Max' },
+];
 const nextSessionCursor = ref('');
 const loadingMoreSessions = ref(false);
 const sessionStatusFilterKey = 'maatgen.sessionStatusFilter';
@@ -46,6 +51,7 @@ const selected = ref<AgentSession>();
 const events = ref<SessionEvent[]>([]);
 const changes = ref<ChangeSet>(emptyChangeSet(''));
 const usage = ref<SessionUsage>(emptySessionUsage(''));
+const providerUsage = ref<ProviderUsage>();
 const sourceStats = ref<SourceStats>(emptySourceStats(''));
 const approvals = ref<CommandApproval[]>([]);
 const approvalRule = ref('');
@@ -87,9 +93,9 @@ const timelineElement = ref<HTMLElement>();
 const textareaElement = ref<HTMLTextAreaElement>();
 
 const lastSequence = computed(() => events.value.at(-1)?.sequence ?? 0);
-const visibleEvents = computed(() => showSystemMessages.value
-  ? events.value
-  : events.value.filter((event) => !['command_started', 'command_completed', 'file_change_reported'].includes(event.type)));
+const visibleEvents = computed(() => events.value
+  .filter((event) => showSystemMessages.value || !['command_started', 'command_completed', 'file_change_reported'].includes(event.type))
+  .filter((event) => hasVisibleEventText(event)));
 const isActive = computed(() => selected.value?.status === 'active');
 const isClosed = computed(() => selected.value?.status === 'closed');
 const selectedChange = computed(() => changes.value.files.find((file) => file.id === selectedChangeId.value));
@@ -247,6 +253,18 @@ function eventText(event: SessionEvent): string {
   return event.type.replaceAll('_', ' ');
 }
 
+function isTokenUsageOnly(text: string): boolean {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length || !lines.some((line) => /token\s+usage/i.test(line))) return false;
+  if (lines.length === 1 && /^token\s+usage\s*:\s*\S.*$/i.test(lines[0]!)) return true;
+  return lines.every((line) => /^\|.*\|$/.test(line) || /^\|?[\s:|-]+\|?$/.test(line));
+}
+
+function hasVisibleEventText(event: SessionEvent): boolean {
+  const text = eventText(event);
+  return text.trim() !== '' && !isTokenUsageOnly(text);
+}
+
 function eventKind(event: SessionEvent): string {
   if (event.type === 'user_prompt') return 'user';
   if (event.type === 'assistant_message') return 'assistant';
@@ -336,6 +354,10 @@ function usageValue(usageData: TokenUsage | undefined, key: TokenUsageKey): stri
   return formatTokens(usageData?.[key]);
 }
 
+function providerUsageText(value: ProviderUsage | undefined): string {
+  return value?.windows.map((window) => `${window.name} ${window.usedPercent}%`).join(' · ') ?? '';
+}
+
 function formatApprovalRule(argv?: string[]): string {
   return (argv ?? []).map((value) => /\s|["']/.test(value) ? JSON.stringify(value) : value).join(' ');
 }
@@ -409,9 +431,11 @@ async function selectSession(session: AgentSession) {
   selectedModel.value = provider?.defaultModel && provider.models.includes(provider.defaultModel)
     ? provider.defaultModel
     : '';
+  reasoningEffort.value = '';
   events.value = [];
   changes.value = emptyChangeSet(session.id);
   usage.value = emptySessionUsage(session.id);
+  providerUsage.value = undefined;
   sourceStats.value = emptySourceStats(session.id);
   approvals.value = [];
   approvalRule.value = '';
@@ -461,6 +485,7 @@ async function refreshSelected(full = false) {
   if (pendingApprovals[0] && !approvalRule.value) approvalRule.value = formatApprovalRule(pendingApprovals[0].segments[0]?.argv);
   updateDiagnosticFromEvents(newEvents);
   scrollTimelineToBottom();
+  if (full) void refreshProviderUsage(id);
 }
 
 async function refreshSelectedState(sessionId: string) {
@@ -481,6 +506,16 @@ async function refreshSelectedState(sessionId: string) {
     eventStream = undefined;
   }
   await refreshSessions();
+  void refreshProviderUsage(sessionId);
+}
+
+async function refreshProviderUsage(sessionId: string) {
+  try {
+    const currentProviderUsage = await api.getProviderUsage(sessionId);
+    if (selected.value?.id === sessionId) providerUsage.value = currentProviderUsage;
+  } catch {
+    // Provider usage is optional and must not block the session UI.
+  }
 }
 
 function startEventStream(sessionId: string) {
@@ -543,6 +578,7 @@ async function sendPrompt() {
     activeRun.value = await api.sendMessage(selected.value!.id, {
       message,
       ...(selectedModel.value ? { model: selectedModel.value } : {}),
+      ...(reasoningEffort.value ? { reasoningEffort: reasoningEffort.value } : {}),
     });
     await refreshSelected();
     scrollTimelineToBottom();
@@ -842,6 +878,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
       <div class="brand"><img src="/maat.png" class="brand-mark" alt="Maat"><span>maatgen</span></div>
       <div class="topbar-status">
         <button type="button" class="quiet-button usage-summary-button" @click="openUsageSummary">Usage Summary</button>
+        <span class="provider-usage-summary" :title="providerUsage?.fetchedAt">{{ providerUsageText(providerUsage) }}</span>
         <label class="system-message-setting" title="コマンド実行やファイル編集のシステムメッセージを表示">
           <input v-model="showSystemMessages" type="checkbox" @change="toggleSystemMessages" />
           <span>System messages</span>
@@ -1004,6 +1041,9 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
             <select v-model="selectedModel" :disabled="busy || !!activeRun" aria-label="Model" @change="persistSelectedModel">
               <option value="">Default model</option>
               <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
+            </select>
+            <select v-model="reasoningEffort" :disabled="busy || !!activeRun" aria-label="Reasoning effort">
+              <option v-for="option in reasoningEffortOptions" :key="option.value || 'default-effort'" :value="option.value">Effort: {{ option.label }}</option>
             </select>
             <span v-if="selectedModelPricing" class="model-pricing">${{ selectedModelPricing.inputPerMillion % 1 === 0 ? selectedModelPricing.inputPerMillion.toFixed(0) : selectedModelPricing.inputPerMillion.toFixed(2) }}/${{ selectedModelPricing.outputPerMillion % 1 === 0 ? selectedModelPricing.outputPerMillion.toFixed(0) : selectedModelPricing.outputPerMillion.toFixed(2) }}/MTok</span>
           </div>

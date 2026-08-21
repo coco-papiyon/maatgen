@@ -27,6 +27,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/eventbroker"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/pricing"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/providerusage"
 	restoreservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/restore"
 	runservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/run"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/runtimeinfo"
@@ -225,6 +226,7 @@ func run() error {
 	})
 	defer approvals.Close()
 	runs := runservice.NewMulti(store, adapters, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle))
+	providerUsage := providerusage.New(adapters)
 	restores, err := restoreservice.New(store, checkpointManager)
 	if err != nil {
 		return err
@@ -273,12 +275,13 @@ func run() error {
 				defer modelConfigMu.Unlock()
 				return toolconfig.SaveDefaultModel(resolvedConfigPath, &toolConfig, provider, model)
 			},
-			UsageReader:        store,
-			UsageSummaryReader: store,
-			SourceStatsReader:  store,
-			ApprovalController: approvals,
-			WorkspaceReader:    sessions,
-			StaticFS:           staticFS,
+			UsageReader:         store,
+			ProviderUsageReader: providerUsage,
+			UsageSummaryReader:  store,
+			SourceStatsReader:   store,
+			ApprovalController:  approvals,
+			WorkspaceReader:     sessions,
+			StaticFS:            staticFS,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

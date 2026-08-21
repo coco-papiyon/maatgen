@@ -7,6 +7,7 @@ import type {
   SessionEvent,
   SessionListResponse,
   ProviderListResponse,
+  ProviderUsage,
   WsTicketResponse,
   CommandApproval,
   ApprovalDecisionRequest,
@@ -16,6 +17,7 @@ import type {
 } from '@maatgen/protocol';
 
 export type UsageGranularity = 'day' | 'week' | 'month';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type SessionStatusFilter = 'active' | 'closed' | 'all';
 
@@ -54,6 +56,7 @@ export interface AgentApi {
   issueWebSocketTicket(): Promise<WsTicketResponse>;
   getChanges(id: string): Promise<ChangeSet>;
   getUsage(id: string): Promise<SessionUsage>;
+  getProviderUsage(id: string): Promise<ProviderUsage | undefined>;
   getUsageSummary(granularity: UsageGranularity, provider?: string, model?: string): Promise<UsageSummary>;
   getUsageProviders(): Promise<string[]>;
   getUsageModels(provider?: string): Promise<string[]>;
@@ -157,6 +160,9 @@ export const httpAgentApi: AgentApi = {
   },
   getUsage(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/usage`);
+  },
+  getProviderUsage(id) {
+    return request(`/api/v1/sessions/${encodeURIComponent(id)}/provider-usage`);
   },
   getUsageSummary(granularity, provider, model) {
     const query = new URLSearchParams({ granularity });

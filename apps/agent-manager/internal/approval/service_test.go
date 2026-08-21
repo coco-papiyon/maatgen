@@ -65,11 +65,8 @@ func TestServiceWaitsForHumanAndAddsSessionRule(t *testing.T) {
 	}()
 
 	approval := waitForPendingApproval(t, store)
-	run, err := store.GetRun(context.Background(), "run-1")
-	if err != nil || run.Status != protocol.RunWaitingForApproval {
-		t.Fatalf("run status = %q, err = %v", run.Status, err)
-	}
-	_, err = service.Decide(context.Background(), "session-1", approval.ID, protocol.ApprovalDecisionRequest{
+	waitForRunStatus(t, store, "run-1", protocol.RunWaitingForApproval)
+	_, err := service.Decide(context.Background(), "session-1", approval.ID, protocol.ApprovalDecisionRequest{
 		Decision: protocol.ApprovalAllowSession,
 		RuleArgv: []string{"go", "test", "*"},
 	})
@@ -141,4 +138,18 @@ func waitForPendingApproval(t *testing.T, store *sqlite.Store) protocol.CommandA
 	}
 	t.Fatal("pending approval did not appear")
 	return protocol.CommandApproval{}
+}
+
+func waitForRunStatus(t *testing.T, store *sqlite.Store, runID string, expected protocol.RunStatus) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		run, err := store.GetRun(context.Background(), runID)
+		if err == nil && run.Status == expected {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	run, err := store.GetRun(context.Background(), runID)
+	t.Fatalf("run status = %q, err = %v", run.Status, err)
 }

@@ -273,7 +273,7 @@ button:disabled { opacity: .42; cursor: not-allowed; }
   .usage-summary-overlay { padding: 8px; }
 }
 
-.usage-summary-button { flex: 0 0 auto; }
+.usage-summary-button { flex: 0 0 auto; }.provider-usage-summary { color: var(--green); font: 9px ui-monospace, monospace; white-space: nowrap; }
 .usage-summary-overlay { position: fixed; z-index: 25; inset: 0; display: grid; place-items: center; padding: 28px; background: rgba(3, 7, 4, .78); backdrop-filter: blur(6px); }
 .usage-summary-modal { display: flex; flex-direction: column; gap: 16px; width: min(760px, 96vw); max-height: 90vh; overflow: auto; padding: 20px; border: 1px solid #35453a; border-radius: 12px; background: #0f1510; box-shadow: 0 30px 100px rgba(0, 0, 0, .58); }
 .usage-summary-modal-header { display: flex; align-items: center; justify-content: space-between; }
