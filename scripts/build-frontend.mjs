@@ -11,7 +11,9 @@ const npmCacheDirectory = join(root, '.npm-cache');
 mkdirSync(npmCacheDirectory, { recursive: true });
 
 const packageManager = process.execPath;
-const npmCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+const npmCli =
+  process.env.npm_execpath ??
+  join(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
 
 function run(args, cwd = root) {
   const result = spawnSync(packageManager, [npmCli, ...args], {

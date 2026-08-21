@@ -24,7 +24,8 @@
       "panel": [
         {
           "id": "maatgen",
-          "title": "Maatgen"
+          "title": "Maatgen",
+          "icon": "media/maat.png"
         }
       ]
     },
@@ -52,7 +53,7 @@
       {
         "command": "maatgen.focusPanel",
         "title": "Maatgen: Focus Panel",
-        "icon": "media/maat.svg"
+        "icon": "media/maat.png"
       }
     ],
     "menus": {
