@@ -28,15 +28,6 @@
         }
       ]
     },
-    "icons": {
-      "maatgen-icon": {
-        "description": "Maatgen icon",
-        "default": {
-          "fontPath": "media/maat.svg",
-          "fontCharacter": "M"
-        }
-      }
-    },
     "configuration": {
       "title": "Maatgen",
       "properties": {
@@ -61,7 +52,7 @@
       {
         "command": "maatgen.focusPanel",
         "title": "Maatgen: Focus Panel",
-        "icon": "$(maatgen-icon)"
+        "icon": "media/maat.svg"
       }
     ],
     "menus": {
