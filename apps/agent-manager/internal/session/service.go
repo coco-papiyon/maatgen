@@ -113,7 +113,7 @@ func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSess
 func (s *Service) recordSourceStats(ctx context.Context, sessionID, repository string) {
 	stats, err := s.analyzer.Analyze(ctx, repository)
 	if err != nil {
-		slog.Warn("source stats analysis failed", "session", sessionID, "error", err)
+		slog.Warn("source stats analysis failed", "session", sessionID, "repository", repository, "error", err)
 		return
 	}
 	stats.SessionID = sessionID

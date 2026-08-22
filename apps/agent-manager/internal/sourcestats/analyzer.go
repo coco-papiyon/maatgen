@@ -48,9 +48,13 @@ func (a *Analyzer) Analyze(ctx context.Context, repository string) (protocol.Sou
 	}
 	runCtx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
-	args := append(append([]string{}, a.prefixArgs...), "--vcs=git", "--json", repository)
+	// cloc's bundled Perl mishandles non-ASCII Windows paths (e.g. a Japanese
+	// folder name), failing to chdir back after scanning subdirectories. The
+	// short path form is pure ASCII and sidesteps that bug when available.
+	target := toShortPath(repository)
+	args := append(append([]string{}, a.prefixArgs...), "--vcs=git", "--json", target)
 	command := exec.CommandContext(runCtx, a.binaryName, args...)
-	command.Dir = repository
+	command.Dir = target
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
