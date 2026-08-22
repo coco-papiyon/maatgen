@@ -244,6 +244,7 @@ function eventText(event: SessionEvent): string {
   if (typeof data?.command === 'string') return data.command;
   if (event.type === 'run_started') return `${providerLabel.value}が作業を開始しました`;
   if (event.type === 'run_completed') return 'Runが完了しました';
+  if (event.type === 'run_failed') return 'Runがエラーで終了しました';
   if (event.type === 'run_cancelled') return 'Runをキャンセルしました';
   if (event.type === 'usage_reported') {
     if (typeof data?.aiCredits === 'number') return `AI credits: ${formatCredits(data.aiCredits)}`;
