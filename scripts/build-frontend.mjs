@@ -32,6 +32,9 @@ function runNode(args, cwd = root) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+console.log('Building the protocol package...');
+run(['run', 'build', '--prefix', 'packages/protocol']);
+
 console.log('Building the Web version...');
 run(['run', 'build', '--prefix', 'apps/web']);
 

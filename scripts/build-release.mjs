@@ -63,6 +63,9 @@ const platforms = [
 console.log('=== Building Maatgen Release ===\n');
 
 // Step 1: Build Web UI
+console.log('Building the protocol package...');
+run(['run', 'build', '--prefix', 'packages/protocol']);
+
 console.log('Building the Web version...');
 run(['run', 'build', '--prefix', 'apps/web']);
 

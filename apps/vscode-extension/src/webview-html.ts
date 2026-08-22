@@ -193,10 +193,15 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         const text = eventText(event);
         return text.trim() !== '' && !isTokenUsageOnly(text);
       };
+      let lastRenderedEventsSignature = null;
       const renderEvents = (events) => {
+        const visibleEvents = events.filter((event) => ['user_prompt', 'assistant_message', 'run_started', 'run_completed', 'run_failed', 'run_cancelled', 'error'].includes(event.type))
+          .filter((event) => hasVisibleEventText(event));
+        const signature = JSON.stringify(visibleEvents.map((event) => [event.id, event.type, eventText(event)]));
+        if (signature === lastRenderedEventsSignature) return;
+        lastRenderedEventsSignature = signature;
         eventList.replaceChildren();
-        events.filter((event) => ['user_prompt', 'assistant_message', 'run_started', 'run_completed', 'run_failed', 'run_cancelled', 'error'].includes(event.type))
-          .filter((event) => hasVisibleEventText(event)).forEach((event) => {
+        visibleEvents.forEach((event) => {
           const item = document.createElement('article');
           item.className = 'event-item ' + event.type;
           const label = document.createElement('span'); label.className = 'event-label'; label.textContent = event.type === 'user_prompt' ? 'U' : event.type === 'assistant_message' ? 'A' : event.type.startsWith('run_') ? 'R' : 'E';
