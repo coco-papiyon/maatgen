@@ -68,7 +68,8 @@ func (m *Manager) Capture(ctx context.Context, repository, sessionID, runID, pha
 func (m *Manager) captureState(ctx context.Context, repository string) (Snapshot, error) {
 	head, err := m.run(ctx, repository, nil, "rev-parse", "HEAD")
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("read HEAD: %w", err)
+		// Repository has no commits yet (e.g., just after git init). Use the empty tree hash.
+		head = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 	}
 	indexTree, err := m.run(ctx, repository, nil, "write-tree")
 	if err != nil {
@@ -87,9 +88,8 @@ func (m *Manager) captureState(ctx context.Context, repository string) (Snapshot
 	}
 	defer os.Remove(tempPath)
 	env := []string{"GIT_INDEX_FILE=" + tempPath}
-	if _, err := m.run(ctx, repository, env, "read-tree", "HEAD"); err != nil {
-		return Snapshot{}, fmt.Errorf("initialize temporary index: %w", err)
-	}
+	// read-tree fails for repositories with no commits; in that case we have an empty index already.
+	_, _ = m.run(ctx, repository, env, "read-tree", "HEAD")
 	if _, err := m.run(ctx, repository, env, "add", "-A", "--", "."); err != nil {
 		return Snapshot{}, fmt.Errorf("snapshot working tree: %w", err)
 	}
