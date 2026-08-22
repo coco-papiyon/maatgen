@@ -53,6 +53,7 @@ func TestCreateSessionRecordsSourceStatsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	service.waitForSourceStats()
 	if store.sourceStats.SessionID != created.ID || store.sourceStats.Total.Code != 100 {
 		t.Fatalf("source stats = %#v", store.sourceStats)
 	}
@@ -66,6 +67,7 @@ func TestCreateSessionIgnoresSourceStatsFailure(t *testing.T) {
 	if _, err := service.CreateSession(context.Background(), protocol.CreateSessionRequest{Agent: protocol.AgentCodex, Workspace: "C:/repo"}); err != nil {
 		t.Fatalf("session creation must survive analyzer failure: %v", err)
 	}
+	service.waitForSourceStats()
 	if store.sourceStats.SessionID != "" {
 		t.Fatalf("source stats must not be saved on analyzer failure: %#v", store.sourceStats)
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -281,6 +282,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 			return s.approval(approvalCtx, approvalRequest)
 		}
 	}
+	slog.Info("agent run starting", "run", run.ID, "session", session.ID, "agent", session.Agent, "model", model)
 	result, runErr := adapter.Run(ctx, agent.RunRequest{
 		Directory: session.Workspace, Prompt: run.Prompt, ThreadID: stringValue(session.AgentThreadID),
 		Model: model, ReasoningEffort: stringValue(request.ReasoningEffort), Timeout: timeout, Approval: approvalHandler,
@@ -394,16 +396,19 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		run.Status = protocol.RunCancelled
 		terminalType = protocol.EventTypeRunCancelled
 		terminalData = mustJSON(map[string]any{"reason": "cancelled"})
+		slog.Warn("agent run cancelled", "run", run.ID, "session", session.ID, "agent", session.Agent)
 	case result.TimedOut || errors.Is(runErr, process.ErrTimeout):
 		run.Status = protocol.RunFailed
 		terminalType = protocol.EventTypeRunFailed
 		terminalData = mustJSON(map[string]any{"message": agentLabel(session.Agent) + " run timed out", "timeout": true})
+		slog.Error("agent run timed out", "run", run.ID, "session", session.ID, "agent", session.Agent)
 	case errors.Is(runErr, agent.ErrUnavailable):
 		run.Status = protocol.RunFailed
 		terminalType = protocol.EventTypeRunFailed
 		terminalData = mustJSON(map[string]any{
 			"code": string(session.Agent) + "_unavailable", "message": agentLabel(session.Agent) + " CLI is not installed or unavailable",
 		})
+		slog.Warn("agent unavailable", "run", run.ID, "session", session.ID, "agent", session.Agent)
 	case runErr != nil || result.ExitCode != 0:
 		run.Status = protocol.RunFailed
 		terminalType = protocol.EventTypeRunFailed
@@ -411,8 +416,10 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		if len(terminalData) == 0 {
 			terminalData = mustJSON(map[string]any{"message": agentLabel(session.Agent) + " run failed", "exitCode": result.ExitCode})
 		}
+		slog.Error("agent run failed", "run", run.ID, "session", session.ID, "agent", session.Agent, "error", runErr, "exitCode", result.ExitCode)
 	default:
 		run.Status = protocol.RunCompleted
+		slog.Info("agent run completed", "run", run.ID, "session", session.ID, "agent", session.Agent)
 		if len(terminalData) > 0 {
 			terminalSource = eventSource(session.Agent)
 		}
@@ -444,6 +451,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		terminalType = protocol.EventTypeRunFailed
 		terminalSource = protocol.EventSourceManager
 		terminalData = mustJSON(map[string]any{"message": "capture changes after agent run", "code": "checkpoint_capture_failed"})
+		slog.Error("agent run failed due to checkpoint capture error", "run", run.ID, "session", session.ID, "agent", session.Agent, "error", snapshotErr)
 	}
 	_ = s.store.UpdateRun(persistCtx, run)
 	// Release the per-session execution slot before publishing the terminal event.
@@ -454,10 +462,11 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	_, _ = s.appendRawEvent(persistCtx, session.ID, run.ID, terminalSource, terminalType, terminalData)
 }
 
-func (s *Service) finishPersistenceFailure(run protocol.AgentRun, _ error) {
+func (s *Service) finishPersistenceFailure(run protocol.AgentRun, err error) {
 	finishedAt := s.now().UTC()
 	run.Status = protocol.RunFailed
 	run.FinishedAt = &finishedAt
+	slog.Error("agent run failed due to persistence error", "run", run.ID, "session", run.SessionID, "error", err)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = s.store.UpdateRun(ctx, run)

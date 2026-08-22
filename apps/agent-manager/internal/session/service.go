@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
@@ -49,7 +50,13 @@ type Service struct {
 	analyzer     SourceStatsAnalyzer
 	now          func() time.Time
 	newID        func() (string, error)
+	wg           sync.WaitGroup
 }
+
+// waitForSourceStats blocks until all in-flight background source stats
+// analyses have finished. It exists for tests; production callers don't need
+// to wait since the analysis is best-effort and asynchronous.
+func (s *Service) waitForSourceStats() { s.wg.Wait() }
 
 type Option func(*Service)
 
@@ -90,12 +97,18 @@ func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSess
 		return protocol.AgentSession{}, fmt.Errorf("persist session: %w", err)
 	}
 	if s.analyzer != nil {
-		s.recordSourceStats(ctx, created.ID, repository)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.recordSourceStats(context.Background(), created.ID, repository)
+		}()
 	}
 	return created, nil
 }
 
-// recordSourceStats counts source lines once, at Session creation. It is
+// recordSourceStats counts source lines once, at Session creation. It runs in
+// the background so a slow or failing cloc invocation (e.g. against a large
+// or cloud-synced directory) never blocks session creation. It is
 // best-effort: a failed count must not fail session creation.
 func (s *Service) recordSourceStats(ctx context.Context, sessionID, repository string) {
 	stats, err := s.analyzer.Analyze(ctx, repository)
