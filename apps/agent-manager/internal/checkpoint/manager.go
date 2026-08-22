@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var ErrNotRepository = errors.New("not a Git repository")
@@ -22,6 +23,10 @@ type Snapshot struct {
 
 type Manager struct {
 	gitPath string
+	// runOnce executes a single git invocation. It is a field (rather than a
+	// plain method call) so tests can simulate lock contention without
+	// spawning real subprocesses.
+	runOnce func(ctx context.Context, repository string, extraEnv []string, args ...string) (string, error)
 }
 
 func New() (*Manager, error) {
@@ -29,7 +34,9 @@ func New() (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find git executable: %w", err)
 	}
-	return &Manager{gitPath: gitPath}, nil
+	manager := &Manager{gitPath: gitPath}
+	manager.runOnce = manager.execGit
+	return manager, nil
 }
 
 func (m *Manager) ValidateRepository(ctx context.Context, workspace string) (string, error) {
@@ -127,7 +134,39 @@ func (m *Manager) CleanupSession(ctx context.Context, repository, sessionID stri
 
 func (m *Manager) GitPath() string { return m.gitPath }
 
+// lockRetryDelays bounds how long we wait out a transient "*.lock: File
+// exists" failure (e.g. another checkpoint capture, an editor briefly
+// touching the index, or a cloud-sync client holding a handle) before
+// surfacing the error. We never delete the lock file ourselves: it may
+// belong to a genuinely active git process, and removing it could corrupt
+// the repository.
+var lockRetryDelays = []time.Duration{100 * time.Millisecond, 300 * time.Millisecond, 800 * time.Millisecond, 1500 * time.Millisecond}
+
 func (m *Manager) run(ctx context.Context, repository string, extraEnv []string, args ...string) (string, error) {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		output, err := m.runOnce(ctx, repository, extraEnv, args...)
+		if err == nil {
+			return output, nil
+		}
+		lastErr = err
+		if attempt >= len(lockRetryDelays) || !isLockContention(err) {
+			return "", lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(lockRetryDelays[attempt]):
+		}
+	}
+}
+
+func isLockContention(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, ".lock") && strings.Contains(message, "File exists")
+}
+
+func (m *Manager) execGit(ctx context.Context, repository string, extraEnv []string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, m.gitPath, append([]string{"-C", repository}, args...)...)
 	command.Env = append(os.Environ(), extraEnv...)
 	var stdout, stderr bytes.Buffer
