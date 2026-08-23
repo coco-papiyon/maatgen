@@ -79,10 +79,10 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('renderUsage(event.data.usage.summary, event.data.selectedProvider)');
   });
 
-  it('shows the provider usage percentage rather than the remaining percentage', () => {
+  it('shows the remaining provider usage percentage', () => {
     const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
-    expect(html).toContain("window.name + ' ' + window.usedPercent + '%'");
-    expect(html).not.toContain("window.name + ' ' + window.remainingPercent + '%'");
+    expect(html).toContain("window.name + ' ' + window.remainingPercent + '%'");
+    expect(html).not.toContain("window.name + ' ' + window.usedPercent + '%'");
   });
 
   it('keeps the generated webview script syntactically valid', () => {

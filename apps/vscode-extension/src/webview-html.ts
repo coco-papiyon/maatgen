@@ -169,7 +169,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         usageCount.textContent = 'available';
       };
       const renderProviderUsage = (usage) => {
-        providerUsageElement.textContent = (usage?.windows || []).map((window) => window.name + ' ' + window.usedPercent + '%').join(' · ');
+        providerUsageElement.textContent = (usage?.windows || []).map((window) => window.name + ' ' + window.remainingPercent + '%').join(' · ');
         providerUsageElement.title = usage?.fetchedAt ? 'Fetched ' + usage.fetchedAt : '';
       };
       const eventText = (event) => {

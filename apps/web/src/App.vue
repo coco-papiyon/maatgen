@@ -356,7 +356,7 @@ function usageValue(usageData: TokenUsage | undefined, key: TokenUsageKey): stri
 }
 
 function providerUsageText(value: ProviderUsage | undefined): string {
-  return value?.windows.map((window) => `${window.name} ${window.usedPercent}%`).join(' · ') ?? '';
+  return value?.windows.map((window) => `${window.name} ${window.remainingPercent}%`).join(' · ') ?? '';
 }
 
 function formatApprovalRule(argv?: string[]): string {

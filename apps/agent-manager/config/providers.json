@@ -11,14 +11,14 @@
         "gpt-5.4",
         "gpt-5.4-mini"
       ],
-      "defaultModel": "gpt-5.6-sol",
+      "defaultModel": "gpt-5.6-luna",
       "pricing": {
         "gpt-5.6-luna": {
           "inputPerMillion": 0.2,
           "outputPerMillion": 1.2
         },
         "gpt-5.6-sol": {
-          "inputPerMillion": 5,
+          "inputPerMillion": 4,
           "outputPerMillion": 2
         },
         "gpt-5.6-terra": {
@@ -36,7 +36,7 @@
         "claude-sonnet-4-6",
         "claude-haiku-4-5"
       ],
-      "defaultModel": "claude-haiku-4-5",
+      "defaultModel": "claude-sonnet-5",
       "pricing": {
         "claude-haiku-4-5": {
           "inputPerMillion": 0.8,

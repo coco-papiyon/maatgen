@@ -47,7 +47,7 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
   });
 
-  it('shows the provider usage percentage rather than the remaining percentage', async () => {
+  it('shows the remaining provider usage percentage', async () => {
     class ProviderUsageApi extends MockAgentApi {
       override async getProviderUsage() {
         return {
@@ -59,7 +59,7 @@ describe('App with MockAgentApi', () => {
     }
     wrapper = mount(App, { props: { agentApi: new ProviderUsageApi(), eventStreamFactory: passiveEventStream } });
     await flushPromises();
-    expect(wrapper.find('.provider-usage-summary').text()).toBe('primary 3%');
+    expect(wrapper.find('.provider-usage-summary').text()).toBe('primary 97%');
   });
 
   it('hides a closed session from the list but keeps it available via the status filter', async () => {
