@@ -89,9 +89,18 @@ func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSess
 	if err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("generate session ID: %w", err)
 	}
+	triggerSource := request.TriggerSource
+	if triggerSource == "" {
+		triggerSource = protocol.TriggerSourceManual
+	}
 	created := protocol.AgentSession{
 		ID: id, Agent: request.Agent, Workspace: repository,
-		Status: protocol.SessionActive, CreatedAt: s.now().UTC(),
+		Status: protocol.SessionActive, TriggerSource: triggerSource,
+		GitHubMonitorEvent: request.GitHubMonitorEvent,
+		GitHubRuleID:       request.GitHubRuleID,
+		GitHubItemKind:     request.GitHubItemKind,
+		GitHubItemNumber:   request.GitHubItemNumber,
+		CreatedAt:          s.now().UTC(),
 	}
 	if err := s.store.CreateSession(ctx, created); err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("persist session: %w", err)

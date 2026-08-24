@@ -188,15 +188,26 @@ func (s *Store) migrate(ctx context.Context) error {
 }
 
 func (s *Store) CreateSession(ctx context.Context, session protocol.AgentSession) error {
+	triggerSource := session.TriggerSource
+	if triggerSource == "" {
+		triggerSource = protocol.TriggerSourceManual
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions(
-			id, agent, workspace, agent_thread_id, status, created_at, closed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			id, agent, workspace, agent_thread_id, status, trigger_source,
+			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
+			created_at, closed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Agent,
 		session.Workspace,
 		nullableString(session.AgentThreadID),
 		session.Status,
+		triggerSource,
+		session.GitHubMonitorEvent,
+		session.GitHubRuleID,
+		(*string)(session.GitHubItemKind),
+		session.GitHubItemNumber,
 		formatTime(session.CreatedAt),
 		nullableTime(session.ClosedAt),
 	)
@@ -208,7 +219,9 @@ func (s *Store) CreateSession(ctx context.Context, session protocol.AgentSession
 
 func (s *Store) GetSession(ctx context.Context, id string) (protocol.AgentSession, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, agent, workspace, agent_thread_id, status, created_at, closed_at
+		SELECT id, agent, workspace, agent_thread_id, status, trigger_source,
+			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
+			created_at, closed_at
 		FROM sessions WHERE id = ?`, id)
 	return scanSession(row)
 }
@@ -218,7 +231,9 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 		limit = 100
 	}
 	query := `
-		SELECT id, agent, workspace, agent_thread_id, status, created_at, closed_at
+		SELECT id, agent, workspace, agent_thread_id, status, trigger_source,
+			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
+			created_at, closed_at
 		FROM sessions`
 	conditions := []string{}
 	args := []any{}
@@ -396,7 +411,7 @@ type execer interface {
 
 func scanSession(row scanner) (protocol.AgentSession, error) {
 	var session protocol.AgentSession
-	var threadID, closedAt sql.NullString
+	var threadID, closedAt, triggerSource, itemKind sql.NullString
 	var createdAt string
 	if err := row.Scan(
 		&session.ID,
@@ -404,6 +419,11 @@ func scanSession(row scanner) (protocol.AgentSession, error) {
 		&session.Workspace,
 		&threadID,
 		&session.Status,
+		&triggerSource,
+		&session.GitHubMonitorEvent,
+		&session.GitHubRuleID,
+		&itemKind,
+		&session.GitHubItemNumber,
 		&createdAt,
 		&closedAt,
 	); err != nil {
@@ -411,6 +431,14 @@ func scanSession(row scanner) (protocol.AgentSession, error) {
 			return protocol.AgentSession{}, storage.ErrNotFound
 		}
 		return protocol.AgentSession{}, fmt.Errorf("scan session: %w", err)
+	}
+	if triggerSource.Valid {
+		session.TriggerSource = protocol.TriggerSource(triggerSource.String)
+	} else {
+		session.TriggerSource = protocol.TriggerSourceManual
+	}
+	if itemKind.Valid {
+		session.GitHubItemKind = (*protocol.GitHubItemKind)(&itemKind.String)
 	}
 	parsedCreatedAt, err := parseTime(createdAt)
 	if err != nil {

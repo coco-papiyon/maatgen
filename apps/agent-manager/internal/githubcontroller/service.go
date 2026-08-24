@@ -179,12 +179,20 @@ func (s *Service) UpdateMonitor(ctx context.Context, request protocol.UpdateGitH
 	}
 	updated.CoalesceQueueLimit = coalesceLimit
 	updated.ProjectName = strings.TrimSpace(request.ProjectName)
-	if request.RemoteName != nil && *request.RemoteName != existing.RemoteName {
+	if request.RemoteName != nil {
 		candidate, err := s.resolveCandidate(ctx, repository, request.RemoteName)
 		if err != nil {
 			return protocol.GitHubRepositoryMonitor{}, err
 		}
 		updated.Host, updated.Owner, updated.Name, updated.RemoteName = candidate.Host, candidate.Owner, candidate.Name, candidate.RemoteName
+	} else {
+		candidate, err := s.resolveCandidate(ctx, repository, &existing.RemoteName)
+		if err != nil {
+			return protocol.GitHubRepositoryMonitor{}, err
+		}
+		if candidate.Host != existing.Host || candidate.Owner != existing.Owner || candidate.Name != existing.Name {
+			updated.Host, updated.Owner, updated.Name = candidate.Host, candidate.Owner, candidate.Name
+		}
 	}
 	now := s.now().UTC()
 	if err := s.store.UpdateRepositoryMonitorSettings(ctx, updated, now); err != nil {

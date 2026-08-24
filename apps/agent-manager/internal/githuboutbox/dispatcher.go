@@ -54,6 +54,7 @@ type SessionCreator interface {
 // RunStarter is satisfied by *run.Service.
 type RunStarter interface {
 	StartRun(ctx context.Context, sessionID string, request protocol.SendMessageRequest) (protocol.AgentRun, error)
+	CancelRun(ctx context.Context, runID string) error
 }
 
 // Dispatcher is the Outbox dispatcher. Register ObserveRunTerminal with the
@@ -240,13 +241,23 @@ func (d *Dispatcher) dispatchQueued(ctx context.Context, event protocol.GitHubMo
 		return
 	}
 
-	session, err := d.sessions.CreateSession(ctx, protocol.CreateSessionRequest{Agent: rule.Provider, Workspace: event.Repository})
+	req := protocol.CreateSessionRequest{
+		Agent:              rule.Provider,
+		Workspace:          event.Repository,
+		TriggerSource:      protocol.TriggerSourceGitHubMonitor,
+		GitHubMonitorEvent: &event.ID,
+		GitHubRuleID:       event.RuleID,
+		GitHubItemKind:     &event.Kind,
+		GitHubItemNumber:   &event.Number,
+	}
+	session, err := d.sessions.CreateSession(ctx, req)
 	if err != nil {
 		d.failEvent(ctx, event.ID, "create session failed: "+err.Error())
 		return
 	}
 	if err := d.store.AttachMonitorEventSession(ctx, event.ID, session.ID, d.now().UTC()); err != nil {
-		slog.Error("attach github monitor event session failed", "event", event.ID, "session", session.ID, "error", err)
+		d.failEvent(ctx, event.ID, "attach session failed: "+err.Error())
+		return
 	}
 	event.SessionID = &session.ID
 
@@ -291,7 +302,17 @@ func (d *Dispatcher) startRun(ctx context.Context, event protocol.GitHubMonitorE
 		return
 	}
 	if err := d.store.AttachMonitorEventRun(ctx, event.ID, startedRun.ID, d.now().UTC()); err != nil {
+		// The Run has already been started (and may be mutating the Working
+		// Tree) but its association with this event could not be persisted.
+		// Cancel it so it does not keep running unassociated with any
+		// monitor event; the event itself is recorded failed, with the
+		// orphaned Run's ID kept in the error message for manual recovery.
+		if cancelErr := d.runs.CancelRun(ctx, startedRun.ID); cancelErr != nil {
+			slog.Error("cancel orphaned run after attach failure failed", "event", event.ID, "run", startedRun.ID, "error", cancelErr)
+		}
 		slog.Error("attach github monitor event run failed", "event", event.ID, "run", startedRun.ID, "error", err)
+		d.failEvent(ctx, event.ID, fmt.Sprintf("attach run failed (run %s was cancelled): %v", startedRun.ID, err))
+		return
 	}
 	d.track(startedRun.ID, event.ID)
 }

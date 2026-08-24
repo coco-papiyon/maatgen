@@ -36,7 +36,7 @@
         "claude-sonnet-4-6",
         "claude-haiku-4-5"
       ],
-      "defaultModel": "claude-haiku-4-5",
+      "defaultModel": "claude-sonnet-5",
       "pricing": {
         "claude-haiku-4-5": {
           "inputPerMillion": 0.8,
@@ -142,6 +142,13 @@
           "/bin/bash",
           "-lc",
           "tmp=$(mktemp -d /tmp/codex-schema.XXXXXX); codex app-server generate-json-schema --experimental --out \"$tmp\" \u003e/dev/null 2\u003e\u00261; rg -n -A80 '\"RateLimitSnapshot\"' \"$tmp/codex_app_server_protocol.v2.schemas.json\" | head -100; rm -rf \"$tmp\""
+        ]
+      },
+      {
+        "argv": [
+          "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+          "-Command",
+          "corepack pnpm --filter @maatgen/web typecheck"
         ]
       }
     ]

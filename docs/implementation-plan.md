@@ -894,3 +894,10 @@ docs/decisions/
 - [x] cancel、timeout、Manager再起動時のfail-closed recovery
 - [x] parser、rule、AI、human decision、永続化のGoテスト
 - [ ] 実Codex CLIを使ったWindows／macOS／Linux手動統合試験
+
+### Phase 11：GitHub監視
+
+- [x] 監視ルール作成・編集をWeb版のポップアップで提供
+- [x] Issue／PRの担当者条件と、PRのレビュー依頼中ユーザー条件をルールへ保存・評価
+- [x] GitHub PRのレビュー依頼変更を正規化状態と変更検知hashへ反映
+- [x] VS Code版では監視ルール編集を提供せず、自動実行Sessionの参照に限定

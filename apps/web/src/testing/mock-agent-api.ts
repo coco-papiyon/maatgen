@@ -729,7 +729,12 @@ function mockGitHubPullRequests(): GitHubItem[] {
     kind: 'pull_request', number: 7, title: 'Add retry logic to the sync client', body: '',
     state: 'open', author: { login: 'dave' }, assignees: [{ login: 'alice' }], labels: [],
     createdAt: now, updatedAt: now, url: 'https://github.com/octo-demo/example-repo/pull/7',
-    pullRequest: { draft: false, base: { ref: 'main', sha: 'abc123' }, head: { ref: 'feature/retry', sha: 'def456' } },
+    pullRequest: {
+      draft: false,
+      base: { ref: 'main', sha: 'abc123' },
+      head: { ref: 'feature/retry', sha: 'def456' },
+      requestedReviewers: [{ login: 'bob' }],
+    },
   }];
 }
 

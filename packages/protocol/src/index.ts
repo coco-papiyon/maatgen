@@ -137,6 +137,7 @@ export interface GitHubPullRequestDetails {
   draft: boolean;
   base: GitHubBranchRef;
   head: GitHubBranchRef;
+  requestedReviewers: GitHubUser[];
 }
 
 export interface GitHubItem {
@@ -187,6 +188,7 @@ export interface GitHubMonitorFilters {
   bodyContains?: string;
   authors?: string[];
   assignees?: string[];
+  reviewers?: string[];
   labels?: string[];
   milestones?: string[];
   states?: GitHubItemState[];

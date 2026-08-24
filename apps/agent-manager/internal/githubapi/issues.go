@@ -132,13 +132,17 @@ func normalizePullRequest(pull *github.PullRequest) protocol.GitHubItem {
 		UpdatedAt: pull.GetUpdatedAt().Time,
 		URL:       pull.GetHTMLURL(),
 		PullRequest: &protocol.GitHubPullRequestDetails{
-			Draft: pull.GetDraft(),
-			Base:  protocol.GitHubBranchRef{Ref: pull.GetBase().GetRef(), SHA: pull.GetBase().GetSHA()},
-			Head:  protocol.GitHubBranchRef{Ref: pull.GetHead().GetRef(), SHA: pull.GetHead().GetSHA()},
+			Draft:              pull.GetDraft(),
+			Base:               protocol.GitHubBranchRef{Ref: pull.GetBase().GetRef(), SHA: pull.GetBase().GetSHA()},
+			Head:               protocol.GitHubBranchRef{Ref: pull.GetHead().GetRef(), SHA: pull.GetHead().GetSHA()},
+			RequestedReviewers: []protocol.GitHubUser{},
 		},
 	}
 	for _, assignee := range pull.Assignees {
 		item.Assignees = append(item.Assignees, protocol.GitHubUser{Login: assignee.GetLogin()})
+	}
+	for _, reviewer := range pull.RequestedReviewers {
+		item.PullRequest.RequestedReviewers = append(item.PullRequest.RequestedReviewers, protocol.GitHubUser{Login: reviewer.GetLogin()})
 	}
 	for _, label := range pull.Labels {
 		item.Labels = append(item.Labels, protocol.GitHubLabel{Name: label.GetName()})

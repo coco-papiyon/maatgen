@@ -74,6 +74,16 @@ func (s *Store) ListObservedItems(ctx context.Context, repository string) ([]pro
 	return items, nil
 }
 
+// ClearRepositoryObservations deletes all observed items for a repository
+// when its GitHub remote has changed (ADR-007 section 1: remote変更時に旧観測状態を破棄).
+func (s *Store) ClearRepositoryObservations(ctx context.Context, repository string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM github_observed_items WHERE repository = ?`, repository)
+	if err != nil {
+		return fmt.Errorf("clear github observed items: %w", err)
+	}
+	return nil
+}
+
 const observedItemSelect = `SELECT repository, kind, number, state_hash, last_action,
 	projects_available, snapshot_json, first_synced_at, observed_at FROM github_observed_items`
 

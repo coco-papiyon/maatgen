@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type {
   GitHubConcurrencyPolicy,
   GitHubItemKind,
@@ -138,6 +138,8 @@ interface RuleForm {
   reasoningEffort: string;
   concurrencyPolicy: GitHubConcurrencyPolicy;
   labels: string;
+  assignees: string;
+  reviewers: string;
   projectTitle: string;
   projectField: string;
   projectValue: string;
@@ -147,15 +149,23 @@ function blankRuleForm(): RuleForm {
   return {
     id: '', name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
     provider: 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce',
-    labels: '', projectTitle: '', projectField: '', projectValue: '',
+    labels: '', assignees: '', reviewers: '', projectTitle: '', projectField: '', projectValue: '',
   };
 }
 
 const editingRule = ref<RuleForm>();
 const savingRule = ref(false);
+const ruleDialog = ref<HTMLElement>();
+const includesIssues = computed(() => editingRule.value?.eventKinds.includes('issue') ?? false);
+const includesPullRequests = computed(() => editingRule.value?.eventKinds.includes('pull_request') ?? false);
+
+function focusRuleDialog() {
+  void nextTick(() => ruleDialog.value?.querySelector<HTMLElement>('input')?.focus());
+}
 
 function startCreateRule() {
   editingRule.value = blankRuleForm();
+  focusRuleDialog();
 }
 
 function startEditRule(rule: GitHubTriggerRule) {
@@ -164,9 +174,12 @@ function startEditRule(rule: GitHubTriggerRule) {
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider as RuleForm['provider'],
     model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', concurrencyPolicy: rule.concurrencyPolicy,
     labels: (rule.filters.labels ?? []).join(', '),
+    assignees: (rule.filters.assignees ?? []).join(', '),
+    reviewers: (rule.filters.reviewers ?? []).join(', '),
     projectTitle: rule.filters.project?.projectTitle ?? '', projectField: rule.filters.project?.fieldName ?? '',
     projectValue: rule.filters.project?.value ?? '',
   };
+  focusRuleDialog();
 }
 
 function cancelEditRule() {
@@ -179,7 +192,9 @@ async function saveRule() {
   savingRule.value = true;
   error.value = '';
   try {
-    const labels = form.labels.split(',').map((label) => label.trim()).filter(Boolean);
+    const labels = parseCommaSeparated(form.labels);
+    const assignees = parseCommaSeparated(form.assignees);
+    const reviewers = parseCommaSeparated(form.reviewers);
     const request = {
       workspace: githubWorkspace.value,
       name: form.name,
@@ -187,6 +202,8 @@ async function saveRule() {
       eventKinds: form.eventKinds,
       filters: {
         ...(labels.length ? { labels } : {}),
+        ...(assignees.length ? { assignees } : {}),
+        ...(form.eventKinds.includes('pull_request') && reviewers.length ? { reviewers } : {}),
         ...(form.projectTitle && form.projectField
           ? { project: { projectTitle: form.projectTitle, fieldName: form.projectField, value: form.projectValue } }
           : {}),
@@ -210,6 +227,10 @@ async function saveRule() {
   } finally {
     savingRule.value = false;
   }
+}
+
+function parseCommaSeparated(value: string): string[] {
+  return [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean))];
 }
 
 async function deleteRule(rule: GitHubTriggerRule) {
@@ -316,48 +337,71 @@ onMounted(() => void refresh());
         </ul>
         <p v-else class="github-hint">ルールはまだありません。</p>
 
-        <form v-if="editingRule" class="github-rule-form" @submit.prevent="saveRule">
-          <h3>{{ editingRule.id ? 'ルールを編集' : '新しいルール' }}</h3>
-          <label>ルール名<input v-model="editingRule.name" required /></label>
-          <fieldset class="github-checkbox-group">
-            <legend>対象</legend>
-            <label class="github-checkbox"><input v-model="editingRule.eventKinds" type="checkbox" value="issue" /> Issue</label>
-            <label class="github-checkbox"><input v-model="editingRule.eventKinds" type="checkbox" value="pull_request" /> Pull Request</label>
-          </fieldset>
-          <label>label条件（カンマ区切り、任意）<input v-model="editingRule.labels" placeholder="bug, needs-design" /></label>
-          <div class="github-form-row">
-            <label>Project名（任意）<input v-model="editingRule.projectTitle" placeholder="Roadmap" /></label>
-            <label>フィールド名<input v-model="editingRule.projectField" placeholder="Status" /></label>
-            <label>値<input v-model="editingRule.projectValue" placeholder="Ready" /></label>
-          </div>
-          <label>Promptテンプレート
-            <textarea v-model="editingRule.promptTemplate" rows="4" required placeholder="Design {{.Title}} (#{{.Number}})"></textarea>
-          </label>
-          <label class="github-checkbox"><input v-model="editingRule.includeBody" type="checkbox" /> Issue/PR本文をPromptに含める</label>
-          <div class="github-form-row">
-            <label>Provider
-              <select v-model="editingRule.provider">
-                <option value="codex">codex</option>
-                <option value="claude">claude</option>
-                <option value="copilot">copilot</option>
+      </section>
+
+      <div v-if="editingRule" class="github-modal-backdrop" @click.self="cancelEditRule">
+        <section
+          ref="ruleDialog"
+          class="github-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="github-rule-dialog-title"
+          @keydown.esc="cancelEditRule"
+        >
+          <form class="github-rule-form" @submit.prevent="saveRule">
+            <div class="github-modal-header">
+              <h2 id="github-rule-dialog-title">{{ editingRule.id ? '監視ルールを編集' : '監視ルールを作成' }}</h2>
+              <button type="button" aria-label="閉じる" @click="cancelEditRule">×</button>
+            </div>
+            <label>ルール名<input v-model="editingRule.name" required /></label>
+            <fieldset class="github-checkbox-group">
+              <legend>対象</legend>
+              <label class="github-checkbox"><input v-model="editingRule.eventKinds" type="checkbox" value="issue" /> Issue</label>
+              <label class="github-checkbox"><input v-model="editingRule.eventKinds" type="checkbox" value="pull_request" /> Pull Request</label>
+            </fieldset>
+            <div v-if="includesIssues || includesPullRequests" class="github-form-row">
+              <label>アサイン（GitHub login、カンマ区切り）
+                <input v-model="editingRule.assignees" aria-label="アサイン" placeholder="octocat, hubot" />
+              </label>
+              <label v-if="includesPullRequests">レビューア（GitHub login、カンマ区切り）
+                <input v-model="editingRule.reviewers" aria-label="レビューア" placeholder="reviewer1, reviewer2" />
+              </label>
+            </div>
+            <label>label条件（カンマ区切り、任意）<input v-model="editingRule.labels" placeholder="bug, needs-design" /></label>
+            <div class="github-form-row">
+              <label>Project名（任意）<input v-model="editingRule.projectTitle" placeholder="Roadmap" /></label>
+              <label>フィールド名<input v-model="editingRule.projectField" placeholder="Status" /></label>
+              <label>値<input v-model="editingRule.projectValue" placeholder="Ready" /></label>
+            </div>
+            <label>Promptテンプレート
+              <textarea v-model="editingRule.promptTemplate" rows="4" required placeholder="Design {{.Title}} (#{{.Number}})"></textarea>
+            </label>
+            <label class="github-checkbox"><input v-model="editingRule.includeBody" type="checkbox" /> Issue/PR本文をPromptに含める</label>
+            <div class="github-form-row">
+              <label>Provider
+                <select v-model="editingRule.provider">
+                  <option value="codex">codex</option>
+                  <option value="claude">claude</option>
+                  <option value="copilot">copilot</option>
+                </select>
+              </label>
+              <label>model（任意）<input v-model="editingRule.model" /></label>
+              <label>reasoningEffort（任意）<input v-model="editingRule.reasoningEffort" /></label>
+            </div>
+            <label>同時実行時の扱い
+              <select v-model="editingRule.concurrencyPolicy">
+                <option value="coalesce">coalesce（保留して後で再評価）</option>
+                <option value="skip">skip（今回はスキップ）</option>
               </select>
             </label>
-            <label>model（任意）<input v-model="editingRule.model" /></label>
-            <label>reasoningEffort（任意）<input v-model="editingRule.reasoningEffort" /></label>
-          </div>
-          <label>同時実行時の扱い
-            <select v-model="editingRule.concurrencyPolicy">
-              <option value="coalesce">coalesce（保留して後で再評価）</option>
-              <option value="skip">skip（今回はスキップ）</option>
-            </select>
-          </label>
-          <label class="github-checkbox"><input v-model="editingRule.enabled" type="checkbox" /> 有効</label>
-          <div class="github-form-actions">
-            <button type="submit" :disabled="savingRule">保存</button>
-            <button type="button" @click="cancelEditRule">キャンセル</button>
-          </div>
-        </form>
-      </section>
+            <label class="github-checkbox"><input v-model="editingRule.enabled" type="checkbox" /> 有効</label>
+            <div class="github-form-actions github-modal-actions">
+              <button type="button" @click="cancelEditRule">キャンセル</button>
+              <button type="submit" :disabled="savingRule">保存</button>
+            </div>
+          </form>
+        </section>
+      </div>
     </template>
   </div>
 </template>

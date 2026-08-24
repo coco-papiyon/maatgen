@@ -187,7 +187,9 @@ Web版の監視設定画面には次を表示する。
 2. **監視ルール一覧／編集領域**
    - ルール名、対象イベント、主なフィルタ、Prompt概要、enabled状態
    - ルールの新規作成、編集、複製、有効化・無効化、削除
-   - 編集フォームの項目は、イベント種別、action、担当者、label、state、draft、branch、Project／Status、Provider、model、reasoning effort、同時実行方針、Promptテンプレートとする
+   - 作成・編集フォームはルール一覧上のポップアップとして表示する
+   - 編集フォームの項目は、イベント種別、action、担当者、レビューア、label、state、draft、branch、Project／Status、Provider、model、reasoning effort、同時実行方針、Promptテンプレートとする。担当者はIssue／PRで指定でき、レビューアはPRでのみ指定できる
+   - レビューア条件は、現在レビュー依頼中のGitHub user loginに対して評価する
    - 保存時に必須条件、フィルタ値、Provider／model、Promptテンプレートを検証する
    - Project条件を設定した場合、Projects情報が取得できない間は発火しないことをフィルタ欄の近くに表示する
 

@@ -64,14 +64,28 @@ const (
 	RunCancelled          RunStatus = "cancelled"
 )
 
+// TriggerSource identifies what initiated a Session or Run.
+type TriggerSource string
+
+const (
+	TriggerSourceManual        TriggerSource = "manual"
+	TriggerSourceGitHubMonitor TriggerSource = "github_monitor"
+)
+
+// AgentSession represents a conversation session with an Agent.
 type AgentSession struct {
-	ID            string        `json:"id"`
-	Agent         AgentName     `json:"agent"`
-	Workspace     string        `json:"workspace"`
-	AgentThreadID *string       `json:"agentThreadId,omitempty"`
-	Status        SessionStatus `json:"status"`
-	CreatedAt     time.Time     `json:"createdAt"`
-	ClosedAt      *time.Time    `json:"closedAt,omitempty"`
+	ID                 string          `json:"id"`
+	Agent              AgentName       `json:"agent"`
+	Workspace          string          `json:"workspace"`
+	AgentThreadID      *string         `json:"agentThreadId,omitempty"`
+	Status             SessionStatus   `json:"status"`
+	TriggerSource      TriggerSource   `json:"triggerSource"`
+	GitHubMonitorEvent *string         `json:"githubMonitorEvent,omitempty"`
+	GitHubRuleID       *string         `json:"githubRuleId,omitempty"`
+	GitHubItemKind     *GitHubItemKind `json:"githubItemKind,omitempty"`
+	GitHubItemNumber   *int            `json:"githubItemNumber,omitempty"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	ClosedAt           *time.Time      `json:"closedAt,omitempty"`
 }
 
 // SessionCursor is the decoded keyset position used for session pagination.
@@ -82,8 +96,13 @@ type SessionCursor struct {
 }
 
 type CreateSessionRequest struct {
-	Agent     AgentName `json:"agent"`
-	Workspace string    `json:"workspace"`
+	Agent              AgentName       `json:"agent"`
+	Workspace          string          `json:"workspace"`
+	TriggerSource      TriggerSource   `json:"triggerSource"`
+	GitHubMonitorEvent *string         `json:"githubMonitorEvent,omitempty"`
+	GitHubRuleID       *string         `json:"githubRuleId,omitempty"`
+	GitHubItemKind     *GitHubItemKind `json:"githubItemKind,omitempty"`
+	GitHubItemNumber   *int            `json:"githubItemNumber,omitempty"`
 }
 
 type SendMessageRequest struct {

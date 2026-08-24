@@ -48,6 +48,17 @@ func TestHashItemChangesWithTitle(t *testing.T) {
 	}
 }
 
+func TestHashItemChangesWithRequestedReviewers(t *testing.T) {
+	a := baseItem()
+	a.Kind = protocol.GitHubItemPullRequest
+	a.PullRequest = &protocol.GitHubPullRequestDetails{RequestedReviewers: []protocol.GitHubUser{{Login: "alice"}}}
+	b := a
+	b.PullRequest = &protocol.GitHubPullRequestDetails{RequestedReviewers: []protocol.GitHubUser{{Login: "bob"}}}
+	if HashItem(a) == HashItem(b) {
+		t.Fatalf("hash must change when requested reviewers change")
+	}
+}
+
 func TestHashItemChangesWithProjectFields(t *testing.T) {
 	a := baseItem()
 	a.ProjectFields = []protocol.GitHubProjectFieldValue{{ProjectTitle: "Roadmap", FieldName: "Status", Value: "Todo"}}

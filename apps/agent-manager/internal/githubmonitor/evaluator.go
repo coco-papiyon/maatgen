@@ -38,10 +38,11 @@ func NewEvaluator(store Store) *Evaluator {
 // a queued Outbox event (ADR-007 section 6) for every enabled rule that
 // matches the detected change, except:
 //
-//   - During the monitor's first-ever sync (monitor.LastSyncedAt == nil):
-//     every fetched item establishes a baseline only, never fires a rule
+//   - When an item is new and the monitor's first-ever sync:
+//     every new item establishes a baseline only, never fires a rule
 //     (ADR-007 section 3), since there is nothing yet to consider a change
-//     relative to.
+//     relative to. If an item was observed before (even in a partial first
+//     sync that later failed), its state changes are evaluated normally.
 //   - When nothing changed since the last poll (same normalized state
 //     hash): there is no new change to evaluate rules against.
 //
@@ -80,8 +81,8 @@ func (e *Evaluator) EvaluateItem(ctx context.Context, monitor protocol.GitHubRep
 		ObservedAt:        now,
 	}
 
-	isMonitorFirstSync := monitor.LastSyncedAt == nil
-	if isMonitorFirstSync || !change.Changed {
+	isItemNewInFirstSync := monitor.LastSyncedAt == nil && previousPtr == nil
+	if isItemNewInFirstSync || !change.Changed {
 		if _, err := e.store.ApplyItemObservation(ctx, observed, nil); err != nil {
 			return nil, fmt.Errorf("evaluate github item: %w", err)
 		}

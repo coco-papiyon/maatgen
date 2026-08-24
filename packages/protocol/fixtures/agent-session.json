@@ -4,5 +4,6 @@
   "workspace": "C:/workspace/project",
   "agentThreadId": "d40fc21a-7d30-4e50-9bb0-c922aae7988f",
   "status": "active",
+  "triggerSource": "manual",
   "createdAt": "2026-08-15T00:00:00Z"
 }

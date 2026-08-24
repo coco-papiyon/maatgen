@@ -46,6 +46,26 @@ describe('GitHubSettingsView', () => {
     expect(rules.some((rule) => rule.name === '新しいルール')).toBe(true);
   });
 
+  it('opens rule creation in a dialog and saves assignee and PR reviewer filters', async () => {
+    const { wrapper, api } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    expect(wrapper.get('[role="dialog"]').attributes('aria-modal')).toBe('true');
+    expect(wrapper.find('input[aria-label="レビューア"]').exists()).toBe(false);
+
+    await wrapper.get('input[value="pull_request"]').setValue(true);
+    await wrapper.get('input[aria-label="アサイン"]').setValue('alice, bob');
+    await wrapper.get('input[aria-label="レビューア"]').setValue('carol, dave');
+    await wrapper.get('.github-rule-form input').setValue('PR担当ルール');
+    await wrapper.get('.github-rule-form textarea').setValue('Review {{.Title}}');
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const rule = (await api.listGitHubTriggerRules(githubWorkspace.value)).find((candidate) => candidate.name === 'PR担当ルール');
+    expect(rule?.filters.assignees).toEqual(['alice', 'bob']);
+    expect(rule?.filters.reviewers).toEqual(['carol', 'dave']);
+  });
+
   it('deletes the monitor after confirmation', async () => {
     const originalConfirm = window.confirm;
     window.confirm = () => true;

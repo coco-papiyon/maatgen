@@ -10,6 +10,11 @@ export interface AgentSession {
   workspace: string;
   agentThreadId?: string;
   status: 'active' | 'closed';
+  triggerSource: 'manual' | 'github_monitor';
+  githubMonitorEvent?: string;
+  githubRuleId?: string;
+  githubItemKind?: 'issue' | 'pull_request';
+  githubItemNumber?: number;
   createdAt: string;
   closedAt?: string;
 }

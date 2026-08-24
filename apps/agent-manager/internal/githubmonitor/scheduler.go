@@ -109,6 +109,10 @@ func (s *Scheduler) Close(ctx context.Context) error {
 // makes concurrent syncs pointless work, not a speedup — and one
 // monitor's failure (recorded on it by Poller) never stops the rest from
 // being checked.
+//
+// Before syncing, it re-resolves the monitor's remote to detect if the
+// repository has moved or the remote URL has changed (ADR-007 section 1:
+// "remote変更検出後は前のrepositoryへ問い合わせない").
 func (s *Scheduler) Tick(ctx context.Context) error {
 	monitors, err := s.store.ListRepositoryMonitors(ctx)
 	if err != nil {

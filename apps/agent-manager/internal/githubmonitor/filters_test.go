@@ -70,6 +70,25 @@ func TestMatchesDraftAndBranchesRequirePullRequest(t *testing.T) {
 	}
 }
 
+func TestMatchesReviewersRequirePullRequestAndMatchRequestedReviewer(t *testing.T) {
+	issue := baseItem()
+	if Matches(protocol.GitHubMonitorFilters{Reviewers: []string{"alice"}}, issue, "opened") {
+		t.Fatalf("a reviewer filter must not match a plain Issue")
+	}
+
+	pr := baseItem()
+	pr.Kind = protocol.GitHubItemPullRequest
+	pr.PullRequest = &protocol.GitHubPullRequestDetails{
+		RequestedReviewers: []protocol.GitHubUser{{Login: "Octo-Reviewer"}},
+	}
+	if !Matches(protocol.GitHubMonitorFilters{Reviewers: []string{"octo-reviewer"}}, pr, "updated") {
+		t.Fatalf("expected case-insensitive requested reviewer match")
+	}
+	if Matches(protocol.GitHubMonitorFilters{Reviewers: []string{"someone-else"}}, pr, "updated") {
+		t.Fatalf("expected no match for a reviewer not requested on the pull request")
+	}
+}
+
 func TestMatchesCreatedUpdatedTimeRange(t *testing.T) {
 	item := baseItem()
 	item.CreatedAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

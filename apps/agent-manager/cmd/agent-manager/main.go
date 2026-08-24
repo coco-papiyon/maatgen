@@ -29,6 +29,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubcontroller"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubmonitor"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githuboutbox"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitworktree"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/pricing"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/providerusage"
@@ -279,9 +280,30 @@ func run() error {
 		return githubapi.NewClient(host, token)
 	}
 	evaluator := githubmonitor.NewEvaluator(store)
+	remoteResolver := func(ctx context.Context, repository string, selectedRemoteName string) (*githubmonitor.RemoteCandidate, error) {
+		resolution, err := gitworktree.ResolveGitHubRemote(ctx, checkpointManager.GitPath(), repository, toolConfig.GitHub.AllowedEnterpriseHosts)
+		if err != nil && !errors.Is(err, gitworktree.ErrNoGitHubRemote) {
+			return nil, err
+		}
+		var candidate *gitworktree.GitHubRepository
+		if selectedRemoteName != "" {
+			for _, c := range resolution.Candidates {
+				if c.RemoteName == selectedRemoteName {
+					candidate = &c
+					break
+				}
+			}
+		} else {
+			candidate = resolution.Repository
+		}
+		if candidate == nil {
+			return nil, nil
+		}
+		return &githubmonitor.RemoteCandidate{Host: candidate.Host, Owner: candidate.Owner, Name: candidate.Name, RemoteName: candidate.RemoteName}, nil
+	}
 	poller := githubmonitor.NewPoller(store, evaluator, func(host string) (githubmonitor.GitHubClient, error) {
 		return githubClients(host)
-	})
+	}, remoteResolver)
 	githubMonitor := githubcontroller.New(store, checkpointManager, checkpointManager.GitPath(), toolConfig.GitHub.AllowedEnterpriseHosts, poller,
 		func(host string) (githubcontroller.GitHubClient, error) { return githubClients(host) })
 

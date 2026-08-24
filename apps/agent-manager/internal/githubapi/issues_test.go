@@ -127,14 +127,15 @@ func TestGetPullRequestNormalizesFields(t *testing.T) {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
 		writeJSON(t, w, map[string]any{
-			"number":   7,
-			"title":    "Add feature",
-			"state":    "open",
-			"draft":    true,
-			"html_url": "https://github.com/octo-org/example/pull/7",
-			"user":     map[string]any{"login": "carol"},
-			"base":     map[string]any{"ref": "main", "sha": "aaa"},
-			"head":     map[string]any{"ref": "feature", "sha": "bbb"},
+			"number":              7,
+			"title":               "Add feature",
+			"state":               "open",
+			"draft":               true,
+			"html_url":            "https://github.com/octo-org/example/pull/7",
+			"user":                map[string]any{"login": "carol"},
+			"requested_reviewers": []map[string]any{{"login": "reviewer-one"}},
+			"base":                map[string]any{"ref": "main", "sha": "aaa"},
+			"head":                map[string]any{"ref": "feature", "sha": "bbb"},
 		})
 	})
 
@@ -150,6 +151,9 @@ func TestGetPullRequestNormalizesFields(t *testing.T) {
 	}
 	if item.PullRequest.Base.Ref != "main" || item.PullRequest.Head.Ref != "feature" {
 		t.Fatalf("item.PullRequest = %#v", item.PullRequest)
+	}
+	if len(item.PullRequest.RequestedReviewers) != 1 || item.PullRequest.RequestedReviewers[0].Login != "reviewer-one" {
+		t.Fatalf("item.PullRequest.RequestedReviewers = %#v", item.PullRequest.RequestedReviewers)
 	}
 }
 

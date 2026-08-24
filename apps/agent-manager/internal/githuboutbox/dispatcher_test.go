@@ -181,10 +181,12 @@ type runStartCall struct {
 }
 
 type fakeRuns struct {
-	mu     sync.Mutex
-	calls  []runStartCall
-	err    error
-	nextID int
+	mu        sync.Mutex
+	calls     []runStartCall
+	err       error
+	nextID    int
+	cancelled []string
+	cancelErr error
 }
 
 func (f *fakeRuns) StartRun(ctx context.Context, sessionID string, request protocol.SendMessageRequest) (protocol.AgentRun, error) {
@@ -196,6 +198,13 @@ func (f *fakeRuns) StartRun(ctx context.Context, sessionID string, request proto
 	}
 	f.nextID++
 	return protocol.AgentRun{ID: fmt.Sprintf("run-%d", f.nextID), SessionID: sessionID, Status: protocol.RunQueued}, nil
+}
+
+func (f *fakeRuns) CancelRun(ctx context.Context, runID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelled = append(f.cancelled, runID)
+	return f.cancelErr
 }
 
 func testMonitor(repository string) protocol.GitHubRepositoryMonitor {

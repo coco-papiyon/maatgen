@@ -7,4 +7,9 @@
 export interface CreateSessionRequest {
   agent: 'codex' | 'claude' | 'copilot';
   workspace: string;
+  triggerSource?: 'manual' | 'github_monitor';
+  githubMonitorEvent?: string;
+  githubRuleId?: string;
+  githubItemKind?: 'issue' | 'pull_request';
+  githubItemNumber?: number;
 }

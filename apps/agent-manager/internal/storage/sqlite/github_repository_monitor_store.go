@@ -58,6 +58,54 @@ func (s *Store) UpdateRepositoryMonitorSyncState(ctx context.Context, repository
 	return updateResult("update github repository monitor sync state", result, err)
 }
 
+// ApplyRemoteChange atomically applies a detected GitHub remote change
+// (ADR-007 section 1) to a monitor: it updates the monitor's target
+// (host/owner/name/remoteName), clears its previously observed items, and
+// resets its sync state (last_synced_at/next_sync_at) to nil, all in a
+// single transaction.
+//
+// Atomicity matters here specifically because these three effects must
+// never be observed partially: if the monitor's target were updated but the
+// crash happened before observations were cleared or sync state reset, a
+// restart would see a monitor already pointing at the new repository (so it
+// would never take the "remote changed" branch again) while still holding
+// the old repository's observed items and a non-nil LastSyncedAt — causing
+// the new target's items to be diffed against the old target's state and
+// producing spurious "changed" events (ADR-007 section 3). Doing all three
+// in one transaction rules that out: either the whole switch is visible, or
+// none of it is, and an interrupted switch is retried in full on the next
+// sync attempt.
+func (s *Store) ApplyRemoteChange(ctx context.Context, monitor protocol.GitHubRepositoryMonitor, updatedAt time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("apply github remote change: begin transaction: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `UPDATE github_repository_monitors
+		SET host = ?, owner = ?, name = ?, remote_name = ?,
+			last_synced_at = NULL, next_sync_at = NULL, updated_at = ?
+		WHERE repository = ?`,
+		monitor.Host, monitor.Owner, monitor.Name, monitor.RemoteName, formatTime(updatedAt), monitor.Repository)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("apply github remote change: update monitor: %w", err)
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows == 0 {
+		_ = tx.Rollback()
+		return storage.ErrNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_observed_items WHERE repository = ?`, monitor.Repository); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("apply github remote change: clear observations: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("apply github remote change: commit: %w", err)
+	}
+	return nil
+}
+
 // GetRepositoryMonitor returns the monitor for repository, or
 // storage.ErrNotFound if none is registered.
 func (s *Store) GetRepositoryMonitor(ctx context.Context, repository string) (protocol.GitHubRepositoryMonitor, error) {

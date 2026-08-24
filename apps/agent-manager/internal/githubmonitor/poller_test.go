@@ -45,6 +45,14 @@ func (f *fakeGitHubClient) FetchProjectFields(ctx context.Context, owner, repo s
 	return f.projectFields[number], nil
 }
 
+// unchangedRemoteResolver simulates a RemoteResolveFunc that always finds
+// the monitor's already-configured remote unchanged, matching how these
+// tests' fixture monitor (host github.com, owner octo-org, name example,
+// remote origin) is set up.
+func unchangedRemoteResolver(ctx context.Context, repository string, remoteName string) (*RemoteCandidate, error) {
+	return &RemoteCandidate{Host: "github.com", Owner: "octo-org", Name: "example", RemoteName: "origin"}, nil
+}
+
 func TestPollerSyncRepositoryFirstSyncEstablishesBaselineWithoutFiring(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
@@ -63,7 +71,7 @@ func TestPollerSyncRepositoryFirstSyncEstablishesBaselineWithoutFiring(t *testin
 			1: {{ProjectTitle: "Roadmap", FieldName: "Status", Value: "Ready"}},
 		},
 	}
-	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil })
+	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil }, unchangedRemoteResolver)
 
 	result, err := poller.SyncRepository(ctx, repository)
 	if err != nil {
@@ -108,7 +116,7 @@ func TestPollerSyncRepositoryFiresOnceStatusBecomesReady(t *testing.T) {
 			1: {{ProjectTitle: "Roadmap", FieldName: "Status", Value: "Ready"}},
 		},
 	}
-	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil })
+	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil }, unchangedRemoteResolver)
 
 	result, err := poller.SyncRepository(ctx, repository)
 	if err != nil {
@@ -143,7 +151,7 @@ func TestPollerSyncRepositoryRecordsProjectsErrorWithoutFailingSync(t *testing.T
 		}},
 		projectErr: map[int]error{1: errors.New("insufficient permission")},
 	}
-	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil })
+	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil }, unchangedRemoteResolver)
 
 	result, err := poller.SyncRepository(ctx, repository)
 	if err != nil {
@@ -178,7 +186,7 @@ func TestPollerSyncRepositoryRecordsListFailure(t *testing.T) {
 	}
 
 	client := &fakeGitHubClient{listIssuesErr: errors.New("network unreachable")}
-	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil })
+	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil }, unchangedRemoteResolver)
 
 	if _, err := poller.SyncRepository(ctx, repository); err == nil {
 		t.Fatalf("expected an error")
@@ -198,7 +206,7 @@ func TestPollerSyncRepositoryRecordsListFailure(t *testing.T) {
 func TestPollerSyncRepositoryUnknownRepositoryReturnsError(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return &fakeGitHubClient{}, nil })
+	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return &fakeGitHubClient{}, nil }, unchangedRemoteResolver)
 	if _, err := poller.SyncRepository(ctx, "/missing"); err == nil {
 		t.Fatalf("expected an error for an unregistered repository")
 	}

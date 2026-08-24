@@ -49,9 +49,10 @@ type GitHubProjectFieldValue struct {
 // GitHubPullRequestDetails holds the fields that exist only on Pull
 // Requests, in addition to the Issue-shaped fields every GitHubItem carries.
 type GitHubPullRequestDetails struct {
-	Draft bool            `json:"draft"`
-	Base  GitHubBranchRef `json:"base"`
-	Head  GitHubBranchRef `json:"head"`
+	Draft              bool            `json:"draft"`
+	Base               GitHubBranchRef `json:"base"`
+	Head               GitHubBranchRef `json:"head"`
+	RequestedReviewers []GitHubUser    `json:"requestedReviewers"`
 }
 
 // GitHubItem is the normalized representation shared by Issues and Pull
@@ -159,6 +160,7 @@ type GitHubMonitorFilters struct {
 	BodyContains  *string                       `json:"bodyContains,omitempty"`
 	Authors       []string                      `json:"authors,omitempty"`
 	Assignees     []string                      `json:"assignees,omitempty"`
+	Reviewers     []string                      `json:"reviewers,omitempty"`
 	Labels        []string                      `json:"labels,omitempty"`
 	Milestones    []string                      `json:"milestones,omitempty"`
 	States        []GitHubItemState             `json:"states,omitempty"`

@@ -23,7 +23,7 @@ func RuleMatches(rule protocol.GitHubTriggerRule, item protocol.GitHubItem, acti
 // Matches evaluates GitHubMonitorFilters against a detected change
 // (ADR-007 section 3). Every populated field is ANDed; an empty/nil field
 // imposes no constraint. List-valued fields (Actions, Authors, Assignees,
-// Labels, ...) match if the item's corresponding value is any one of the
+// Reviewers, Labels, ...) match if the item's corresponding value is any one of the
 // listed values.
 //
 // A Project condition never matches while the item's Project data is
@@ -49,6 +49,9 @@ func Matches(filters protocol.GitHubMonitorFilters, item protocol.GitHubItem, ac
 		return false
 	}
 	if len(filters.Assignees) > 0 && !anyFold(filters.Assignees, userLogins(item.Assignees)) {
+		return false
+	}
+	if len(filters.Reviewers) > 0 && !matchesReviewers(filters.Reviewers, item.PullRequest) {
 		return false
 	}
 	if len(filters.Labels) > 0 && !anyFold(filters.Labels, labelNames(item.Labels)) {
@@ -150,6 +153,13 @@ func matchesDraft(want bool, pr *protocol.GitHubPullRequestDetails) bool {
 		return false
 	}
 	return pr.Draft == want
+}
+
+func matchesReviewers(reviewers []string, pr *protocol.GitHubPullRequestDetails) bool {
+	if pr == nil {
+		return false
+	}
+	return anyFold(reviewers, userLogins(pr.RequestedReviewers))
 }
 
 func matchesBranch(branches []string, pr *protocol.GitHubPullRequestDetails, base bool) bool {

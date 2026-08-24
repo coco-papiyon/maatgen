@@ -4,13 +4,18 @@
   "title": "AgentSession",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "agent", "workspace", "status", "createdAt"],
+  "required": ["id", "agent", "workspace", "status", "triggerSource", "createdAt"],
   "properties": {
     "id": { "type": "string", "minLength": 1 },
     "agent": { "enum": ["codex", "claude", "copilot"] },
     "workspace": { "type": "string", "minLength": 1 },
     "agentThreadId": { "type": "string", "minLength": 1 },
     "status": { "enum": ["active", "closed"] },
+    "triggerSource": { "enum": ["manual", "github_monitor"] },
+    "githubMonitorEvent": { "type": "string", "minLength": 1 },
+    "githubRuleId": { "type": "string", "minLength": 1 },
+    "githubItemKind": { "enum": ["issue", "pull_request"] },
+    "githubItemNumber": { "type": "integer" },
     "createdAt": { "type": "string", "format": "date-time" },
     "closedAt": { "type": "string", "format": "date-time" }
   }

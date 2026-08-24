@@ -27,6 +27,10 @@ type ClientFactory func(host string) (GitHubClient, error)
 type PollerStore interface {
 	GetRepositoryMonitor(ctx context.Context, repository string) (protocol.GitHubRepositoryMonitor, error)
 	UpdateRepositoryMonitorSyncState(ctx context.Context, repository string, lastSyncedAt, nextSyncAt time.Time, lastError *string, updatedAt time.Time) error
+	// ApplyRemoteChange atomically updates the monitor's target, clears its
+	// observed items, and resets its sync state, so an interrupted remote
+	// switch is never partially visible after a restart (ADR-007 section 1).
+	ApplyRemoteChange(ctx context.Context, monitor protocol.GitHubRepositoryMonitor, updatedAt time.Time) error
 }
 
 // SyncResult summarizes one repository sync, for the manual "sync now"
@@ -37,6 +41,21 @@ type SyncResult struct {
 	EventsMatched         int
 }
 
+// RemoteCandidate represents a resolved GitHub remote from the local repository.
+type RemoteCandidate struct {
+	Host       string
+	Owner      string
+	Name       string
+	RemoteName string
+}
+
+// RemoteResolveFunc revalidates a monitor's GitHub remote against the local
+// repository's git remotes (ADR-007 section 1). It uses the monitor's
+// RemoteName to track which remote was explicitly selected; if the remote
+// has moved or been deleted, it detects this without falling back to
+// automatic selection (which would violate ADR section 1: "選択したremoteを追跡").
+type RemoteResolveFunc func(ctx context.Context, repository string, selectedRemoteName string) (*RemoteCandidate, error)
+
 // Poller runs one GitHub polling cycle for a repository (ADR-007 section
 // 2): fetch Issues and Pull Requests (and, per item, Project field values),
 // then hand each to Evaluator to detect changes and match Trigger Rules.
@@ -45,14 +64,15 @@ type SyncResult struct {
 // SyncRepository method (see ADR-007 section 2: the two fetch paths share
 // the adapter and this evaluation logic, not a persistence model).
 type Poller struct {
-	store     PollerStore
-	evaluator *Evaluator
-	clients   ClientFactory
-	now       func() time.Time
+	store          PollerStore
+	evaluator      *Evaluator
+	clients        ClientFactory
+	remoteResolver RemoteResolveFunc
+	now            func() time.Time
 }
 
-func NewPoller(store PollerStore, evaluator *Evaluator, clients ClientFactory) *Poller {
-	return &Poller{store: store, evaluator: evaluator, clients: clients, now: time.Now}
+func NewPoller(store PollerStore, evaluator *Evaluator, clients ClientFactory, remoteResolver RemoteResolveFunc) *Poller {
+	return &Poller{store: store, evaluator: evaluator, clients: clients, remoteResolver: remoteResolver, now: time.Now}
 }
 
 // SyncRepository fetches every Issue and Pull Request for repository's
@@ -63,6 +83,17 @@ func NewPoller(store PollerStore, evaluator *Evaluator, clients ClientFactory) *
 // monitor's sync state stale forever; a rate limit failure backs off by at
 // least the GitHub-reported retry-after instead of the configured
 // interval.
+//
+// Before fetching, it revalidates the monitor's remote against the local
+// repository (ADR-007 section 1: "remote変更検出後は前のrepositoryへ問い合わせない").
+// If the remote has changed, the monitor's target, observed items, and sync
+// state are all updated atomically (PollerStore.ApplyRemoteChange) so the
+// next sync treats the new target as a first sync with no prior
+// observations, and the old repository is not queried again. Atomicity here
+// specifically prevents a crash between these updates from leaving the
+// monitor pointing at the new repository while still holding the old
+// repository's observed items or a stale LastSyncedAt, which would cause
+// the new target's items to be evaluated as spurious changes.
 //
 // State "all" is fetched (not just "open") so a transition to closed is
 // observed even though Maatgen never received a webhook or event stream
@@ -76,6 +107,26 @@ func (p *Poller) SyncRepository(ctx context.Context, repository string) (SyncRes
 	if err != nil {
 		return SyncResult{}, fmt.Errorf("sync github repository: %w", err)
 	}
+
+	candidate, err := p.remoteResolver(ctx, repository, monitor.RemoteName)
+	if err != nil {
+		p.recordFailure(ctx, monitor, err)
+		return SyncResult{}, fmt.Errorf("sync github repository: revalidate remote: %w", err)
+	}
+
+	if candidate == nil {
+		p.recordFailure(ctx, monitor, fmt.Errorf("github remote %q no longer exists or is inaccessible", monitor.RemoteName))
+		return SyncResult{}, fmt.Errorf("sync github repository: remote resolution failed: remote %q lost", monitor.RemoteName)
+	}
+	if candidate.Host != monitor.Host || candidate.Owner != monitor.Owner || candidate.Name != monitor.Name {
+		monitor.Host, monitor.Owner, monitor.Name, monitor.RemoteName = candidate.Host, candidate.Owner, candidate.Name, candidate.RemoteName
+		monitor.LastSyncedAt, monitor.NextSyncAt = nil, nil
+		if err := p.store.ApplyRemoteChange(ctx, monitor, p.now().UTC()); err != nil {
+			p.recordFailure(ctx, monitor, fmt.Errorf("apply remote change: %w", err))
+			return SyncResult{}, fmt.Errorf("sync github repository: apply remote change: %w", err)
+		}
+	}
+
 	client, err := p.clients(monitor.Host)
 	if err != nil {
 		p.recordFailure(ctx, monitor, err)

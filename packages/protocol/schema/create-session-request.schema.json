@@ -7,6 +7,11 @@
   "required": ["agent", "workspace"],
   "properties": {
     "agent": { "enum": ["codex", "claude", "copilot"] },
-    "workspace": { "type": "string", "minLength": 1 }
+    "workspace": { "type": "string", "minLength": 1 },
+    "triggerSource": { "enum": ["manual", "github_monitor"] },
+    "githubMonitorEvent": { "type": "string", "minLength": 1 },
+    "githubRuleId": { "type": "string", "minLength": 1 },
+    "githubItemKind": { "enum": ["issue", "pull_request"] },
+    "githubItemNumber": { "type": "integer" }
   }
 }
