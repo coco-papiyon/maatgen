@@ -80,3 +80,33 @@ func TestParseCommandPreservesWindowsPaths(t *testing.T) {
 		t.Fatalf("argv = %#v, want %#v", segments[0].Argv, want)
 	}
 }
+
+func TestParseCommandEvaluatesPowerShellCommandPayload(t *testing.T) {
+	segments, err := ParseCommand(`"C:\Program Files\PowerShell\7\pwsh.exe" -Command "gh pr create --base main --head issue_3"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) != 1 || !reflect.DeepEqual(segments[0].Argv, []string{"gh", "pr", "create", "--base", "main", "--head", "issue_3"}) {
+		t.Fatalf("segments = %#v", segments)
+	}
+}
+
+func TestParseCommandEvaluatesNestedShellCommandPayload(t *testing.T) {
+	segments, err := ParseCommand(`bash -c "git status && go test ./internal/approval"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) != 2 || !reflect.DeepEqual(segments[0].Argv, []string{"git", "status"}) || !reflect.DeepEqual(segments[1].Argv, []string{"go", "test", "./internal/approval"}) {
+		t.Fatalf("segments = %#v", segments)
+	}
+}
+
+func TestParseCommandRejectsEncodedPowerShellPayload(t *testing.T) {
+	segments, err := ParseCommand(`pwsh -EncodedCommand Z2V0LWNvbnRlbnQ=`)
+	if !errors.Is(err, ErrDynamicCommand) {
+		t.Fatalf("error = %v, want ErrDynamicCommand", err)
+	}
+	if len(segments) != 1 || len(segments[0].Argv) != 0 {
+		t.Fatalf("fallback segments = %#v", segments)
+	}
+}
