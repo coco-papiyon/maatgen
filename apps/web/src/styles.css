@@ -35,9 +35,6 @@ button { color: inherit; }
 .shell-nav-link { color: #8a978c; text-decoration: none; padding: 4px 2px; border-bottom: 2px solid transparent; }
 .shell-nav-link:hover { color: #d7e3d9; }
 .shell-nav-link.active { color: var(--green); border-bottom-color: var(--green); }
-.shell-nav-group { display: flex; align-items: center; gap: 12px; padding-left: 18px; border-left: 1px solid var(--line); }
-.shell-nav-group.active .shell-nav-group-label { color: var(--green); }
-.shell-nav-group-label { color: #6b786d; font: 700 10px ui-monospace, monospace; text-transform: uppercase; }
 .shell-repository { margin-left: auto; color: #8a978c; font: 11px ui-monospace, monospace; cursor: default; }
 .shell-repository.resolved { color: var(--green); }
 .shell-repository.ambiguous, .shell-repository.unavailable { color: var(--amber); }

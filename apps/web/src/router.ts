@@ -1,11 +1,10 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import App from './App.vue';
 
-// ADR-007 section 7: a common navigation area with "Session" and "GitHub
-// 監視" (with its own Event history/Issue/PR/Settings sub-areas), each a
-// real, deep-linkable, browser-back-compatible route rather than an
-// in-page tab. App.vue itself is unchanged and becomes the "/" route's
-// component.
+// ADR-007 section 7: a common navigation area exposes Session, Issue, PR,
+// Event history, and Settings as real, deep-linkable, browser-back-compatible
+// routes rather than in-page tabs. App.vue itself is unchanged and becomes
+// the "/" route's component.
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'sessions', component: App },
   { path: '/github', redirect: { name: 'github-events' } },
