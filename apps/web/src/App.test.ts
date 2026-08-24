@@ -47,6 +47,19 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
   });
 
+  it('marks sessions with unread assistant activity and clears the mark when opened', async () => {
+    const mounted = await mountApp();
+    const unread = mounted.wrapper.findAll('.unread-mark');
+    expect(unread.length).toBeGreaterThan(0);
+
+    const unreadSession = mounted.wrapper.findAll('.session-item').find((item) => item.find('.unread-mark').exists())!;
+    expect(unreadSession.exists()).toBe(true);
+    await unreadSession.trigger('click');
+    await flushPromises();
+
+    expect(unreadSession.find('.unread-mark').exists()).toBe(false);
+  });
+
   it('shows the remaining provider usage percentage', async () => {
     class ProviderUsageApi extends MockAgentApi {
       override async getProviderUsage() {
