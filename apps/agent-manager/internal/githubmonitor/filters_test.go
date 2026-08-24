@@ -7,9 +7,14 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
 
-func TestMatchesEmptyFiltersAlwaysMatch(t *testing.T) {
+func TestMatchesEmptyFiltersDefaultToOpen(t *testing.T) {
 	if !Matches(protocol.GitHubMonitorFilters{}, baseItem(), "opened") {
-		t.Fatalf("empty filters should match everything")
+		t.Fatalf("empty filters should match open items")
+	}
+	closed := baseItem()
+	closed.State = protocol.GitHubItemClosed
+	if Matches(protocol.GitHubMonitorFilters{}, closed, "closed") {
+		t.Fatalf("empty filters should not match closed items")
 	}
 }
 

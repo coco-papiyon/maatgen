@@ -900,6 +900,7 @@ docs/decisions/
 
 - [x] 監視ルール作成・編集をWeb版のポップアップで提供
 - [x] Issue／PRの担当者条件と、PRのレビュー依頼中ユーザー条件をルールへ保存・評価
+- [x] Issue／PRのOpen／Close／Open+Close条件をルールへ保存・評価（未指定はOpen）
 - [x] GitHub PRのレビュー依頼変更を正規化状態と変更検知hashへ反映
 - [x] 定期ポーリングとIssue／PR一覧取得の構造化ログ
 - [x] Issue／PR観測後に作成・更新された監視ルールを現在状態へ評価し、同じルール・item番号の自動イベントはactionをまたいで一度だけ作成

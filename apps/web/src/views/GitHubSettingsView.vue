@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type {
   GitHubConcurrencyPolicy,
+  GitHubItemState,
   GitHubItemKind,
   GitHubRepositoryMonitor,
   GitHubRepositoryResolution,
@@ -137,6 +138,7 @@ interface RuleForm {
   model: string;
   reasoningEffort: string;
   concurrencyPolicy: GitHubConcurrencyPolicy;
+  state: 'open' | 'closed' | 'all';
   labels: string;
   assignees: string;
   reviewers: string;
@@ -148,7 +150,7 @@ interface RuleForm {
 function blankRuleForm(): RuleForm {
   return {
     id: '', name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
-    provider: 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce',
+    provider: 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce', state: 'open',
     labels: '', assignees: '', reviewers: '', projectTitle: '', projectField: '', projectValue: '',
   };
 }
@@ -173,6 +175,7 @@ function startEditRule(rule: GitHubTriggerRule) {
     id: rule.id, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider as RuleForm['provider'],
     model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', concurrencyPolicy: rule.concurrencyPolicy,
+    state: rule.filters.states?.length === 2 ? 'all' : rule.filters.states?.[0] === 'closed' ? 'closed' : 'open',
     labels: (rule.filters.labels ?? []).join(', '),
     assignees: (rule.filters.assignees ?? []).join(', '),
     reviewers: (rule.filters.reviewers ?? []).join(', '),
@@ -201,6 +204,7 @@ async function saveRule() {
       enabled: form.enabled,
       eventKinds: form.eventKinds,
       filters: {
+        states: (form.state === 'all' ? ['open', 'closed'] : [form.state]) as GitHubItemState[],
         ...(labels.length ? { labels } : {}),
         ...(assignees.length ? { assignees } : {}),
         ...(form.eventKinds.includes('pull_request') && reviewers.length ? { reviewers } : {}),
@@ -368,6 +372,13 @@ onMounted(() => void refresh());
               </label>
             </div>
             <label>label条件（カンマ区切り、任意）<input v-model="editingRule.labels" placeholder="bug, needs-design" /></label>
+            <label>状態
+              <select v-model="editingRule.state">
+                <option value="open">Open（デフォルト）</option>
+                <option value="closed">Close</option>
+                <option value="all">Open+Close</option>
+              </select>
+            </label>
             <div class="github-form-row">
               <label>Project名（任意）<input v-model="editingRule.projectTitle" placeholder="Roadmap" /></label>
               <label>フィールド名<input v-model="editingRule.projectField" placeholder="Status" /></label>
