@@ -28,6 +28,7 @@ describe('GitHubSettingsView', () => {
   it('shows the resolved repository and existing monitor settings', async () => {
     const { wrapper } = await mountSettings();
     expect(wrapper.text()).toContain('github.com/octo-demo/example-repo');
+    expect(wrapper.get('input[aria-label="プロジェクト名"]')).toBeTruthy();
     const pollInput = wrapper.find('.github-form-row input[type="number"]');
     expect((pollInput.element as HTMLInputElement).valueAsNumber).toBe(300);
     expect(wrapper.text()).toContain('Ready になったら設計する');

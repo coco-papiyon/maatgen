@@ -17,10 +17,10 @@ import (
 // repository already registered returns storage.ErrConflict.
 func (s *Store) CreateRepositoryMonitor(ctx context.Context, monitor protocol.GitHubRepositoryMonitor) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO github_repository_monitors(
-		repository, host, owner, name, remote_name, enabled, poll_interval_seconds,
+		repository, host, owner, name, remote_name, project_name, enabled, poll_interval_seconds,
 		coalesce_queue_limit, last_synced_at, next_sync_at, last_error, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		monitor.Repository, monitor.Host, monitor.Owner, monitor.Name, monitor.RemoteName,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		monitor.Repository, monitor.Host, monitor.Owner, monitor.Name, monitor.RemoteName, monitor.ProjectName,
 		boolToInt(monitor.Enabled), monitor.PollIntervalSeconds, monitor.CoalesceQueueLimit,
 		nullableTime(monitor.LastSyncedAt), nullableTime(monitor.NextSyncAt), nullableString(monitor.LastError),
 		formatTime(monitor.CreatedAt), formatTime(monitor.UpdatedAt))
@@ -39,10 +39,10 @@ func (s *Store) CreateRepositoryMonitor(ctx context.Context, monitor protocol.Gi
 // poll interval, and the coalesce queue limit (ADR-007 section 6).
 func (s *Store) UpdateRepositoryMonitorSettings(ctx context.Context, monitor protocol.GitHubRepositoryMonitor, updatedAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE github_repository_monitors
-		SET host = ?, owner = ?, name = ?, remote_name = ?, enabled = ?,
+		SET host = ?, owner = ?, name = ?, remote_name = ?, project_name = ?, enabled = ?,
 			poll_interval_seconds = ?, coalesce_queue_limit = ?, updated_at = ?
 		WHERE repository = ?`,
-		monitor.Host, monitor.Owner, monitor.Name, monitor.RemoteName, boolToInt(monitor.Enabled),
+		monitor.Host, monitor.Owner, monitor.Name, monitor.RemoteName, monitor.ProjectName, boolToInt(monitor.Enabled),
 		monitor.PollIntervalSeconds, monitor.CoalesceQueueLimit, formatTime(updatedAt), monitor.Repository)
 	return updateResult("update github repository monitor settings", result, err)
 }
@@ -94,7 +94,7 @@ func (s *Store) DeleteRepositoryMonitor(ctx context.Context, repository string) 
 	return updateResult("delete github repository monitor", result, err)
 }
 
-const repositoryMonitorSelect = `SELECT repository, host, owner, name, remote_name, enabled,
+const repositoryMonitorSelect = `SELECT repository, host, owner, name, remote_name, project_name, enabled,
 	poll_interval_seconds, coalesce_queue_limit, last_synced_at, next_sync_at, last_error,
 	created_at, updated_at FROM github_repository_monitors`
 
@@ -103,7 +103,7 @@ func scanRepositoryMonitor(row scanner) (protocol.GitHubRepositoryMonitor, error
 	var enabled int
 	var lastSyncedAt, nextSyncAt, lastError sql.NullString
 	var createdAt, updatedAt string
-	if err := row.Scan(&monitor.Repository, &monitor.Host, &monitor.Owner, &monitor.Name, &monitor.RemoteName,
+	if err := row.Scan(&monitor.Repository, &monitor.Host, &monitor.Owner, &monitor.Name, &monitor.RemoteName, &monitor.ProjectName,
 		&enabled, &monitor.PollIntervalSeconds, &monitor.CoalesceQueueLimit, &lastSyncedAt, &nextSyncAt, &lastError,
 		&createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

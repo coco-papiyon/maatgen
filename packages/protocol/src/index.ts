@@ -163,6 +163,7 @@ export interface GitHubRepositoryMonitor {
   owner: string;
   name: string;
   remoteName: string;
+  projectName?: string;
   enabled: boolean;
   pollIntervalSeconds: number;
   coalesceQueueLimit: number;
@@ -254,6 +255,7 @@ export interface GitHubRepositoryResolution {
 export interface CreateGitHubMonitorRequest {
   workspace: string;
   remoteName?: string;
+  projectName?: string;
   pollIntervalSeconds: number;
   coalesceQueueLimit?: number;
 }
@@ -264,6 +266,7 @@ export interface UpdateGitHubMonitorRequest {
   pollIntervalSeconds: number;
   coalesceQueueLimit: number;
   remoteName?: string;
+  projectName?: string;
 }
 
 export interface GitHubSyncResult {

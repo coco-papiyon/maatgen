@@ -116,6 +116,7 @@ type GitHubRepositoryMonitor struct {
 	Owner               string     `json:"owner"`
 	Name                string     `json:"name"`
 	RemoteName          string     `json:"remoteName"`
+	ProjectName         string     `json:"projectName,omitempty"`
 	Enabled             bool       `json:"enabled"`
 	PollIntervalSeconds int        `json:"pollIntervalSeconds"`
 	CoalesceQueueLimit  int        `json:"coalesceQueueLimit"`
@@ -289,6 +290,7 @@ type GitHubRepositoryResolution struct {
 type CreateGitHubMonitorRequest struct {
 	Workspace           string  `json:"workspace"`
 	RemoteName          *string `json:"remoteName,omitempty"`
+	ProjectName         string  `json:"projectName,omitempty"`
 	PollIntervalSeconds int     `json:"pollIntervalSeconds"`
 	CoalesceQueueLimit  int     `json:"coalesceQueueLimit,omitempty"`
 }
@@ -301,6 +303,7 @@ type UpdateGitHubMonitorRequest struct {
 	PollIntervalSeconds int     `json:"pollIntervalSeconds"`
 	CoalesceQueueLimit  int     `json:"coalesceQueueLimit"`
 	RemoteName          *string `json:"remoteName,omitempty"`
+	ProjectName         string  `json:"projectName,omitempty"`
 }
 
 // GitHubSyncResult reports the outcome of a manual "sync now" action

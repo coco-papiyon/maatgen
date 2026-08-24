@@ -23,6 +23,7 @@ const syncMessage = ref('');
 const remoteNameChoice = ref('');
 const pollIntervalSeconds = ref(300);
 const coalesceQueueLimit = ref(20);
+const projectName = ref('');
 const monitorEnabled = ref(true);
 const savingMonitor = ref(false);
 
@@ -44,6 +45,7 @@ async function refresh() {
       monitorEnabled.value = resolution.value.monitor.enabled;
       pollIntervalSeconds.value = resolution.value.monitor.pollIntervalSeconds;
       coalesceQueueLimit.value = resolution.value.monitor.coalesceQueueLimit;
+      projectName.value = resolution.value.monitor.projectName ?? '';
       remoteNameChoice.value = resolution.value.monitor.remoteName;
       rules.value = await api.listGitHubTriggerRules(githubWorkspace.value);
     } else {
@@ -66,6 +68,7 @@ async function createMonitor() {
       ...(remoteNameChoice.value ? { remoteName: remoteNameChoice.value } : {}),
       pollIntervalSeconds: pollIntervalSeconds.value,
       coalesceQueueLimit: coalesceQueueLimit.value,
+      ...(projectName.value.trim() ? { projectName: projectName.value.trim() } : {}),
     });
     await refresh();
   } catch (cause) {
@@ -84,6 +87,7 @@ async function updateMonitor() {
       enabled: monitorEnabled.value,
       pollIntervalSeconds: pollIntervalSeconds.value,
       coalesceQueueLimit: coalesceQueueLimit.value,
+      ...(projectName.value.trim() ? { projectName: projectName.value.trim() } : { projectName: '' }),
       ...(remoteNameChoice.value ? { remoteName: remoteNameChoice.value } : {}),
     });
     await refresh();
@@ -247,6 +251,14 @@ onMounted(() => void refresh());
           <dt v-if="resolution.selected || monitor">GitHub</dt>
           <dd v-if="monitor">{{ monitor.host }}/{{ monitor.owner }}/{{ monitor.name }} (remote: {{ monitor.remoteName }})</dd>
           <dd v-else-if="resolution.selected">{{ resolution.selected.host }}/{{ resolution.selected.owner }}/{{ resolution.selected.name }} (remote: {{ resolution.selected.remoteName }})</dd>
+          <dt>プロジェクト名</dt>
+          <dd>
+            <div class="github-inline-field">
+              <input v-model="projectName" placeholder="Roadmap（任意）" aria-label="プロジェクト名" />
+              <button v-if="monitor" type="button" :disabled="savingMonitor" @click="updateMonitor">プロジェクト名を保存</button>
+            </div>
+            <small v-if="!monitor" class="github-field-hint">監視を開始すると保存できます。</small>
+          </dd>
         </dl>
 
         <p v-if="hasNoRemote" class="github-error">このリポジトリにはGitHubを指すremoteが見つかりません。</p>

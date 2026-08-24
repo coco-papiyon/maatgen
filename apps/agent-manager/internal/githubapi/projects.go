@@ -20,42 +20,51 @@ type projectV2FieldValue struct {
 	Typename string `graphql:"__typename"`
 	Text     struct {
 		Text githubv4.String
+		Field projectV2Field
 	} `graphql:"... on ProjectV2ItemFieldTextValue"`
 	SingleSelect struct {
 		Name githubv4.String
+		Field projectV2Field
 	} `graphql:"... on ProjectV2ItemFieldSingleSelectValue"`
 	Number struct {
 		Number githubv4.Float
+		Field projectV2Field
 	} `graphql:"... on ProjectV2ItemFieldNumberValue"`
 	Date struct {
 		Date githubv4.Date
+		Field projectV2Field
 	} `graphql:"... on ProjectV2ItemFieldDateValue"`
-	Field struct {
-		Common struct {
-			Name githubv4.String
-		} `graphql:"... on ProjectV2FieldCommon"`
-	} `graphql:"field"`
+}
+
+type projectV2Field struct {
+	Common struct {
+		Name githubv4.String
+	} `graphql:"... on ProjectV2FieldCommon"`
 }
 
 func (v projectV2FieldValue) resolve() (name, value string, ok bool) {
-	name = string(v.Field.Common.Name)
-	if name == "" {
-		return "", "", false
-	}
 	switch v.Typename {
 	case "ProjectV2ItemFieldTextValue":
-		return name, string(v.Text.Text), true
+		name = string(v.Text.Field.Common.Name)
+		value = string(v.Text.Text)
 	case "ProjectV2ItemFieldSingleSelectValue":
-		return name, string(v.SingleSelect.Name), true
+		name = string(v.SingleSelect.Field.Common.Name)
+		value = string(v.SingleSelect.Name)
 	case "ProjectV2ItemFieldNumberValue":
-		return name, strconv.FormatFloat(float64(v.Number.Number), 'f', -1, 64), true
+		name = string(v.Number.Field.Common.Name)
+		value = strconv.FormatFloat(float64(v.Number.Number), 'f', -1, 64)
 	case "ProjectV2ItemFieldDateValue":
-		return name, v.Date.Date.Time.Format("2006-01-02"), true
+		name = string(v.Date.Field.Common.Name)
+		value = v.Date.Date.Time.Format("2006-01-02")
 	default:
 		// Iteration fields and other value types not yet needed by any
 		// filter (ADR-007 section 3) are ignored rather than guessed at.
 		return "", "", false
 	}
+	if name == "" {
+		return "", "", false
+	}
+	return name, value, true
 }
 
 type projectV2Item struct {

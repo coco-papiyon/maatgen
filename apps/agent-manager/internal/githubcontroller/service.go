@@ -148,7 +148,7 @@ func (s *Service) CreateMonitor(ctx context.Context, request protocol.CreateGitH
 	now := s.now().UTC()
 	monitor := protocol.GitHubRepositoryMonitor{
 		Repository: repository, Host: candidate.Host, Owner: candidate.Owner, Name: candidate.Name,
-		RemoteName: candidate.RemoteName, Enabled: true, PollIntervalSeconds: request.PollIntervalSeconds,
+		RemoteName: candidate.RemoteName, ProjectName: strings.TrimSpace(request.ProjectName), Enabled: true, PollIntervalSeconds: request.PollIntervalSeconds,
 		CoalesceQueueLimit: coalesceLimit, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.store.CreateRepositoryMonitor(ctx, monitor); err != nil {
@@ -178,6 +178,7 @@ func (s *Service) UpdateMonitor(ctx context.Context, request protocol.UpdateGitH
 		coalesceLimit = defaultCoalesceQueueLimit
 	}
 	updated.CoalesceQueueLimit = coalesceLimit
+	updated.ProjectName = strings.TrimSpace(request.ProjectName)
 	if request.RemoteName != nil && *request.RemoteName != existing.RemoteName {
 		candidate, err := s.resolveCandidate(ctx, repository, request.RemoteName)
 		if err != nil {

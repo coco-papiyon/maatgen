@@ -60,8 +60,8 @@ function statusValue(item: (typeof items.value)[number]): string {
               <td>{{ item.title }}</td>
               <td>{{ item.state }}</td>
               <td>{{ item.author.login }}</td>
-              <td>{{ item.assignees.map((a) => a.login).join(', ') }}</td>
-              <td>{{ item.labels.map((l) => l.name).join(', ') }}</td>
+              <td>{{ (item.assignees ?? []).map((a) => a.login).join(', ') }}</td>
+              <td>{{ (item.labels ?? []).map((l) => l.name).join(', ') }}</td>
               <td>{{ statusValue(item) }}</td>
               <td>{{ item.updatedAt }}</td>
             </tr>
