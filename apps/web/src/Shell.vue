@@ -12,7 +12,6 @@ function routeName(): string {
   return typeof route.name === 'string' ? route.name : '';
 }
 
-const isGitHubArea = computed(() => routeName().startsWith('github'));
 const isIssuesArea = computed(() => routeName().startsWith('github-issue'));
 const isPullsArea = computed(() => routeName().startsWith('github-pull'));
 
@@ -36,13 +35,10 @@ const repositoryDisplay = computed(() => {
   <div class="shell">
     <nav class="shell-nav" aria-label="共通ナビゲーション">
       <RouterLink to="/" class="shell-nav-link" :class="{ active: routeName() === 'sessions' }">Session</RouterLink>
-      <div class="shell-nav-group" :class="{ active: isGitHubArea }">
-        <span class="shell-nav-group-label">GitHub監視</span>
-        <RouterLink to="/github/events" class="shell-nav-link" :class="{ active: routeName() === 'github-events' }">イベント履歴</RouterLink>
-        <RouterLink to="/github/issues" class="shell-nav-link" :class="{ active: isIssuesArea }">Issue</RouterLink>
-        <RouterLink to="/github/pulls" class="shell-nav-link" :class="{ active: isPullsArea }">PR</RouterLink>
-        <RouterLink to="/github/settings" class="shell-nav-link" :class="{ active: routeName() === 'github-settings' }">設定</RouterLink>
-      </div>
+      <RouterLink to="/github/issues" class="shell-nav-link" :class="{ active: isIssuesArea }">Issue</RouterLink>
+      <RouterLink to="/github/pulls" class="shell-nav-link" :class="{ active: isPullsArea }">PR</RouterLink>
+      <RouterLink to="/github/events" class="shell-nav-link" :class="{ active: routeName() === 'github-events' }">イベント履歴</RouterLink>
+      <RouterLink to="/github/settings" class="shell-nav-link" :class="{ active: routeName() === 'github-settings' }">設定</RouterLink>
       <span class="shell-repository" :class="githubRepositoryStatus" :title="githubWorkspace">{{ repositoryDisplay }}</span>
     </nav>
     <div class="shell-body">

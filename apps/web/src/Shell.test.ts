@@ -44,8 +44,15 @@ describe('Shell', () => {
     await router.push({ name: 'github-events' });
     await flushPromises();
     expect(wrapper.text()).toContain('イベント履歴');
-    expect(wrapper.find('.shell-nav-group.active').exists()).toBe(true);
     expect(wrapper.find('a[href="/github/events"]').classes()).toContain('active');
+  });
+
+  it('renders the requested top menu order without a GitHub monitoring group', async () => {
+    const { wrapper } = await mountShell('/');
+    const labels = wrapper.findAll('.shell-nav > .shell-nav-link').map((link) => link.text());
+    expect(labels).toEqual(['Session', 'Issue', 'PR', 'イベント履歴', '設定']);
+    expect(wrapper.find('.shell-nav-group').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('GitHub監視');
   });
 
   it('redirects "/github" to the event history route', async () => {
