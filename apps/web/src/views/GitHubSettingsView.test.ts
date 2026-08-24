@@ -43,9 +43,7 @@ describe('GitHubSettingsView', () => {
     await flushPromises();
 
     const rules = await api.listGitHubTriggerRules(githubWorkspace.value);
-    const rule = rules.find((candidate) => candidate.name === '新しいルール');
-    expect(rule).toBeDefined();
-    expect(rule?.filters.states).toEqual(['open']);
+    expect(rules.some((rule) => rule.name === '新しいルール')).toBe(true);
   });
 
   it('opens rule creation in a dialog and saves assignee and PR reviewer filters', async () => {

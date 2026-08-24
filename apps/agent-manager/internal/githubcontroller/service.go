@@ -278,7 +278,7 @@ func (s *Service) CreateRule(ctx context.Context, request protocol.GitHubTrigger
 	now := s.now().UTC()
 	rule := protocol.GitHubTriggerRule{
 		ID: id, Repository: repository, Name: strings.TrimSpace(request.Name), Enabled: request.Enabled,
-		EventKinds: request.EventKinds, Filters: normalizeRuleFilters(request.Filters), PromptTemplate: request.PromptTemplate,
+		EventKinds: request.EventKinds, Filters: request.Filters, PromptTemplate: request.PromptTemplate,
 		IncludeBody: request.IncludeBody, Provider: request.Provider, Model: request.Model,
 		ReasoningEffort: request.ReasoningEffort, ConcurrencyPolicy: normalizeConcurrencyPolicy(request.ConcurrencyPolicy),
 		CreatedAt: now, UpdatedAt: now,
@@ -305,7 +305,7 @@ func (s *Service) UpdateRule(ctx context.Context, id string, request protocol.Gi
 	updated.Name = strings.TrimSpace(request.Name)
 	updated.Enabled = request.Enabled
 	updated.EventKinds = request.EventKinds
-	updated.Filters = normalizeRuleFilters(request.Filters)
+	updated.Filters = request.Filters
 	updated.PromptTemplate = request.PromptTemplate
 	updated.IncludeBody = request.IncludeBody
 	updated.Provider = request.Provider
@@ -317,16 +317,6 @@ func (s *Service) UpdateRule(ctx context.Context, id string, request protocol.Gi
 		return protocol.GitHubTriggerRule{}, err
 	}
 	return updated, nil
-}
-
-// normalizeRuleFilters applies the public default for state conditions. An
-// omitted state condition means Open, so closed items are only considered when
-// a rule explicitly selects Close or Open+Close.
-func normalizeRuleFilters(filters protocol.GitHubMonitorFilters) protocol.GitHubMonitorFilters {
-	if len(filters.States) == 0 {
-		filters.States = []protocol.GitHubItemState{protocol.GitHubItemOpen}
-	}
-	return filters
 }
 
 func (s *Service) DeleteRule(ctx context.Context, id string) error {

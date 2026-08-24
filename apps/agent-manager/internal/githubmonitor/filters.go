@@ -60,11 +60,7 @@ func Matches(filters protocol.GitHubMonitorFilters, item protocol.GitHubItem, ac
 	if len(filters.Milestones) > 0 && !matchesMilestone(filters.Milestones, item.Milestone) {
 		return false
 	}
-	states := filters.States
-	if len(states) == 0 {
-		states = []protocol.GitHubItemState{protocol.GitHubItemOpen}
-	}
-	if !containsState(states, item.State) {
+	if len(filters.States) > 0 && !containsState(filters.States, item.State) {
 		return false
 	}
 	if filters.Draft != nil && !matchesDraft(*filters.Draft, item.PullRequest) {

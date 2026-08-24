@@ -17,9 +17,12 @@ type fakeGitHubClient struct {
 	projectErr    map[int]error
 	listIssuesErr error
 	listPullsErr  error
+	issueState    string
+	pullState     string
 }
 
 func (f *fakeGitHubClient) ListIssues(ctx context.Context, owner, repo string, opts githubapi.ListOptions) ([]protocol.GitHubItem, error) {
+	f.issueState = opts.State
 	if f.listIssuesErr != nil {
 		return nil, f.listIssuesErr
 	}
@@ -27,6 +30,7 @@ func (f *fakeGitHubClient) ListIssues(ctx context.Context, owner, repo string, o
 }
 
 func (f *fakeGitHubClient) ListPullRequests(ctx context.Context, owner, repo string, opts githubapi.ListOptions) ([]protocol.GitHubItem, error) {
+	f.pullState = opts.State
 	if f.listPullsErr != nil {
 		return nil, f.listPullsErr
 	}
@@ -79,6 +83,9 @@ func TestPollerSyncRepositoryFirstSyncEstablishesBaselineWithoutFiring(t *testin
 	}
 	if result.IssuesProcessed != 1 || result.EventsMatched != 0 {
 		t.Fatalf("result = %#v, want 1 issue processed and 0 events (first sync)", result)
+	}
+	if client.issueState != "open" || client.pullState != "open" {
+		t.Fatalf("list states = issue %q, pull request %q; want open", client.issueState, client.pullState)
 	}
 
 	updated, err := store.GetRepositoryMonitor(ctx, repository)
