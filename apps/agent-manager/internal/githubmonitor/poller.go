@@ -95,13 +95,9 @@ func NewPoller(store PollerStore, evaluator *Evaluator, clients ClientFactory, r
 // repository's observed items or a stale LastSyncedAt, which would cause
 // the new target's items to be evaluated as spurious changes.
 //
-// State "all" is fetched (not just "open") so a transition to closed is
-// observed even though Maatgen never received a webhook or event stream
-// for it; for a repository with a very large Issue/PR history this means
-// each poll is more expensive than fetching only open items. This is an
-// accepted, documented v1 simplification, not a fundamental constraint: a
-// future revision could instead diff the fetched open set against
-// previously-observed open items and fetch closures individually.
+// Only open items are fetched. This bounds polling work to the repository's
+// active Issue/PR set instead of walking its entire closed history on every
+// cycle. Closed transitions are therefore outside polling scope.
 func (p *Poller) SyncRepository(ctx context.Context, repository string) (SyncResult, error) {
 	monitor, err := p.store.GetRepositoryMonitor(ctx, repository)
 	if err != nil {
@@ -134,7 +130,7 @@ func (p *Poller) SyncRepository(ctx context.Context, repository string) (SyncRes
 	}
 
 	var result SyncResult
-	issues, err := client.ListIssues(ctx, monitor.Owner, monitor.Name, githubapi.ListOptions{State: "all"})
+	issues, err := client.ListIssues(ctx, monitor.Owner, monitor.Name, githubapi.ListOptions{State: "open"})
 	if err != nil {
 		p.recordFailure(ctx, monitor, err)
 		return result, fmt.Errorf("sync github repository: list issues: %w", err)
@@ -150,7 +146,7 @@ func (p *Poller) SyncRepository(ctx context.Context, repository string) (SyncRes
 		result.EventsMatched += len(events)
 	}
 
-	pulls, err := client.ListPullRequests(ctx, monitor.Owner, monitor.Name, githubapi.ListOptions{State: "all"})
+	pulls, err := client.ListPullRequests(ctx, monitor.Owner, monitor.Name, githubapi.ListOptions{State: "open"})
 	if err != nil {
 		p.recordFailure(ctx, monitor, err)
 		return result, fmt.Errorf("sync github repository: list pull requests: %w", err)

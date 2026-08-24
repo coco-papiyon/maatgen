@@ -1072,7 +1072,7 @@ src/auth.test.ts
 
 ### GitHub監視ルール
 
-Web版のGitHub監視設定では、監視ルールの作成・編集フォームをルール一覧上のポップアップとして表示する。Issue／PRには担当者loginを条件指定でき、PRには加えてレビュー依頼中ユーザーのloginをレビューア条件として指定できる。レビュー依頼の変更はGitHub itemの正規化状態と変更検知hashに含める。VS Code版は監視ルール編集画面を持たず、自動実行されたSessionの参照のみ提供する。
+Web版のGitHub監視設定では、監視ルールの作成・編集フォームをルール一覧上のポップアップとして表示する。Issue／PRには担当者loginを条件指定でき、PRには加えてレビュー依頼中ユーザーのloginをレビューア条件として指定できる。レビュー依頼の変更はGitHub itemの正規化状態と変更検知hashに含める。ポーラーはOpenのIssue／PRだけを取得し、リポジトリの全クローズ履歴を毎回走査しない。VS Code版は監視ルール編集画面を持たず、自動実行されたSessionの参照のみ提供する。
 
 定期ポーリングはAgent Manager起動中にSchedulerが30秒間隔で期限到来を確認し、各monitorの`pollIntervalSeconds`と`nextSyncAt`に従って実行する。Schedulerはポーリング開始・完了・失敗を、GitHub API adapterはIssue／PR一覧取得の開始・完了・失敗と取得件数を構造化ログへ出力する。認証tokenやIssue／PR本文はログへ出力しない。
 
