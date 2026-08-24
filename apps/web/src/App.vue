@@ -365,8 +365,13 @@ function providerUsageText(value: ProviderUsage | undefined): string {
   return value?.windows.map((window) => `${window.name} ${window.remainingPercent}%`).join(' · ') ?? '';
 }
 
-function formatApprovalRule(argv?: string[]): string {
-  return (argv ?? []).map((value) => /\s|["']/.test(value) ? JSON.stringify(value) : value).join(' ');
+function formatApprovalRule(segment?: { command: string; argv: string[] }): string {
+  if (segment?.argv.length) return segment.argv.map((value) => /\s|["']/.test(value) ? JSON.stringify(value) : value).join(' ');
+  return segment?.command ?? '';
+}
+
+function defaultApprovalSegment(approval?: CommandApproval): { command: string; argv: string[] } | undefined {
+  return approval?.segments.find((segment) => !segment.allowed) ?? approval?.segments[0];
 }
 
 function parseApprovalRule(value: string): string[] {
@@ -493,7 +498,7 @@ async function refreshSelected(full = false) {
   changes.value = changeSet;
   usage.value = sessionUsage;
   approvals.value = pendingApprovals;
-  if (pendingApprovals[0] && !approvalRule.value) approvalRule.value = formatApprovalRule(pendingApprovals[0].segments[0]?.argv);
+  if (pendingApprovals[0] && !approvalRule.value) approvalRule.value = formatApprovalRule(defaultApprovalSegment(pendingApprovals[0]));
   updateDiagnosticFromEvents(newEvents);
   scrollTimelineToBottom();
   if (full) void refreshProviderUsage(id);
@@ -511,7 +516,7 @@ async function refreshSelectedState(sessionId: string) {
   changes.value = changeSet;
   usage.value = sessionUsage;
   approvals.value = pendingApprovals;
-  approvalRule.value = formatApprovalRule(pendingApprovals[0]?.segments[0]?.argv);
+  approvalRule.value = formatApprovalRule(defaultApprovalSegment(pendingApprovals[0]));
   if (session.status !== 'active') {
     eventStream?.stop();
     eventStream = undefined;
@@ -566,7 +571,7 @@ async function decideApproval(decision: ApprovalDecision) {
       ...(['allow_session', 'allow_permanent'].includes(decision) ? { ruleArgv } : {}),
     });
     approvals.value = await api.listApprovals(selected.value!.id, true);
-    approvalRule.value = formatApprovalRule(approvals.value[0]?.segments[0]?.argv);
+    approvalRule.value = formatApprovalRule(defaultApprovalSegment(approvals.value[0]));
   });
 }
 
@@ -1186,7 +1191,11 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           <li v-for="factor in pendingApproval.factors" :key="factor">{{ factor }}</li>
         </ul>
         <div class="approval-segments">
-          <span v-for="segment in pendingApproval.segments" :key="segment.index"><strong>{{ segment.index + 1 }}</strong><code>{{ segment.command }}</code></span>
+          <span v-for="segment in pendingApproval.segments" :key="segment.index">
+            <strong>{{ segment.index + 1 }}</strong>
+            <code>{{ segment.command }}</code>
+            <em :class="['segment-status', segment.allowed ? 'allowed' : 'pending']">{{ segment.allowed ? '承認済み' : '未承認' }}</em>
+          </span>
         </div>
         <label class="approval-rule">
           許可ルール（引数ごとに空白で区切り、<code>*</code>を使用可能）

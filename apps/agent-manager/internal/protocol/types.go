@@ -171,6 +171,7 @@ type CommandSegment struct {
 	Index   int      `json:"index"`
 	Command string   `json:"command"`
 	Argv    []string `json:"argv"`
+	Allowed bool     `json:"allowed"`
 }
 
 type CommandApproval struct {

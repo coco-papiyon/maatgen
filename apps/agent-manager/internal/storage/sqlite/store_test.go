@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -220,28 +223,135 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	defer second.Close()
 }
 
+func TestRuleItemUniqueMigrationPreservesHistoryAndBlocksFutureDuplicates(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "manager.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	for _, entry := range entries {
+		if entry.Name() >= "017_" || entry.IsDir() {
+			continue
+		}
+		content, readErr := migrationsFS.ReadFile("migrations/" + entry.Name())
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if _, err = db.ExecContext(ctx, string(content)); err != nil {
+			t.Fatalf("apply %s: %v", entry.Name(), err)
+		}
+		versionText, _, _ := strings.Cut(entry.Name(), "_")
+		version, _ := strconv.Atoi(versionText)
+		if _, err = db.ExecContext(ctx, "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)", version, "2026-08-24T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO github_repository_monitors(
+		repository, host, owner, name, remote_name, enabled, poll_interval_seconds,
+		coalesce_queue_limit, created_at, updated_at
+	) VALUES ('C:/repo', 'github.com', 'owner', 'repo', 'origin', 1, 300, 20,
+		'2026-08-24T00:00:00Z', '2026-08-24T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO github_trigger_rules(
+		id, repository, name, enabled, event_kinds_json, filters_json,
+		prompt_template, provider, concurrency_policy, created_at, updated_at
+	) VALUES ('rule-1', 'C:/repo', 'Rule', 1, '["issue"]', '{}',
+		'Run', 'codex', 'coalesce', '2026-08-24T00:00:00Z', '2026-08-24T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, values := range []struct{ id, action, key, created string }{
+		{"event-opened", "opened", "old-opened-key", "2026-08-24T01:00:00Z"},
+		{"event-closed", "closed", "old-closed-key", "2026-08-24T02:00:00Z"},
+	} {
+		if _, err = db.ExecContext(ctx, `INSERT INTO github_monitor_events(
+			id, repository, rule_id, kind, number, action, after_state_hash,
+			delivery_key, status, item_snapshot_json, created_at, updated_at
+		) VALUES (?, 'C:/repo', 'rule-1', 'issue', 7, ?, 'hash', ?, 'completed', '{}', ?, ?)`,
+			values.id, values.action, values.key, values.created, values.created); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("upgrade store: %v", err)
+	}
+	defer store.Close()
+	var total, keyed int
+	if err = store.db.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(delivery_key)
+		FROM github_monitor_events WHERE rule_id = 'rule-1' AND kind = 'issue' AND number = 7`).Scan(&total, &keyed); err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || keyed != 1 {
+		t.Fatalf("migrated events: total=%d keyed=%d, want preserved total=2 keyed=1", total, keyed)
+	}
+
+	ruleID := "rule-1"
+	event := testMonitorEvent("event-reopened", "C:/repo", time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC))
+	event.RuleID = &ruleID
+	event.Number = 7
+	event.Action = "reopened"
+	if inserted, insertErr := store.InsertMonitorEvent(ctx, event); insertErr != nil || inserted {
+		t.Fatalf("post-migration duplicate: inserted=%v err=%v, want silent deduplication", inserted, insertErr)
+	}
+}
+
 func TestMultiAgentMigrationPreservesCodexSessions(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "manager.db")
 	db, err := sql.Open("sqlite", path)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	for version, name := range []string{"001_initial.sql", "002_change_store.sql", "003_session_cleanup.sql", "004_direct_checkpoints.sql"} {
 		content, readErr := migrationsFS.ReadFile("migrations/" + name)
-		if readErr != nil { t.Fatal(readErr) }
-		if _, err = db.ExecContext(ctx, string(content)); err != nil { t.Fatalf("apply %s: %v", name, err) }
-		if _, err = db.ExecContext(ctx, "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)", version+1, formatTime(time.Now().UTC())); err != nil { t.Fatal(err) }
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if _, err = db.ExecContext(ctx, string(content)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+		if _, err = db.ExecContext(ctx, "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)", version+1, formatTime(time.Now().UTC())); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err = db.ExecContext(ctx, `INSERT INTO sessions(id, agent, workspace, codex_thread_id, status, created_at) VALUES ('session-old', 'codex', 'C:/repo', 'thread-old', 'active', '2026-08-15T00:00:00Z')`); err != nil { t.Fatal(err) }
-	if _, err = db.ExecContext(ctx, `INSERT INTO runs(id, session_id, status, prompt, created_at) VALUES ('run-old', 'session-old', 'completed', 'done', '2026-08-15T00:00:00Z')`); err != nil { t.Fatal(err) }
-	if _, err = db.ExecContext(ctx, `INSERT INTO events(id, session_id, run_id, sequence, source, event_type, schema_version, payload_json, created_at) VALUES ('event-old', 'session-old', 'run-old', 1, 'codex', 'run_completed', 1, '{}', '2026-08-15T00:00:00Z')`); err != nil { t.Fatal(err) }
-	if err = db.Close(); err != nil { t.Fatal(err) }
+	if _, err = db.ExecContext(ctx, `INSERT INTO sessions(id, agent, workspace, codex_thread_id, status, created_at) VALUES ('session-old', 'codex', 'C:/repo', 'thread-old', 'active', '2026-08-15T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO runs(id, session_id, status, prompt, created_at) VALUES ('run-old', 'session-old', 'completed', 'done', '2026-08-15T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO events(id, session_id, run_id, sequence, source, event_type, schema_version, payload_json, created_at) VALUES ('event-old', 'session-old', 'run-old', 1, 'codex', 'run_completed', 1, '{}', '2026-08-15T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	store, err := Open(ctx, path)
-	if err != nil { t.Fatalf("upgrade store: %v", err) }
+	if err != nil {
+		t.Fatalf("upgrade store: %v", err)
+	}
 	defer store.Close()
 	session, err := store.GetSession(ctx, "session-old")
-	if err != nil || session.AgentThreadID == nil || *session.AgentThreadID != "thread-old" { t.Fatalf("session = %#v, err = %v", session, err) }
-	if _, err = store.GetRun(ctx, "run-old"); err != nil { t.Fatalf("preserved run: %v", err) }
+	if err != nil || session.AgentThreadID == nil || *session.AgentThreadID != "thread-old" {
+		t.Fatalf("session = %#v, err = %v", session, err)
+	}
+	if _, err = store.GetRun(ctx, "run-old"); err != nil {
+		t.Fatalf("preserved run: %v", err)
+	}
 	events, err := store.ListEventsAfter(ctx, "session-old", 0, 10)
-	if err != nil || len(events) != 1 || events[0].Source != protocol.EventSourceCodex { t.Fatalf("events = %#v, err = %v", events, err) }
+	if err != nil || len(events) != 1 || events[0].Source != protocol.EventSourceCodex {
+		t.Fatalf("events = %#v, err = %v", events, err)
+	}
 }

@@ -36,7 +36,10 @@ type Assessment struct {
 }
 
 type Reviewer interface {
-	Review(context.Context, agent.ApprovalRequest, []protocol.CommandSegment) (Assessment, error)
+	// approvedCommands lists argv patterns the caller has already approved
+	// for this session or permanently, so the reviewer can weigh a close
+	// variant of an approved command as no riskier than what was approved.
+	Review(ctx context.Context, request agent.ApprovalRequest, segments []protocol.CommandSegment, approvedCommands [][]string) (Assessment, error)
 }
 
 type RuleSaver func([]string) error
@@ -90,6 +93,10 @@ func (s *Service) Handle(ctx context.Context, request agent.ApprovalRequest) (ag
 		return agent.ApprovalDecision{Approved: true, Reason: "command approval is disabled"}, nil
 	}
 	segments, parseErr := ParseCommand(request.Command)
+	rules := s.rulesForSession(request.SessionID)
+	for index := range segments {
+		segments[index].Allowed = SegmentAllowed(segments[index], rules)
+	}
 	storedSegments := redactSegments(segments)
 	approval := protocol.CommandApproval{
 		ID: newID("approval"), SessionID: request.SessionID, RunID: request.RunID,
@@ -102,7 +109,7 @@ func (s *Service) Handle(ctx context.Context, request agent.ApprovalRequest) (ag
 		return agent.ApprovalDecision{}, err
 	}
 
-	if parseErr == nil && AllSegmentsAllowed(segments, s.rulesForSession(request.SessionID)) {
+	if parseErr == nil && AllSegmentsAllowed(segments, rules) {
 		decided, err := s.decide(context.WithoutCancel(ctx), approval.ID, protocol.ApprovalAllowOnce, protocol.ApprovalScopeOnce, protocol.ApprovalSourceConfig, nil)
 		if err != nil {
 			return agent.ApprovalDecision{}, err
@@ -113,7 +120,7 @@ func (s *Service) Handle(ctx context.Context, request agent.ApprovalRequest) (ag
 	if parseErr == nil && s.cfg.Reviewer != nil {
 		reviewRequest := request
 		reviewRequest.Command = approval.Command
-		assessment, err := s.review(ctx, reviewRequest, storedSegments)
+		assessment, err := s.review(ctx, reviewRequest, storedSegments, rules)
 		if err == nil {
 			_ = s.store.UpdateApprovalAssessment(context.WithoutCancel(ctx), approval.ID, assessment.Risk, assessment.Confidence, assessment.Summary, assessment.Factors)
 			approval.Risk, approval.Confidence, approval.Summary, approval.Factors = &assessment.Risk, &assessment.Confidence, &assessment.Summary, assessment.Factors
@@ -286,7 +293,7 @@ func (s *Service) Close() {
 	}
 }
 
-func (s *Service) review(ctx context.Context, request agent.ApprovalRequest, segments []protocol.CommandSegment) (Assessment, error) {
+func (s *Service) review(ctx context.Context, request agent.ApprovalRequest, segments []protocol.CommandSegment, approvedCommands [][]string) (Assessment, error) {
 	select {
 	case s.reviewSlots <- struct{}{}:
 		defer func() { <-s.reviewSlots }()
@@ -295,7 +302,7 @@ func (s *Service) review(ctx context.Context, request agent.ApprovalRequest, seg
 	}
 	reviewCtx, cancel := context.WithTimeout(ctx, s.cfg.ReviewerTimeout)
 	defer cancel()
-	return s.cfg.Reviewer.Review(reviewCtx, request, segments)
+	return s.cfg.Reviewer.Review(reviewCtx, request, segments, approvedCommands)
 }
 
 func (s *Service) decide(ctx context.Context, id string, decision protocol.ApprovalDecision, scope protocol.ApprovalScope, source protocol.ApprovalSource, rule []string) (protocol.CommandApproval, error) {

@@ -58,6 +58,7 @@ type Store interface {
 
 	ListMonitorEvents(ctx context.Context, repository string, limit int) ([]protocol.GitHubMonitorEvent, error)
 	GetMonitorEvent(ctx context.Context, id string) (protocol.GitHubMonitorEvent, error)
+	SkipMonitorEvent(ctx context.Context, id, reason string, updatedAt time.Time) error
 	CreateReplayEvent(ctx context.Context, originalEventID, newEventID string, createdAt time.Time) (protocol.GitHubMonitorEvent, error)
 }
 
@@ -380,6 +381,15 @@ func (s *Service) ReplayEvent(ctx context.Context, eventID string) (protocol.Git
 		return protocol.GitHubMonitorEvent{}, err
 	}
 	return s.store.CreateReplayEvent(ctx, eventID, newID, s.now().UTC())
+}
+
+// SkipEvent excludes an unstarted monitor event from automatic execution while
+// retaining it in the event history with the normal "skipped" status.
+func (s *Service) SkipEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error) {
+	if err := s.store.SkipMonitorEvent(ctx, eventID, "manually skipped by user", s.now().UTC()); err != nil {
+		return protocol.GitHubMonitorEvent{}, err
+	}
+	return s.store.GetMonitorEvent(ctx, eventID)
 }
 
 // ItemQuery narrows a live Issue/PR list request. All fields are optional;

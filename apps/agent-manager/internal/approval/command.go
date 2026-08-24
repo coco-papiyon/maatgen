@@ -15,26 +15,43 @@ func ParseCommand(command string) ([]protocol.CommandSegment, error) {
 	return parseCommand(command, 0)
 }
 
+// parseCommand splits command into per-operation segments wherever it safely
+// can, even when one part is unresolvable. A single dynamic or unsupported
+// part must never hide the sibling segments that were parsed successfully:
+// the caller needs every segment visible so a human can review each one, and
+// still refuses to auto-approve the whole command whenever the returned
+// error is non-nil.
 func parseCommand(command string, depth int) ([]protocol.CommandSegment, error) {
 	parts, err := splitCommand(command)
 	if err != nil {
 		return fallbackSegment(command), err
 	}
 	segments := make([]protocol.CommandSegment, 0, len(parts))
+	var parseErr error
 	for _, part := range parts {
-		argv, err := splitArgv(part)
-		if err != nil || len(argv) == 0 || dynamicExecutable(argv[0]) {
-			return fallbackSegment(command), ErrDynamicCommand
+		argv, argvErr := splitArgv(part)
+		if argvErr != nil || len(argv) == 0 || dynamicExecutable(argv[0]) {
+			segments = append(segments, unresolvedSegment(len(segments), part))
+			parseErr = ErrDynamicCommand
+			continue
 		}
 		if nested, ok := nestedCommand(argv); ok {
 			if depth >= 4 {
-				return fallbackSegment(command), ErrDynamicCommand
+				segments = append(segments, unresolvedSegment(len(segments), part))
+				parseErr = ErrDynamicCommand
+				continue
 			}
 			inner, innerErr := parseCommand(nested, depth+1)
 			if innerErr != nil {
-				return fallbackSegment(command), innerErr
+				parseErr = innerErr
+				if len(inner) == 1 && len(inner[0].Argv) == 0 {
+					inner[0].Command = strings.TrimSpace(part)
+				}
 			}
-			segments = append(segments, inner...)
+			for _, segment := range inner {
+				segment.Index = len(segments)
+				segments = append(segments, segment)
+			}
 			continue
 		}
 		segments = append(segments, protocol.CommandSegment{Index: len(segments), Command: strings.TrimSpace(part), Argv: argv})
@@ -42,7 +59,7 @@ func parseCommand(command string, depth int) ([]protocol.CommandSegment, error) 
 	if len(segments) == 0 {
 		return fallbackSegment(command), ErrDynamicCommand
 	}
-	return segments, nil
+	return segments, parseErr
 }
 
 // nestedCommand extracts the script passed to a shell wrapper. Approval must
@@ -85,6 +102,10 @@ func nestedCommand(argv []string) (string, bool) {
 
 func fallbackSegment(command string) []protocol.CommandSegment {
 	return []protocol.CommandSegment{{Index: 0, Command: strings.TrimSpace(command), Argv: []string{}}}
+}
+
+func unresolvedSegment(index int, part string) protocol.CommandSegment {
+	return protocol.CommandSegment{Index: index, Command: strings.TrimSpace(part), Argv: []string{}}
 }
 
 func splitCommand(command string) ([]string, error) {
@@ -206,22 +227,27 @@ func dynamicExecutable(executable string) bool {
 	return value == "eval" || value == "invoke-expression" || strings.HasPrefix(value, "$")
 }
 
+// SegmentAllowed reports whether segment individually matches one of rules.
+// A segment with no argv (unresolved dynamic syntax) never matches, since
+// there is nothing static to compare against a rule.
+func SegmentAllowed(segment protocol.CommandSegment, rules [][]string) bool {
+	if len(segment.Argv) == 0 {
+		return false
+	}
+	for _, rule := range rules {
+		if MatchArgv(rule, segment.Argv) {
+			return true
+		}
+	}
+	return false
+}
+
 func AllSegmentsAllowed(segments []protocol.CommandSegment, rules [][]string) bool {
 	if len(segments) == 0 {
 		return false
 	}
 	for _, segment := range segments {
-		if len(segment.Argv) == 0 {
-			return false
-		}
-		allowed := false
-		for _, rule := range rules {
-			if MatchArgv(rule, segment.Argv) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
+		if !SegmentAllowed(segment, rules) {
 			return false
 		}
 	}

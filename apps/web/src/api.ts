@@ -103,6 +103,7 @@ export interface AgentApi {
   updateGitHubTriggerRule(id: string, request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule>;
   deleteGitHubTriggerRule(id: string): Promise<void>;
   listGitHubMonitorEvents(workspace: string, limit?: number): Promise<GitHubMonitorEvent[]>;
+  skipGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent>;
   replayGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent>;
   listGitHubIssues(workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse>;
   getGitHubIssue(workspace: string, number: number): Promise<GitHubItem>;
@@ -290,6 +291,9 @@ export const httpAgentApi: AgentApi = {
   },
   replayGitHubMonitorEvent(eventId) {
     return request(`/api/v1/github/events/${encodeURIComponent(eventId)}/replay`, { method: 'POST' });
+  },
+  skipGitHubMonitorEvent(eventId) {
+    return request(`/api/v1/github/events/${encodeURIComponent(eventId)}/skip`, { method: 'POST' });
   },
   listGitHubIssues(workspace, query) {
     return request(`/api/v1/github/issues?${githubItemQueryString(workspace, query)}`);

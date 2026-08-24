@@ -55,6 +55,7 @@ type SessionCreator interface {
 type RunStarter interface {
 	StartRun(ctx context.Context, sessionID string, request protocol.SendMessageRequest) (protocol.AgentRun, error)
 	CancelRun(ctx context.Context, runID string) error
+	IsRepositoryBusy(repository string) bool
 }
 
 // Dispatcher is the Outbox dispatcher. Register ObserveRunTerminal with the
@@ -238,6 +239,14 @@ func (d *Dispatcher) dispatchQueued(ctx context.Context, event protocol.GitHubMo
 	prompt, err := renderPrompt(rule, monitor, event)
 	if err != nil {
 		d.failEvent(ctx, event.ID, err.Error())
+		return
+	}
+	if d.runs.IsRepositoryBusy(event.Repository) {
+		if rule.ConcurrencyPolicy == protocol.GitHubConcurrencySkip {
+			d.skipEvent(ctx, event.ID, "repository execution lock is held by another run")
+		}
+		// coalesce: leave the event queued for the next Tick. No Session is
+		// created until the repository can actually start processing it.
 		return
 	}
 

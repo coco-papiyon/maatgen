@@ -29,6 +29,7 @@ type fakeGitHubMonitorController struct {
 	lastRuleRequest     protocol.GitHubTriggerRuleRequest
 	lastRuleID          string
 	lastReplayEventID   string
+	lastSkipEventID     string
 	lastListEventsLimit int
 	lastItemQuery       githubcontroller.ItemQuery
 	lastItemNumber      int
@@ -86,6 +87,10 @@ func (f *fakeGitHubMonitorController) ListEvents(ctx context.Context, workspace 
 }
 func (f *fakeGitHubMonitorController) ReplayEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error) {
 	f.lastReplayEventID = eventID
+	return f.replay, f.err
+}
+func (f *fakeGitHubMonitorController) SkipEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error) {
+	f.lastSkipEventID = eventID
 	return f.replay, f.err
 }
 func (f *fakeGitHubMonitorController) ListIssues(ctx context.Context, workspace string, query githubcontroller.ItemQuery) (protocol.GitHubItemListResponse, error) {
@@ -287,6 +292,12 @@ func TestGitHubEventHistoryAndReplayAPI(t *testing.T) {
 	handler.ServeHTTP(recorder, authorizedRequest("POST", "/api/v1/github/events/event-1/replay"))
 	if recorder.Code != 201 || controller.lastReplayEventID != "event-1" {
 		t.Fatalf("status = %d, lastReplayEventID = %q", recorder.Code, controller.lastReplayEventID)
+	}
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, authorizedRequest("POST", "/api/v1/github/events/event-1/skip"))
+	if recorder.Code != 200 || controller.lastSkipEventID != "event-1" {
+		t.Fatalf("skip status = %d, lastSkipEventID = %q", recorder.Code, controller.lastSkipEventID)
 	}
 }
 

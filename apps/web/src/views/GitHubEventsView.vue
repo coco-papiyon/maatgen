@@ -12,8 +12,10 @@ const rules = ref<GitHubTriggerRule[]>([]);
 const loading = ref(false);
 const error = ref('');
 const replayingId = ref('');
+const skippingId = ref('');
 
 const REPLAYABLE = new Set(['skipped', 'failed', 'cancelled']);
+const SKIPPABLE = new Set(['detected', 'matched', 'queued']);
 
 function ruleName(ruleId: string | undefined): string {
   if (!ruleId) return '（削除されたルール）';
@@ -22,6 +24,10 @@ function ruleName(ruleId: string | undefined): string {
 
 function canReplay(event: GitHubMonitorEvent): boolean {
   return REPLAYABLE.has(event.status);
+}
+
+function canSkip(event: GitHubMonitorEvent): boolean {
+  return SKIPPABLE.has(event.status);
 }
 
 async function refresh() {
@@ -56,6 +62,19 @@ async function replay(event: GitHubMonitorEvent) {
     error.value = describeError(cause);
   } finally {
     replayingId.value = '';
+  }
+}
+
+async function skip(event: GitHubMonitorEvent) {
+  skippingId.value = event.id;
+  error.value = '';
+  try {
+    await api.skipGitHubMonitorEvent(event.id);
+    await refresh();
+  } catch (cause) {
+    error.value = describeError(cause);
+  } finally {
+    skippingId.value = '';
   }
 }
 
@@ -113,6 +132,9 @@ onMounted(() => void refresh());
             <span v-else class="github-meta">—</span>
           </td>
           <td>
+            <button v-if="canSkip(event)" type="button" :disabled="skippingId === event.id" @click="skip(event)">
+              スキップ
+            </button>
             <button v-if="canReplay(event)" type="button" :disabled="replayingId === event.id" @click="replay(event)">
               このイベントを実行
             </button>

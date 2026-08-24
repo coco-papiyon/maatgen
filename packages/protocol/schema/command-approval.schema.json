@@ -18,11 +18,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["index", "command", "argv"],
+        "required": ["index", "command", "argv", "allowed"],
         "properties": {
           "index": { "type": "integer", "minimum": 0 },
           "command": { "type": "string" },
-          "argv": { "type": "array", "items": { "type": "string" } }
+          "argv": { "type": "array", "items": { "type": "string" } },
+          "allowed": { "type": "boolean" }
         }
       }
     },

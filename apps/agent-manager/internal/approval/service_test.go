@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -14,16 +15,18 @@ import (
 )
 
 type fixedReviewer struct {
-	assessment Assessment
+	assessment       Assessment
+	approvedCommands [][]string
 }
 
-func (reviewer fixedReviewer) Review(context.Context, agent.ApprovalRequest, []protocol.CommandSegment) (Assessment, error) {
+func (reviewer *fixedReviewer) Review(_ context.Context, _ agent.ApprovalRequest, _ []protocol.CommandSegment, approvedCommands [][]string) (Assessment, error) {
+	reviewer.approvedCommands = approvedCommands
 	return reviewer.assessment, nil
 }
 
 func TestServiceUsesConfigRuleBeforeReviewer(t *testing.T) {
 	store := approvalTestStore(t)
-	reviewer := fixedReviewer{assessment: Assessment{Risk: protocol.ApprovalRiskCritical, Confidence: 1}}
+	reviewer := &fixedReviewer{assessment: Assessment{Risk: protocol.ApprovalRiskCritical, Confidence: 1}}
 	service := New(store, Config{Enabled: true, AllowedCommands: [][]string{{"git", "status"}}, Reviewer: reviewer})
 
 	decision, err := service.Handle(context.Background(), approvalRequest("git status"))
@@ -40,7 +43,7 @@ func TestServiceAllowsLowRiskAIReview(t *testing.T) {
 	store := approvalTestStore(t)
 	service := New(store, Config{
 		Enabled: true, MaxRisk: protocol.ApprovalRiskLow, MinConfidence: .8,
-		Reviewer: fixedReviewer{assessment: Assessment{Risk: protocol.ApprovalRiskLow, Confidence: .95, Summary: "read-only inspection"}},
+		Reviewer: &fixedReviewer{assessment: Assessment{Risk: protocol.ApprovalRiskLow, Confidence: .95, Summary: "read-only inspection"}},
 	})
 
 	decision, err := service.Handle(context.Background(), approvalRequest("git log -1"))
@@ -50,6 +53,27 @@ func TestServiceAllowsLowRiskAIReview(t *testing.T) {
 	approvals, _ := store.ListApprovals(context.Background(), "session-1", nil)
 	if len(approvals) != 1 || approvals[0].Source == nil || *approvals[0].Source != protocol.ApprovalSourceAI {
 		t.Fatalf("approval source = %#v", approvals)
+	}
+}
+
+func TestServiceReviewerReceivesSessionAndPermanentlyApprovedCommands(t *testing.T) {
+	store := approvalTestStore(t)
+	reviewer := &fixedReviewer{assessment: Assessment{Risk: protocol.ApprovalRiskLow, Confidence: .95, Summary: "matches an approved pattern"}}
+	service := New(store, Config{
+		Enabled: true, MaxRisk: protocol.ApprovalRiskLow, MinConfidence: .8,
+		AllowedCommands: [][]string{{"git", "status"}}, Reviewer: reviewer,
+	})
+	service.mu.Lock()
+	service.sessionRules["session-1"] = [][]string{{"go", "test", "*"}}
+	service.mu.Unlock()
+
+	decision, err := service.Handle(context.Background(), approvalRequest("go build ./..."))
+	if err != nil || !decision.Approved {
+		t.Fatalf("decision = %#v, err = %v", decision, err)
+	}
+	want := [][]string{{"git", "status"}, {"go", "test", "*"}}
+	if !reflect.DeepEqual(reviewer.approvedCommands, want) {
+		t.Fatalf("approvedCommands = %#v, want %#v", reviewer.approvedCommands, want)
 	}
 }
 
@@ -86,6 +110,32 @@ func TestServiceWaitsForHumanAndAddsSessionRule(t *testing.T) {
 	if err != nil || !decision.Approved {
 		t.Fatalf("session rule decision = %#v, err = %v", decision, err)
 	}
+}
+
+func TestServiceMarksIndividualSegmentsAllowedForHumanReview(t *testing.T) {
+	store := approvalTestStore(t)
+	service := New(store, Config{Enabled: true, HumanTimeout: time.Second, AllowedCommands: [][]string{{"git", "status"}}})
+	result := make(chan agent.ApprovalDecision, 1)
+	go func() {
+		decision, _ := service.Handle(context.Background(), approvalRequest("git status && go test ./internal/approval"))
+		result <- decision
+	}()
+
+	approval := waitForPendingApproval(t, store)
+	if len(approval.Segments) != 2 {
+		t.Fatalf("segments = %#v", approval.Segments)
+	}
+	if !approval.Segments[0].Allowed {
+		t.Errorf("expected first segment to already match AllowedCommands: %#v", approval.Segments[0])
+	}
+	if approval.Segments[1].Allowed {
+		t.Errorf("expected second segment to still need a decision: %#v", approval.Segments[1])
+	}
+
+	if _, err := service.Decide(context.Background(), "session-1", approval.ID, protocol.ApprovalDecisionRequest{Decision: protocol.ApprovalDeny}); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	<-result
 }
 
 func TestServiceExpiresUnansweredHumanApproval(t *testing.T) {

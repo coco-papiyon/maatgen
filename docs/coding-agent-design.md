@@ -341,7 +341,7 @@ CodingAgent
 Approval Coordinatorは次の順にfail-closedで判定する。
 
 1. `commandApproval.allowedCommands`のargvルールに全command segmentが一致すれば設定で許可する。
-2. 一致しなければ、同じProviderの設定済み軽量モデルをread-onlyの短命processとして実行し、`safe`／`low`／`high`／`critical`を判定する。設定した最大risk以下かつconfidence閾値以上の場合だけAIで許可する。
+2. 一致しなければ、同じProviderの設定済み軽量モデルをread-onlyの短命processとして実行し、`safe`／`low`／`high`／`critical`を判定する。このとき、そのSessionで一時承認済みおよび永続承認済みのargvルールをprompt内へ「既承認コマンド」として渡し、要求内容がそれらと同じ操作を行う近い変種であれば承認済みルール以上のriskにしないようモデルへ指示する。設定した最大risk以下かつconfidence閾値以上の場合だけAIで許可する。
 3. それ以外はRunを`waiting_for_approval`にし、SQLiteへ要求を保存してWebとVS Codeへ通知する。利用者は1回、Session中、永続、または不許可を選択する。
 
 永続許可は設定ファイルへargv配列としてatomicに保存する。複合commandは`|`、`||`、`&&`、`;`、改行、`&`で分割し、すべてのsegmentが個別に一致した場合だけ全体を許可する。PowerShell（`pwsh`／`powershell`）やPOSIX shell（`sh`／`bash`など）の`-Command`／`-c`、Windows `cmd /c`のようなラッパーは、オプション後の実コマンドを取り出して同じ規則で評価する。subshell、redirection、encoded command、その他の動的実行など静的に安全に解釈できない構文は設定で自動許可しない。詳細は[ADR-006](./decisions/006-command-approval.md)を参照する。
@@ -1076,7 +1076,7 @@ Web版のGitHub監視設定では、監視ルールの作成・編集フォー�
 
 定期ポーリングはAgent Manager起動中にSchedulerが30秒間隔で期限到来を確認し、各monitorの`pollIntervalSeconds`と`nextSyncAt`に従って実行する。Schedulerはポーリング開始・完了・失敗を、GitHub API adapterはIssue／PR一覧取得の開始・完了・失敗と取得件数を構造化ログへ出力する。認証tokenやIssue／PR本文はログへ出力しない。
 
-観測済みIssue／PRの後から監視ルールを作成・更新した場合は、itemごとに永続化した評価済みルール版とルールの`updatedAt`を比較し、次回ポーリングで現在状態へ一度だけ適用する。delivery keyにもルール版を含め、同じ版の重複発火を防ぎながら、再更新後の再評価を可能にする。既存DBへ列を追加した直後は評価済みルール版が空のため、現在のルールを既存itemへ一度評価する。
+観測済みIssue／PRの後から監視ルールを作成・更新した場合は、itemごとに永続化した評価済みルール版とルールの`updatedAt`を比較し、次回ポーリングで現在状態を評価する。新規ルールは既存itemへ適用できるが、同じルールとitem番号ですでに自動イベントがあれば、ルール更新やaction変更をまたいで再発火しない。delivery keyはrepository・item kind・number・rule idで構成する。イベント履歴の`detected`、`matched`、`queued`は「スキップ」操作で`skipped`へ遷移させ、履歴を保持したままdispatcherの実行対象から除外できる。
 
 ---
 

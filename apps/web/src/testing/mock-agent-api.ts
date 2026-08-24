@@ -508,6 +508,17 @@ export class MockAgentApi implements AgentApi {
     return clone(replay);
   }
 
+  async skipGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent> {
+    const event = this.githubEvents.get(eventId);
+    if (!event) throw new AgentApiError('monitor event was not found', 404, 'not_found');
+    if (!['detected', 'matched', 'queued'].includes(event.status)) {
+      throw new AgentApiError('monitor event is no longer pending', 409, 'conflict');
+    }
+    const skipped: GitHubMonitorEvent = { ...event, status: 'skipped', skipReason: 'manually skipped by user', updatedAt: now };
+    this.githubEvents.set(eventId, skipped);
+    return clone(skipped);
+  }
+
   async listGitHubIssues(_workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse> {
     return { items: this.githubIssues.filter((item) => matchesMockGitHubQuery(item, query)).map(clone), fetchedAt: now };
   }

@@ -109,8 +109,10 @@ func (s *Store) AttachMonitorEventRun(ctx context.Context, id, runID string, upd
 // event is kept, not deleted, so it can still be replayed later.
 func (s *Store) SkipMonitorEvent(ctx context.Context, id, reason string, updatedAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE github_monitor_events
-		SET status = ?, skip_reason = ?, updated_at = ? WHERE id = ?`,
-		protocol.GitHubMonitorEventSkipped, reason, formatTime(updatedAt), id)
+		SET status = ?, skip_reason = ?, updated_at = ?
+		WHERE id = ? AND status IN (?, ?, ?)`,
+		protocol.GitHubMonitorEventSkipped, reason, formatTime(updatedAt), id,
+		protocol.GitHubMonitorEventDetected, protocol.GitHubMonitorEventMatched, protocol.GitHubMonitorEventQueued)
 	return updateResult("skip github monitor event", result, err)
 }
 

@@ -113,7 +113,7 @@ interface GitHubTriggerRule {
 
 Trigger Ruleに一致した場合、Agent Managerは対象リポジトリに対して新しい通常のAgent Sessionを作成し、そのSessionでRunを起動する。自動実行された処理を既存の手動Sessionや他の監視ルールのSessionへ混在させない。作成されたSessionには、監視ルール、検出したGitHub item、発火イベント、`triggerSource: github_monitor`、選択したProvider／modelへの関連を保存し、通常のSessionと同じライフサイクル、履歴、Checkpoint、Usage、ChangeSet、Restoreの扱いを適用する。
 
-Issue／PRの観測後にTrigger Ruleを作成または更新した場合、次回ポーリングでそのルールの新しい版を現在のitem状態へ一度だけ評価する。item自体が未変更でも、一致すれば発火する。同じルール版をポーリングごとに再発火させず、ルールを再更新した場合は新しい版として再評価する。初回同期時に既に存在するルールとitemについては、従来どおり観測基準点の作成だけを行う。
+Issue／PRの観測後にTrigger Ruleを作成または更新した場合、次回ポーリングで現在のitem状態を評価する。新規ルールはitem自体が未変更でも一致すれば発火する。一方、同じルールと同じitem番号ですでにイベントを作成済みの場合、ルール更新後やitemのaction変更後も再発火しない。初回同期時に既に存在するルールとitemについては、従来どおり観測基準点の作成だけを行う。
 
 Promptは利用者が設定したテンプレートから生成する。テンプレートには、少なくともrepository、kind、number、title、URL、author、assignees、labels、Project情報、検出actionを構造化データとして展開できるようにする。テンプレートの未定義変数は空値とし、本文全体や機密情報を暗黙に追加しない。
 
@@ -136,7 +136,7 @@ Repository execution lockをAgent Managerに置き、Run開始前に取得する
 
 ### 6. 重複実行を永続的な監視配信キーで防止する
 
-ポーリングは同じ項目を繰り返し返すため、`repository + item kind + number + event identity + rule id`を監視配信キーとして保存する。GitHubのevent IDが取得できる場合はそれを使い、取得できない状態変化については、観測したaction、更新時刻、状態のハッシュから安定したキーを作る。
+ポーリングは同じ項目を繰り返し返すため、`repository + item kind + number + rule id`を監視配信キーとして保存する。action、更新時刻、状態、ルール版はキーに含めず、同じルールと同じIssue／PR番号ではOpen、Update、Close、Reopenを通じて自動イベントを一度だけ作成する。IssueとPRはitem kindで区別する。
 
 配信キーの作成は一意制約付きのトランザクションで行う。キーの登録に成功した監視評価だけがRunを起動し、既に存在するキーは無視する。Run起動の直前にManagerが停止しても、再起動時に未処理キーとRunの対応を復元できるよう、監視配信とRunの関連を永続化する。
 
@@ -144,15 +144,17 @@ Repository execution lockをAgent Managerに置き、Run開始前に取得する
 
 自動実行の状態はMaatgenのSQLiteデータベースを正とする。少なくとも、監視ルール、差分検出に必要な最小限の正規化観測状態、監視イベント、重複排除キー、発火結果、起動したRunとの関連、最後のエラーと時刻をMaatgen側に保存する。この観測状態は監視専用であり、Issue／PR一覧・詳細の表示モデルや永続キャッシュとして利用しない。監視イベントには`detected`、`matched`、`queued`、`session_created`、`run_started`、`skipped`、`completed`、`failed`、`cancelled`を使用し、Runの状態とは別に管理する。Manager再起動後も監視履歴と実行状態を復元できるようにする。
 
-GitHubは監視対象データの取得元に限定し、自動実行の状態をGitHubへ反映しない。MaatgenはIssue／PRのラベル、コメント、Project field、ステータス、その他のGitHub上の属性を変更してはならない。したがって、実行済みかどうかの判定や再実行防止にGitHubラベルを利用せず、前述のMaatgenデータベース上の状態と配信キーだけを利用する。手動のGitHub変更によって取得データが変化した場合は、次回ポーリング時に新しい観測イベントとして評価する。
+GitHubは監視対象データの取得元に限定し、自動実行の状態をGitHubへ反映しない。MaatgenはIssue／PRのラベル、コメント、Project field、ステータス、その他のGitHub上の属性を変更してはならない。したがって、実行済みかどうかの判定や再実行防止にGitHubラベルを利用せず、前述のMaatgenデータベース上の状態と配信キーだけを利用する。手動のGitHub変更によって取得データが変化した場合は次回ポーリング時にルールを評価するが、同じルールとitemですでに自動イベントを作成済みなら再作成しない。
 
 Repository execution lock取得中にTrigger Ruleのイベントが発生した場合の扱いは、ルールごとに`skip`または`coalesce`を選べるようにし、既定値は`coalesce`とする。`coalesce`ではIssue／PRごとの最新イベントを保持し、実行中Runの完了後に再評価するため、別のIssue／PRのイベントが互いを上書きしない。
 
 利用者が`skip`を明示的に選んだ場合も、イベント自体は削除せず、理由、適用ルール、item identity、Prompt生成に必要な監視時データをイベント履歴へ保存する。イベント履歴に「このイベントを実行」を設け、選択すると元イベントを`replayOfEventId`で参照する新しいOutbox配信を作成し、新しい通常Sessionとして実行する。同じ元イベントの手動実行は操作ごとに別のreplay IDを持ち、自動実行の重複排除キーを変更しない。Repository execution lock取得中は実行を開始せず、その旨を表示するため、`skip`されたイベントが永久に回収不能になることはない。
 
+イベント履歴の未実行イベント（`detected`、`matched`、`queued`）には「スキップ」操作を設ける。操作対象を削除せず、通常の`skipped`ステータスと理由を保存し、dispatcherが実行対象として回収しないようにする。実行開始後のイベントはこの操作の対象外とする。
+
 `coalesce`の保留件数にはrepository単位の設定可能な上限を設ける。上限到達時は古いイベントを黙って破棄せず`skipped`へ遷移させ、イベント履歴から手動実行できる状態を維持する。無制限のRunキューは初期実装の対象外とする。
 
-イベントはポーリング間に観測した状態差分を単位とする。複数回のGitHub変更が一つのポーリング間隔に含まれる場合、GitHubのイベント履歴を取得できない初期実装では、最新状態への一つの状態差分にまとめる。イベントには変更前後の正規化状態ハッシュ、検出action、観測時刻を保存する。GitHub由来のevent IDが取得できない場合も、これらを含む配信キーで再評価を防止する。
+変更検知はポーリング間に観測した状態差分を単位とする。複数回のGitHub変更が一つのポーリング間隔に含まれる場合、GitHubのイベント履歴を取得できない初期実装では、最新状態への一つの状態差分にまとめる。作成されたイベントには変更前後の正規化状態ハッシュ、検出action、観測時刻を保存するが、これらは配信キーには含めない。
 
 Issue／PR一覧は選択中のローカルrepositoryを対象とする。複数repositoryを横断した一覧は初期実装では提供せず、共通ナビゲーションのGitHub監視領域にはrepository selectorを置く。repositoryを切り替えた場合は、一覧、イベント履歴、監視ルールを選択repositoryのデータへ切り替える。
 

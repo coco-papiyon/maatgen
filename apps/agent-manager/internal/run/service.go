@@ -210,6 +210,17 @@ func (s *Service) StartRun(ctx context.Context, sessionID string, request protoc
 	return run, nil
 }
 
+// IsRepositoryBusy reports whether an active Run currently owns the
+// repository execution lock. Monitoring dispatchers use this preflight check
+// so a queued event does not create a Session merely to discover that its Run
+// cannot start yet.
+func (s *Service) IsRepositoryBusy(repository string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, busy := s.activeByRepository[repository]
+	return busy
+}
+
 func (s *Service) CancelRun(ctx context.Context, runID string) error {
 	s.mu.Lock()
 	active, exists := s.activeByRun[runID]

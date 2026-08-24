@@ -187,6 +187,7 @@ type fakeRuns struct {
 	nextID    int
 	cancelled []string
 	cancelErr error
+	busy      bool
 }
 
 func (f *fakeRuns) StartRun(ctx context.Context, sessionID string, request protocol.SendMessageRequest) (protocol.AgentRun, error) {
@@ -206,6 +207,8 @@ func (f *fakeRuns) CancelRun(ctx context.Context, runID string) error {
 	f.cancelled = append(f.cancelled, runID)
 	return f.cancelErr
 }
+
+func (f *fakeRuns) IsRepositoryBusy(repository string) bool { return f.busy }
 
 func testMonitor(repository string) protocol.GitHubRepositoryMonitor {
 	return protocol.GitHubRepositoryMonitor{
@@ -317,7 +320,7 @@ func TestStartRunSkipPolicyMarksSkippedWhenRepositoryBusy(t *testing.T) {
 	event := testEvent("event-1", "/repo", "rule-1", protocol.GitHubMonitorEventQueued, time.Now())
 	store.addEvent(event)
 
-	runs := &fakeRuns{err: runservice.ErrRepositoryBusy}
+	runs := &fakeRuns{err: runservice.ErrRepositoryBusy, busy: true}
 	dispatcher := NewDispatcher(store, &fakeSessions{}, runs)
 	if err := dispatcher.Tick(ctx); err != nil {
 		t.Fatalf("Tick: %v", err)
@@ -336,14 +339,17 @@ func TestStartRunCoalescePolicyLeavesEventForRetryWhenRepositoryBusy(t *testing.
 	event := testEvent("event-1", "/repo", "rule-1", protocol.GitHubMonitorEventQueued, time.Now())
 	store.addEvent(event)
 
-	runs := &fakeRuns{err: runservice.ErrRepositoryBusy}
+	runs := &fakeRuns{err: runservice.ErrRepositoryBusy, busy: true}
 	dispatcher := NewDispatcher(store, &fakeSessions{}, runs)
 	if err := dispatcher.Tick(ctx); err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
 	got := store.getEvent("event-1")
-	if got.Status != protocol.GitHubMonitorEventSessionCreated {
-		t.Fatalf("event.Status = %v, want session_created (session made, run retried later)", got.Status)
+	if got.Status != protocol.GitHubMonitorEventQueued {
+		t.Fatalf("event.Status = %v, want queued (no session made while repository is busy)", got.Status)
+	}
+	if got.SessionID != nil {
+		t.Fatalf("SessionID = %#v, want nil while repository is busy", got.SessionID)
 	}
 	if got.RunID != nil {
 		t.Fatalf("RunID = %#v, want nil: the run never actually started", got.RunID)

@@ -282,9 +282,12 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .approval-summary { margin: 12px 0 4px; color: #c6d1c8; line-height: 1.5; }
 .approval-factors { margin: 7px 0 0; padding-left: 20px; color: #93a096; font-size: 12px; }
 .approval-segments { display: grid; gap: 5px; margin: 14px 0; }
-.approval-segments span { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 7px; align-items: baseline; color: #aeb9b0; font-size: 11px; }
+.approval-segments span { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 7px; align-items: baseline; color: #aeb9b0; font-size: 11px; }
 .approval-segments strong { color: var(--green); font: 600 10px ui-monospace, monospace; }
 .approval-segments code { overflow-wrap: anywhere; }
+.segment-status { padding: 2px 7px; border: 1px solid #59645b; border-radius: 999px; color: #abb5ad; font: 700 9px ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
+.segment-status.allowed { border-color: #3e7650; color: #75d391; background: #17301e; }
+.segment-status.pending { border-color: #6b5a2e; color: var(--amber); background: #302a17; }
 .approval-rule { display: grid; gap: 6px; color: #8e9b90; font-size: 11px; }
 .approval-rule input { width: 100%; padding: 9px 10px; border: 1px solid #344438; border-radius: 5px; color: #e0e9e2; background: #0a100b; font: 12px ui-monospace, monospace; }
 .approval-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 18px; }

@@ -129,6 +129,18 @@ func (f *fakeStore) GetMonitorEvent(ctx context.Context, id string) (protocol.Gi
 	return event, nil
 }
 
+func (f *fakeStore) SkipMonitorEvent(ctx context.Context, id, reason string, updatedAt time.Time) error {
+	event, ok := f.events[id]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	event.Status = protocol.GitHubMonitorEventSkipped
+	event.SkipReason = &reason
+	event.UpdatedAt = updatedAt
+	f.events[id] = event
+	return nil
+}
+
 func (f *fakeStore) CreateReplayEvent(ctx context.Context, originalEventID, newEventID string, createdAt time.Time) (protocol.GitHubMonitorEvent, error) {
 	original, ok := f.events[originalEventID]
 	if !ok {

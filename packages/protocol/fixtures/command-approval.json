@@ -7,8 +7,8 @@
   "shell": "powershell",
   "workingDirectory": "C:/workspace",
   "segments": [
-    { "index": 0, "command": "go test ./...", "argv": ["go", "test", "./..."] },
-    { "index": 1, "command": "git status", "argv": ["git", "status"] }
+    { "index": 0, "command": "go test ./...", "argv": ["go", "test", "./..."], "allowed": false },
+    { "index": 1, "command": "git status", "argv": ["git", "status"], "allowed": true }
   ],
   "status": "pending",
   "risk": "high",

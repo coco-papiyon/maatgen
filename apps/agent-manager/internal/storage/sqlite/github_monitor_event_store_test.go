@@ -66,6 +66,34 @@ func TestInsertMonitorEventDeduplicatesOnDeliveryKey(t *testing.T) {
 	}
 }
 
+func TestInsertMonitorEventDeduplicatesSameRuleAndItemWithDifferentDeliveryKey(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	createdAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	monitor := newTestRepositoryForEvents(t, store, createdAt)
+	rule := testTriggerRule("rule-1", monitor.Repository, createdAt)
+	if err := store.CreateTriggerRule(ctx, rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	first := testMonitorEvent("event-opened", monitor.Repository, createdAt)
+	first.RuleID = &rule.ID
+	if inserted, err := store.InsertMonitorEvent(ctx, first); err != nil || !inserted {
+		t.Fatalf("first insert: inserted=%v err=%v", inserted, err)
+	}
+
+	closed := testMonitorEvent("event-closed", monitor.Repository, createdAt.Add(time.Minute))
+	closed.RuleID = &rule.ID
+	closed.Action = "closed"
+	closed.AfterStateHash = "hash-closed"
+	if inserted, err := store.InsertMonitorEvent(ctx, closed); err != nil || inserted {
+		t.Fatalf("same rule/item insert: inserted=%v err=%v, want silent deduplication", inserted, err)
+	}
+	if _, err := store.GetMonitorEvent(ctx, closed.ID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("closed event should not exist after deduplication, err = %v", err)
+	}
+}
+
 func TestInsertMonitorEventAllowsMultipleNilDeliveryKeys(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

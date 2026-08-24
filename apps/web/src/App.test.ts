@@ -113,7 +113,7 @@ describe('App with MockAgentApi', () => {
       approval: CommandApproval = {
         id: 'approval-1', sessionId: 'mock-success', runId: 'run-1', providerRequestId: 'provider-1',
         command: 'go test ./internal/approval', shell: 'powershell', workingDirectory: 'C:/demo/success',
-        segments: [{ index: 0, command: 'go test ./internal/approval', argv: ['go', 'test', './internal/approval'] }],
+        segments: [{ index: 0, command: 'go test ./internal/approval', argv: ['go', 'test', './internal/approval'], allowed: false }],
         status: 'pending', risk: 'high', summary: 'テストコマンドの確認が必要です', factors: ['workspace-write'],
         createdAt: '2026-08-16T00:00:00Z',
       };
@@ -139,6 +139,33 @@ describe('App with MockAgentApi', () => {
 
     expect(api.decision).toEqual({ decision: 'allow_session', ruleArgv: ['go', 'test', '*'] });
     expect(wrapper.find('.approval-dialog').exists()).toBe(false);
+  });
+
+  it('shows per-segment approval status and defaults the rule to the first unapproved segment', async () => {
+    class SplitApprovalApi extends MockAgentApi {
+      approval: CommandApproval = {
+        id: 'approval-2', sessionId: 'mock-success', runId: 'run-1', providerRequestId: 'provider-2',
+        command: `"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "gofmt -w store_test.go; $env:GOCACHE='C:\\tmp\\dedupe'; go test ./..."`,
+        shell: 'powershell', workingDirectory: 'C:/demo/success',
+        segments: [
+          { index: 0, command: 'gofmt -w store_test.go', argv: ['gofmt', '-w', 'store_test.go'], allowed: true },
+          { index: 1, command: "$env:GOCACHE='C:\\tmp\\dedupe'", argv: [], allowed: false },
+          { index: 2, command: 'go test ./...', argv: ['go', 'test', './...'], allowed: false },
+        ],
+        status: 'pending', factors: [], createdAt: '2026-08-16T00:00:00Z',
+      };
+
+      override async listApprovals(id: string) {
+        return id === this.approval.sessionId && this.approval.status === 'pending' ? [this.approval] : [];
+      }
+    }
+    const api = new SplitApprovalApi();
+    wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+
+    const statuses = wrapper.findAll('.segment-status');
+    expect(statuses.map((node) => node.classes()).map((classes) => classes.includes('allowed'))).toEqual([true, false, false]);
+    expect(wrapper.find<HTMLInputElement>('.approval-rule input').element.value).toBe("$env:GOCACHE='C:\\tmp\\dedupe'");
   });
 
   it('switches the side panel between Usage and Changes tabs', async () => {

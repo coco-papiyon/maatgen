@@ -31,6 +31,7 @@ type GitHubMonitorController interface {
 	DeleteRule(ctx context.Context, id string) error
 
 	ListEvents(ctx context.Context, workspace string, limit int) ([]protocol.GitHubMonitorEvent, error)
+	SkipEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error)
 	ReplayEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error)
 
 	ListIssues(ctx context.Context, workspace string, query githubcontroller.ItemQuery) (protocol.GitHubItemListResponse, error)
@@ -170,6 +171,14 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			events = []protocol.GitHubMonitorEvent{}
 		}
 		writeJSON(w, http.StatusOK, protocol.GitHubMonitorEventListResponse{Events: events})
+	})))
+	mux.Handle("POST /api/v1/github/events/{id}/skip", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		event, err := controller.SkipEvent(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeGitHubMonitorError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, event)
 	})))
 	mux.Handle("POST /api/v1/github/events/{id}/replay", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		replay, err := controller.ReplayEvent(r.Context(), r.PathValue("id"))

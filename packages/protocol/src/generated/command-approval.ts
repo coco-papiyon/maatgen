@@ -16,6 +16,7 @@ export interface CommandApproval {
     index: number;
     command: string;
     argv: string[];
+    allowed: boolean;
   }[];
   status: 'pending' | 'approved' | 'denied' | 'cancelled' | 'expired';
   risk?: 'safe' | 'low' | 'high' | 'critical';

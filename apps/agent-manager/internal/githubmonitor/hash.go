@@ -23,9 +23,9 @@ import (
 // the same; any relevant field changing changes the hash.
 //
 // CreatedAt, URL, and Number never change once an item exists, so they are
-// excluded. UpdatedAt is deliberately excluded too: ADR-007 section 6
-// treats "the action", "the updated time", and "the state hash" as three
-// independent signals combined by DeliveryKey, not folded into one another.
+// excluded. UpdatedAt is deliberately excluded too: it can change without
+// a normalized content change. DeliveryKey is independent of this hash and
+// deduplicates at the rule-and-item level.
 //
 // Project field values are included: they are frequently the *only* thing
 // that changes when, for example, an Issue's Status moves to "Ready" — the

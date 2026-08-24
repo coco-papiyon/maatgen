@@ -266,7 +266,7 @@ func TestEvaluateItemFiresOnceWhenRuleIsAddedAfterIssueWasObserved(t *testing.T)
 	}
 }
 
-func TestEvaluateItemFiresAgainWhenMatchingRuleIsUpdated(t *testing.T) {
+func TestEvaluateItemDoesNotFireAgainWhenMatchingRuleIsUpdated(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 	repository := "C:/workspace/example"
@@ -305,10 +305,46 @@ func TestEvaluateItemFiresAgainWhenMatchingRuleIsUpdated(t *testing.T) {
 	}
 	evaluator.now = func() time.Time { return time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC) }
 	second, err := evaluator.EvaluateItem(ctx, monitor, item)
-	if err != nil || len(second) != 1 {
-		t.Fatalf("EvaluateItem (updated rule): events=%#v err=%v", second, err)
+	if err != nil || len(second) != 0 {
+		t.Fatalf("EvaluateItem (updated rule): events=%#v err=%v, want no second event for the same rule and item", second, err)
 	}
-	if *first[0].DeliveryKey == *second[0].DeliveryKey {
-		t.Fatalf("updated rule version must produce a distinct delivery key")
+}
+
+func TestEvaluateItemFiresOnlyOnceAcrossActionsForSameRuleAndNumber(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	repository := "C:/workspace/example"
+	syncedAt := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+	monitor := testRepositoryMonitor(repository, &syncedAt)
+	if err := store.CreateRepositoryMonitor(ctx, monitor); err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+	rule := createReadyRule(t, store, repository)
+	rule.Filters = protocol.GitHubMonitorFilters{}
+	if err := store.UpdateTriggerRule(ctx, rule); err != nil {
+		t.Fatalf("update rule: %v", err)
+	}
+
+	evaluator := NewEvaluator(store)
+	opened := baseItem()
+	first, err := evaluator.EvaluateItem(ctx, monitor, opened)
+	if err != nil || len(first) != 1 || first[0].Action != "opened" {
+		t.Fatalf("EvaluateItem (opened): events=%#v err=%v", first, err)
+	}
+
+	updated := opened
+	updated.Title = "Updated title"
+	updated.UpdatedAt = updated.UpdatedAt.Add(time.Minute)
+	second, err := evaluator.EvaluateItem(ctx, monitor, updated)
+	if err != nil || len(second) != 0 {
+		t.Fatalf("EvaluateItem (updated): events=%#v err=%v, want no duplicate", second, err)
+	}
+
+	closed := updated
+	closed.State = protocol.GitHubItemClosed
+	closed.UpdatedAt = closed.UpdatedAt.Add(time.Minute)
+	third, err := evaluator.EvaluateItem(ctx, monitor, closed)
+	if err != nil || len(third) != 0 {
+		t.Fatalf("EvaluateItem (closed): events=%#v err=%v, want no duplicate", third, err)
 	}
 }

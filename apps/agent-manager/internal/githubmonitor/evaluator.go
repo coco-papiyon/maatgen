@@ -48,16 +48,14 @@ func NewEvaluator(store Store) *Evaluator {
 //     there is no new item or rule state to evaluate.
 //
 // A rule created or updated after the item's previous observation is
-// evaluated once against the current item even when the item itself is
-// unchanged. This lets users add monitoring to an existing Issue/PR. The
-// observation timestamp and rule-versioned delivery key prevent the same
-// rule version from firing on every subsequent poll.
+// evaluated against the current item even when the item itself is unchanged.
+// A newly added rule can therefore fire for an existing Issue/PR. Updating a
+// rule does not fire it again for an item for which that rule already produced
+// an event, because delivery is unique per rule and item.
 //
 // The returned events are only the ones newly inserted this call: if
-// re-evaluating the exact same detected change against the exact same rule
-// (e.g. a repeated poll before the baseline advances) would produce an
-// identical delivery key to an event already recorded, that duplicate is
-// silently dropped and omitted from the result (ADR-007 section 6).
+// any later matching observation for the same rule and item produces an
+// identical delivery key and is silently dropped (ADR-007 section 6).
 func (e *Evaluator) EvaluateItem(ctx context.Context, monitor protocol.GitHubRepositoryMonitor, item protocol.GitHubItem) ([]protocol.GitHubMonitorEvent, error) {
 	previous, err := e.store.GetObservedItem(ctx, monitor.Repository, item.Kind, item.Number)
 	var previousPtr *protocol.GitHubObservedItem
@@ -131,7 +129,7 @@ func (e *Evaluator) EvaluateItem(ctx context.Context, monitor protocol.GitHubRep
 			return nil, fmt.Errorf("evaluate github item: generate event id: %w", err)
 		}
 		ruleID := rule.ID
-		key := DeliveryKey(monitor.Repository, item.Kind, item.Number, evaluationAction, item.UpdatedAt, change.StateHash, rule.ID, rule.UpdatedAt)
+		key := DeliveryKey(monitor.Repository, item.Kind, item.Number, rule.ID)
 		candidates = append(candidates, protocol.GitHubMonitorEvent{
 			ID:              id,
 			Repository:      monitor.Repository,

@@ -101,6 +101,39 @@ func TestParseCommandEvaluatesNestedShellCommandPayload(t *testing.T) {
 	}
 }
 
+func TestParseCommandKeepsResolvedSegmentsAlongsideAnUnresolvedOne(t *testing.T) {
+	segments, err := ParseCommand(`"C:\Program Files\PowerShell\7\pwsh.exe" -Command "gofmt -w internal/storage/sqlite/store_test.go; $env:GOCACHE='C:\tmp\maatgen-gocache-dedupe'; go test ./internal/storage/sqlite ./internal/githubmonitor"`)
+	if !errors.Is(err, ErrDynamicCommand) {
+		t.Fatalf("error = %v, want ErrDynamicCommand", err)
+	}
+	if len(segments) != 3 {
+		t.Fatalf("segments = %#v", segments)
+	}
+	if want := []string{"gofmt", "-w", "internal/storage/sqlite/store_test.go"}; !reflect.DeepEqual(segments[0].Argv, want) {
+		t.Errorf("segment 0 argv = %#v, want %#v", segments[0].Argv, want)
+	}
+	if len(segments[1].Argv) != 0 || segments[1].Command == "" {
+		t.Errorf("segment 1 = %#v, want unresolved with non-empty command text", segments[1])
+	}
+	if want := []string{"go", "test", "./internal/storage/sqlite", "./internal/githubmonitor"}; !reflect.DeepEqual(segments[2].Argv, want) {
+		t.Errorf("segment 2 argv = %#v, want %#v", segments[2].Argv, want)
+	}
+}
+
+func TestSegmentAllowedMatchesIndividualSegments(t *testing.T) {
+	segments, err := ParseCommand("git status && go test ./internal/approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := [][]string{{"git", "status"}}
+	if !SegmentAllowed(segments[0], rules) {
+		t.Fatal("expected first segment to be allowed")
+	}
+	if SegmentAllowed(segments[1], rules) {
+		t.Fatal("expected second segment to not be allowed")
+	}
+}
+
 func TestParseCommandRejectsEncodedPowerShellPayload(t *testing.T) {
 	segments, err := ParseCommand(`pwsh -EncodedCommand Z2V0LWNvbnRlbnQ=`)
 	if !errors.Is(err, ErrDynamicCommand) {
