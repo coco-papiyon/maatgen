@@ -344,7 +344,7 @@ Approval Coordinatorは次の順にfail-closedで判定する。
 2. 一致しなければ、同じProviderの設定済み軽量モデルをread-onlyの短命processとして実行し、`safe`／`low`／`high`／`critical`を判定する。設定した最大risk以下かつconfidence閾値以上の場合だけAIで許可する。
 3. それ以外はRunを`waiting_for_approval`にし、SQLiteへ要求を保存してWebとVS Codeへ通知する。利用者は1回、Session中、永続、または不許可を選択する。
 
-永続許可は設定ファイルへargv配列としてatomicに保存する。複合commandは`|`、`||`、`&&`、`;`、改行、`&`で分割し、すべてのsegmentが個別に一致した場合だけ全体を許可する。subshell、redirection、動的実行など静的に安全に解釈できない構文は設定で自動許可しない。詳細は[ADR-006](./decisions/006-command-approval.md)を参照する。
+永続許可は設定ファイルへargv配列としてatomicに保存する。複合commandは`|`、`||`、`&&`、`;`、改行、`&`で分割し、すべてのsegmentが個別に一致した場合だけ全体を許可する。PowerShell（`pwsh`／`powershell`）やPOSIX shell（`sh`／`bash`など）の`-Command`／`-c`、Windows `cmd /c`のようなラッパーは、オプション後の実コマンドを取り出して同じ規則で評価する。subshell、redirection、encoded command、その他の動的実行など静的に安全に解釈できない構文は設定で自動許可しない。詳細は[ADR-006](./decisions/006-command-approval.md)を参照する。
 
 ### 9.2 GitHub Copilot CLI Adapter
 

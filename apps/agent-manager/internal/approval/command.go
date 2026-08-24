@@ -2,6 +2,7 @@ package approval
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -11,6 +12,10 @@ import (
 var ErrDynamicCommand = errors.New("command contains dynamic or unsupported shell syntax")
 
 func ParseCommand(command string) ([]protocol.CommandSegment, error) {
+	return parseCommand(command, 0)
+}
+
+func parseCommand(command string, depth int) ([]protocol.CommandSegment, error) {
 	parts, err := splitCommand(command)
 	if err != nil {
 		return fallbackSegment(command), err
@@ -21,12 +26,61 @@ func ParseCommand(command string) ([]protocol.CommandSegment, error) {
 		if err != nil || len(argv) == 0 || dynamicExecutable(argv[0]) {
 			return fallbackSegment(command), ErrDynamicCommand
 		}
+		if nested, ok := nestedCommand(argv); ok {
+			if depth >= 4 {
+				return fallbackSegment(command), ErrDynamicCommand
+			}
+			inner, innerErr := parseCommand(nested, depth+1)
+			if innerErr != nil {
+				return fallbackSegment(command), innerErr
+			}
+			segments = append(segments, inner...)
+			continue
+		}
 		segments = append(segments, protocol.CommandSegment{Index: len(segments), Command: strings.TrimSpace(part), Argv: argv})
 	}
 	if len(segments) == 0 {
 		return fallbackSegment(command), ErrDynamicCommand
 	}
 	return segments, nil
+}
+
+// nestedCommand extracts the script passed to a shell wrapper. Approval must
+// evaluate the command that the wrapper will execute, rather than allow a
+// rule for the wrapper executable to hide the real operation.
+func nestedCommand(argv []string) (string, bool) {
+	if len(argv) == 0 {
+		return "", false
+	}
+	name := strings.ToLower(strings.TrimSuffix(filepath.Base(strings.ReplaceAll(argv[0], "\\", "/")), ".exe"))
+	commandIndex := -1
+	for index := 1; index < len(argv); index++ {
+		option := strings.ToLower(argv[index])
+		switch name {
+		case "powershell", "pwsh":
+			if option == "-command" || option == "-c" {
+				commandIndex = index
+			}
+			if option == "-encodedcommand" || option == "-e" {
+				return "", true
+			}
+		case "sh", "bash", "dash", "zsh", "ksh":
+			if option == "-c" || option == "--command" {
+				commandIndex = index
+			}
+		case "cmd":
+			if option == "/c" || option == "/k" {
+				commandIndex = index
+			}
+		}
+		if commandIndex >= 0 {
+			break
+		}
+	}
+	if commandIndex < 0 || commandIndex+1 >= len(argv) {
+		return "", false
+	}
+	return strings.Join(argv[commandIndex+1:], " "), true
 }
 
 func fallbackSegment(command string) []protocol.CommandSegment {
