@@ -2,7 +2,7 @@ import { onMounted, ref, watch } from 'vue';
 import type { GitHubItem, GitHubMonitorEvent } from '@maatgen/protocol';
 import { AgentApiError } from '../api';
 import { useAgentApi } from './useAgentApi';
-import { githubWorkspace } from './workspace';
+import { selectedRepository } from './repositories';
 
 // Backs GitHubIssueDetailView / GitHubPullDetailView. The item itself is
 // fetched fresh from GitHub (ADR-007 section 2, "画面表示取得"); related
@@ -18,7 +18,7 @@ export function useGitHubItemDetail(kind: 'issue' | 'pull_request', number: () =
 
   async function refresh() {
     const currentNumber = number();
-    if (!githubWorkspace.value || !Number.isFinite(currentNumber)) {
+    if (!selectedRepository.value || !Number.isFinite(currentNumber)) {
       item.value = undefined;
       relatedEvents.value = [];
       return;
@@ -28,9 +28,9 @@ export function useGitHubItemDetail(kind: 'issue' | 'pull_request', number: () =
     try {
       const [fetchedItem, events] = await Promise.all([
         kind === 'issue'
-          ? api.getGitHubIssue(githubWorkspace.value, currentNumber)
-          : api.getGitHubPullRequest(githubWorkspace.value, currentNumber),
-        api.listGitHubMonitorEvents(githubWorkspace.value, 200).catch(() => []),
+          ? api.getGitHubIssue(selectedRepository.value, currentNumber)
+          : api.getGitHubPullRequest(selectedRepository.value, currentNumber),
+        api.listGitHubMonitorEvents(selectedRepository.value, 200).catch(() => []),
       ]);
       item.value = fetchedItem;
       relatedEvents.value = events.filter((event) => event.kind === kind && event.number === currentNumber);
@@ -46,7 +46,7 @@ export function useGitHubItemDetail(kind: 'issue' | 'pull_request', number: () =
     return cause instanceof Error ? cause.message : String(cause);
   }
 
-  watch([githubWorkspace, number], () => void refresh());
+  watch([selectedRepository, number], () => void refresh());
   onMounted(() => void refresh());
 
   return { item, relatedEvents, loading, error, refresh };

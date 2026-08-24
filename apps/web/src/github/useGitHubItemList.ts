@@ -2,7 +2,7 @@ import { onMounted, ref, watch } from 'vue';
 import type { GitHubItem } from '@maatgen/protocol';
 import { AgentApiError, type GitHubItemQuery } from '../api';
 import { useAgentApi } from './useAgentApi';
-import { githubWorkspace } from './workspace';
+import { selectedRepository } from './repositories';
 
 // Backs both GitHubIssuesView and GitHubPullsView: both are "画面表示取得"
 // screens (ADR-007 section 2) that fetch fresh from GitHub on every filter
@@ -40,7 +40,7 @@ export function useGitHubItemList(kind: 'issue' | 'pull_request') {
   }
 
   async function refresh() {
-    if (!githubWorkspace.value) {
+    if (!selectedRepository.value) {
       items.value = [];
       return;
     }
@@ -48,8 +48,8 @@ export function useGitHubItemList(kind: 'issue' | 'pull_request') {
     error.value = '';
     try {
       const response = kind === 'issue'
-        ? await api.listGitHubIssues(githubWorkspace.value, buildQuery())
-        : await api.listGitHubPullRequests(githubWorkspace.value, buildQuery());
+        ? await api.listGitHubIssues(selectedRepository.value, buildQuery())
+        : await api.listGitHubPullRequests(selectedRepository.value, buildQuery());
       items.value = response.items;
       projectsUnavailable.value = response.projectsUnavailable ?? false;
       fetchedAt.value = response.fetchedAt;
@@ -65,7 +65,7 @@ export function useGitHubItemList(kind: 'issue' | 'pull_request') {
     return cause instanceof Error ? cause.message : String(cause);
   }
 
-  watch(githubWorkspace, () => void refresh());
+  watch(selectedRepository, () => void refresh());
   onMounted(() => void refresh());
 
   return {

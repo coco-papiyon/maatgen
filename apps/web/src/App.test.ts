@@ -154,6 +154,36 @@ describe('App with MockAgentApi', () => {
     expect(wrapper.find('.approval-dialog').exists()).toBe(false);
   });
 
+  it('shows the error inside the approval dialog when a rule is rejected, instead of hiding it behind the modal', async () => {
+    class RejectingApprovalApi extends MockAgentApi {
+      approval: CommandApproval = {
+        id: 'approval-3', sessionId: 'mock-success', runId: 'run-1', providerRequestId: 'provider-3',
+        command: 'go test ./internal/approval', shell: 'powershell', workingDirectory: 'C:/demo/success',
+        segments: [{ index: 0, command: 'go test ./internal/approval', argv: ['go', 'test', './internal/approval'], allowed: false }],
+        status: 'pending', risk: 'high', summary: 'テストコマンドの確認が必要です', factors: ['workspace-write'],
+        createdAt: '2026-08-16T00:00:00Z',
+      };
+
+      override async listApprovals(id: string) {
+        return id === this.approval.sessionId && this.approval.status === 'pending' ? [this.approval] : [];
+      }
+
+      override async decideApproval(): Promise<CommandApproval> {
+        throw new AgentApiError('ruleArgv must match an approval segment', 409, 'conflict');
+      }
+    }
+    const api = new RejectingApprovalApi();
+    wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+
+    await wrapper.find('.approval-rule input').setValue('$env:GOCACHE=*');
+    await wrapper.findAll('.approval-actions button')[3]!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.approval-dialog').exists()).toBe(true);
+    expect(wrapper.find('.approval-dialog .error-banner').text()).toContain('ruleArgv must match an approval segment');
+  });
+
   it('shows per-segment approval status and defaults the rule to the first unapproved segment', async () => {
     class SplitApprovalApi extends MockAgentApi {
       approval: CommandApproval = {

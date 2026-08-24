@@ -295,6 +295,10 @@ export interface GitHubTriggerRuleListResponse {
   rules: GitHubTriggerRule[];
 }
 
+export interface GitHubRepositoryMonitorListResponse {
+  monitors: GitHubRepositoryMonitor[];
+}
+
 export interface GitHubMonitorEventListResponse {
   events: GitHubMonitorEvent[];
 }

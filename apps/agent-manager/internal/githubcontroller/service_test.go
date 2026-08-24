@@ -103,6 +103,22 @@ func (f *fakeStore) ListTriggerRules(ctx context.Context, repository string) ([]
 	return result, nil
 }
 
+func (f *fakeStore) ListAllTriggerRules(ctx context.Context) ([]protocol.GitHubTriggerRule, error) {
+	var result []protocol.GitHubTriggerRule
+	for _, rule := range f.rules {
+		result = append(result, rule)
+	}
+	return result, nil
+}
+
+func (f *fakeStore) ListRepositoryMonitors(ctx context.Context) ([]protocol.GitHubRepositoryMonitor, error) {
+	var result []protocol.GitHubRepositoryMonitor
+	for _, monitor := range f.monitors {
+		result = append(result, monitor)
+	}
+	return result, nil
+}
+
 func (f *fakeStore) DeleteTriggerRule(ctx context.Context, id string) error {
 	if _, ok := f.rules[id]; !ok {
 		return storage.ErrNotFound
@@ -341,6 +357,71 @@ func TestCreateRuleValidatesTemplateAndProvider(t *testing.T) {
 	}
 	if created.ConcurrencyPolicy != protocol.GitHubConcurrencyCoalesce {
 		t.Fatalf("default concurrencyPolicy = %v, want coalesce", created.ConcurrencyPolicy)
+	}
+}
+
+func TestListRulesEmptyWorkspaceListsAllRepositories(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	service := New(store, fakeValidator{}, "", nil, nil, nil)
+
+	base := protocol.GitHubTriggerRuleRequest{
+		Name: "rule", EventKinds: []protocol.GitHubItemKind{protocol.GitHubItemIssue},
+		PromptTemplate: "Design {{.Title}}", Provider: protocol.AgentCodex,
+	}
+	first := base
+	first.Workspace = "/repo-a"
+	if _, err := service.CreateRule(ctx, first); err != nil {
+		t.Fatalf("create rule for /repo-a: %v", err)
+	}
+	second := base
+	second.Workspace = "/repo-b"
+	if _, err := service.CreateRule(ctx, second); err != nil {
+		t.Fatalf("create rule for /repo-b: %v", err)
+	}
+
+	scoped, err := service.ListRules(ctx, "/repo-a")
+	if err != nil {
+		t.Fatalf("ListRules(/repo-a): %v", err)
+	}
+	if len(scoped) != 1 || scoped[0].Repository != "/repo-a" {
+		t.Fatalf("scoped rules = %#v, want exactly the /repo-a rule", scoped)
+	}
+
+	all, err := service.ListRules(ctx, "")
+	if err != nil {
+		t.Fatalf("ListRules(\"\"): %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("all rules = %#v, want 2 across both repositories", all)
+	}
+}
+
+func TestListMonitorsReturnsEveryRegisteredRepository(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	service := New(store, fakeValidator{}, "", nil, nil, nil)
+
+	now := time.Now().UTC()
+	monitorA := protocol.GitHubRepositoryMonitor{
+		Repository: "/repo-a", Host: "github.com", Owner: "octo-org", Name: "a", RemoteName: "origin",
+		Enabled: true, PollIntervalSeconds: 300, CreatedAt: now, UpdatedAt: now,
+	}
+	monitorB := monitorA
+	monitorB.Repository, monitorB.Name, monitorB.Enabled = "/repo-b", "b", false
+	if err := store.CreateRepositoryMonitor(ctx, monitorA); err != nil {
+		t.Fatalf("create monitor a: %v", err)
+	}
+	if err := store.CreateRepositoryMonitor(ctx, monitorB); err != nil {
+		t.Fatalf("create monitor b: %v", err)
+	}
+
+	monitors, err := service.ListMonitors(ctx)
+	if err != nil {
+		t.Fatalf("ListMonitors: %v", err)
+	}
+	if len(monitors) != 2 {
+		t.Fatalf("monitors = %#v, want both repositories regardless of enabled state", monitors)
 	}
 }
 

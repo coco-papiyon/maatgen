@@ -18,6 +18,7 @@ import (
 // is satisfied by *githubcontroller.Service.
 type GitHubMonitorController interface {
 	ResolveRepository(ctx context.Context, workspace string) (protocol.GitHubRepositoryResolution, error)
+	ListMonitors(ctx context.Context) ([]protocol.GitHubRepositoryMonitor, error)
 	CreateMonitor(ctx context.Context, request protocol.CreateGitHubMonitorRequest) (protocol.GitHubRepositoryMonitor, error)
 	GetMonitor(ctx context.Context, workspace string) (protocol.GitHubRepositoryMonitor, error)
 	UpdateMonitor(ctx context.Context, request protocol.UpdateGitHubMonitorRequest) (protocol.GitHubRepositoryMonitor, error)
@@ -54,6 +55,17 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 		writeJSON(w, http.StatusOK, resolution)
 	})))
 
+	mux.Handle("GET /api/v1/github/monitors", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		monitors, err := controller.ListMonitors(r.Context())
+		if err != nil {
+			writeGitHubMonitorError(w, err)
+			return
+		}
+		if monitors == nil {
+			monitors = []protocol.GitHubRepositoryMonitor{}
+		}
+		writeJSON(w, http.StatusOK, protocol.GitHubRepositoryMonitorListResponse{Monitors: monitors})
+	})))
 	mux.Handle("GET /api/v1/github/monitor", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		monitor, err := controller.GetMonitor(r.Context(), r.URL.Query().Get("workspace"))
 		if err != nil {

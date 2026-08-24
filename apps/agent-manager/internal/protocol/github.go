@@ -338,6 +338,13 @@ type GitHubTriggerRuleListResponse struct {
 	Rules []GitHubTriggerRule `json:"rules"`
 }
 
+// GitHubRepositoryMonitorListResponse lists every registered repository
+// monitor, regardless of which repository is currently selected in the UI
+// (multi-repository settings table).
+type GitHubRepositoryMonitorListResponse struct {
+	Monitors []GitHubRepositoryMonitor `json:"monitors"`
+}
+
 type GitHubMonitorEventListResponse struct {
 	Events []GitHubMonitorEvent `json:"events"`
 }

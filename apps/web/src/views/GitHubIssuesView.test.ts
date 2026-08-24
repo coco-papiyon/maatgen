@@ -3,18 +3,18 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import GitHubIssuesView from './GitHubIssuesView.vue';
 import { MockAgentApi } from '../testing/mock-agent-api';
-import { githubWorkspace } from '../github/workspace';
+import { selectedRepository } from '../github/repositories';
 
 let wrapper: VueWrapper | undefined;
 
 afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
-  githubWorkspace.value = '';
+  selectedRepository.value = '';
 });
 
 async function mountIssues(workspace = 'C:/demo/current-repository', api = new MockAgentApi()) {
-  githubWorkspace.value = workspace;
+  selectedRepository.value = workspace;
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [

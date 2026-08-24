@@ -76,6 +76,30 @@ func (s *Store) ListTriggerRules(ctx context.Context, repository string) ([]prot
 	return rules, nil
 }
 
+// ListAllTriggerRules returns every rule across every repository, ordered by
+// repository then creation order. Used by the Settings screen's
+// cross-repository rule table, where rules are managed independently of
+// whichever repository is currently selected in the UI.
+func (s *Store) ListAllTriggerRules(ctx context.Context) ([]protocol.GitHubTriggerRule, error) {
+	rows, err := s.db.QueryContext(ctx, triggerRuleSelect+` ORDER BY repository ASC, created_at ASC, id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list all github trigger rules: %w", err)
+	}
+	defer rows.Close()
+	rules := []protocol.GitHubTriggerRule{}
+	for rows.Next() {
+		rule, err := scanTriggerRule(rows)
+		if err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list all github trigger rules: %w", err)
+	}
+	return rules, nil
+}
+
 // DeleteTriggerRule removes a rule. Existing monitor events created from it
 // keep their history: github_monitor_events.rule_id is set to NULL rather
 // than cascading the delete (ADR-007 section 6 requires event history to

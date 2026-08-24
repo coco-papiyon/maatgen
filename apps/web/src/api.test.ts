@@ -28,6 +28,27 @@ describe('httpAgentApi', () => {
     expect(page.nextCursor).toBe('next-page');
   });
 
+  it('lists every registered GitHub repository monitor', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ monitors: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+
+    await httpAgentApi.listGitHubMonitors();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/github/monitors', expect.any(Object));
+  });
+
+  it('omits the workspace query parameter when listing trigger rules across every repository', async () => {
+    const fetch = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ rules: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetch);
+
+    await httpAgentApi.listGitHubTriggerRules();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/github/rules', expect.any(Object));
+
+    await httpAgentApi.listGitHubTriggerRules('/repo');
+    expect(fetch).toHaveBeenCalledWith('/api/v1/github/rules?workspace=%2Frepo', expect.any(Object));
+  });
+
   it('preserves HTTP status and API error code for diagnostics', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       error: { code: 'unauthorized', message: 'a valid bearer token is required' },

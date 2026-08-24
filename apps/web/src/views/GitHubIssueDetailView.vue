@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { toRef } from 'vue';
 import { useGitHubItemDetail } from '../github/useGitHubItemDetail';
-import { githubWorkspace } from '../github/workspace';
+import { selectedRepository } from '../github/repositories';
 
 const props = defineProps<{ number: number }>();
 const numberRef = toRef(props, 'number');
@@ -10,7 +10,7 @@ const { item, relatedEvents, loading, error } = useGitHubItemDetail('issue', () 
 
 <template>
   <div class="github-view">
-    <p v-if="!githubWorkspace" class="github-empty-hint">Sessionを選択すると、そのリポジトリが自動的に対象になります。</p>
+    <p v-if="!selectedRepository" class="github-empty-hint">画面右上でリポジトリを選択してください。</p>
     <p v-else-if="loading" class="github-hint">読み込み中…</p>
     <p v-else-if="error" class="github-error">{{ error }}</p>
     <template v-else-if="item">

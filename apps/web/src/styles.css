@@ -32,10 +32,15 @@ button { color: inherit; }
   background: #0f1610;
   font-size: 12px;
 }
-.shell-nav-link { color: #8a978c; text-decoration: none; padding: 4px 2px; border-bottom: 2px solid transparent; }
+.shell-nav-link { flex: 0 0 auto; white-space: nowrap; color: #8a978c; text-decoration: none; padding: 4px 2px; border-bottom: 2px solid transparent; }
 .shell-nav-link:hover { color: #d7e3d9; }
 .shell-nav-link.active { color: var(--green); border-bottom-color: var(--green); }
-.shell-repository { margin-left: auto; color: #8a978c; font: 11px ui-monospace, monospace; cursor: default; }
+.shell-repository {
+  flex: 0 1 auto; min-width: 0; max-width: 160px; margin-left: auto; color: #8a978c;
+  font: 11px ui-monospace, monospace; background: transparent; border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+select.shell-repository { cursor: pointer; }
 .shell-repository.resolved { color: var(--green); }
 .shell-repository.ambiguous, .shell-repository.unavailable { color: var(--amber); }
 .shell-body { flex: 1 1 auto; min-height: 0; }

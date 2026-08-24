@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { useAgentApi } from './github/useAgentApi';
-import { githubRepositoryLabel, githubRepositoryStatus, watchGitHubRepository } from './github/repository';
-import { githubWorkspace } from './github/workspace';
+import { githubRepositoryStatus, watchGitHubRepository } from './github/repository';
+import { refreshRepositories, remoteGroups, selectRemote, selectedRemoteKey } from './github/repositories';
 
 const route = useRoute();
-watchGitHubRepository(useAgentApi());
+const api = useAgentApi();
+watchGitHubRepository(api);
+onMounted(() => void refreshRepositories(api));
 
 function routeName(): string {
   return typeof route.name === 'string' ? route.name : '';
@@ -15,20 +17,9 @@ function routeName(): string {
 const isIssuesArea = computed(() => routeName().startsWith('github-issue'));
 const isPullsArea = computed(() => routeName().startsWith('github-pull'));
 
-const repositoryDisplay = computed(() => {
-  switch (githubRepositoryStatus.value) {
-    case 'resolved':
-      return githubRepositoryLabel.value;
-    case 'resolving':
-      return '解決中…';
-    case 'ambiguous':
-      return 'remoteが複数あります（設定で選択）';
-    case 'unavailable':
-      return 'GitHubリポジトリ未検出';
-    default:
-      return 'セッション未選択';
-  }
-});
+function onRemoteChange(event: Event) {
+  selectRemote((event.target as HTMLSelectElement).value);
+}
 </script>
 
 <template>
@@ -39,7 +30,18 @@ const repositoryDisplay = computed(() => {
       <RouterLink to="/github/pulls" class="shell-nav-link" :class="{ active: isPullsArea }">PR</RouterLink>
       <RouterLink to="/github/events" class="shell-nav-link" :class="{ active: routeName() === 'github-events' }">イベント履歴</RouterLink>
       <RouterLink to="/github/settings" class="shell-nav-link" :class="{ active: routeName() === 'github-settings' }">設定</RouterLink>
-      <span class="shell-repository" :class="githubRepositoryStatus" :title="githubWorkspace">{{ repositoryDisplay }}</span>
+      <select
+        v-if="remoteGroups.length"
+        class="shell-repository"
+        :class="githubRepositoryStatus"
+        aria-label="リモートリポジトリ"
+        :title="selectedRemoteKey"
+        :value="selectedRemoteKey"
+        @change="onRemoteChange"
+      >
+        <option v-for="group in remoteGroups" :key="group.key" :value="group.key">{{ group.owner }}/{{ group.name }}</option>
+      </select>
+      <span v-else class="shell-repository idle">リポジトリ未登録</span>
     </nav>
     <div class="shell-body">
       <RouterView />

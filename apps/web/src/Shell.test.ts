@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import Shell from './Shell.vue';
 import { createAppRouter } from './router';
-import { createMockEnvironment } from './testing/mock-agent-api';
+import { createMockEnvironment, MockAgentApi } from './testing/mock-agent-api';
 import { githubWorkspace } from './github/workspace';
+import { selectedRepository } from './github/repositories';
 
 let wrapper: VueWrapper | undefined;
 
@@ -11,21 +12,22 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
   githubWorkspace.value = '';
+  selectedRepository.value = '';
   for (const key of ['maatgen.showSystemMessages', 'maatgen.provider', 'maatgen.sidePanel', 'maatgen.sessionStatusFilter']) {
     localStorage.removeItem(key);
   }
 });
 
-async function mountShell(initialPath = '/') {
+async function mountShell(initialPath = '/', api: MockAgentApi = new MockAgentApi()) {
   const router = createAppRouter();
   await router.push(initialPath);
   await router.isReady();
-  const environment = createMockEnvironment();
+  const environment = createMockEnvironment(api);
   wrapper = mount(Shell, {
     global: { plugins: [router], provide: { agentApi: environment.agentApi, eventStreamFactory: environment.eventStreamFactory } },
   });
   await flushPromises();
-  return { wrapper, router };
+  return { wrapper, router, api };
 }
 
 describe('Shell', () => {
@@ -60,15 +62,32 @@ describe('Shell', () => {
     expect(router.currentRoute.value.name).toBe('github-events');
   });
 
-  it('shows a neutral placeholder before any Session has been selected', async () => {
+  it('shows a neutral placeholder when no repository is registered yet', async () => {
+    const api = new MockAgentApi();
+    await api.deleteGitHubMonitor('C:/demo/current-repository');
+    const { wrapper } = await mountShell('/github/issues', api);
+    expect(wrapper.find('.shell-repository').text()).toBe('リポジトリ未登録');
+  });
+
+  it('lists every registered repository, grouping by remote, and defaults to the first one', async () => {
     const { wrapper } = await mountShell('/github/issues');
-    expect(wrapper.find('.shell-repository').text()).toBe('セッション未選択');
+    // The option text stays short (owner/name only, host dropped) so the
+    // nav bar's other buttons never wrap; the full host/owner/name identity
+    // is still the option's value and the select's title.
+    const options = wrapper.findAll('select.shell-repository option').map((option) => option.text());
+    expect(options).toEqual(['octo-demo/example-repo']);
+    const select = wrapper.find('select.shell-repository').element as HTMLSelectElement;
+    expect(select.value).toBe('github.com/octo-demo/example-repo');
+    expect(select.title).toBe('github.com/octo-demo/example-repo');
   });
 
   it('resolves and displays the GitHub repository once a Session workspace is set (as App.vue does on select)', async () => {
-    const { wrapper } = await mountShell('/github/issues');
+    const api = new MockAgentApi();
+    await api.createGitHubMonitor({ workspace: 'C:/demo/other-repository', pollIntervalSeconds: 300 });
+    const { wrapper } = await mountShell('/github/issues', api);
     githubWorkspace.value = 'C:/demo/current-repository';
     await flushPromises();
-    expect(wrapper.find('.shell-repository.resolved').text()).toBe('github.com/octo-demo/example-repo');
+    const select = wrapper.find('select.shell-repository.resolved').element as HTMLSelectElement;
+    expect(select.value).toBe('github.com/octo-demo/example-repo');
   });
 });

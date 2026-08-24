@@ -3,7 +3,7 @@ import { onMounted, ref, watch } from 'vue';
 import type { GitHubMonitorEvent, GitHubTriggerRule } from '@maatgen/protocol';
 import { AgentApiError } from '../api';
 import { useAgentApi } from '../github/useAgentApi';
-import { githubWorkspace } from '../github/workspace';
+import { selectedRepository } from '../github/repositories';
 
 const api = useAgentApi();
 
@@ -31,7 +31,7 @@ function canSkip(event: GitHubMonitorEvent): boolean {
 }
 
 async function refresh() {
-  if (!githubWorkspace.value) {
+  if (!selectedRepository.value) {
     events.value = [];
     rules.value = [];
     return;
@@ -40,8 +40,8 @@ async function refresh() {
   error.value = '';
   try {
     const [eventList, ruleList] = await Promise.all([
-      api.listGitHubMonitorEvents(githubWorkspace.value, 200),
-      api.listGitHubTriggerRules(githubWorkspace.value).catch(() => []),
+      api.listGitHubMonitorEvents(selectedRepository.value, 200),
+      api.listGitHubTriggerRules(selectedRepository.value).catch(() => []),
     ]);
     events.value = eventList;
     rules.value = ruleList;
@@ -83,7 +83,7 @@ function describeError(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-watch(githubWorkspace, () => void refresh());
+watch(selectedRepository, () => void refresh());
 onMounted(() => void refresh());
 </script>
 
@@ -94,8 +94,8 @@ onMounted(() => void refresh());
       <button type="button" :disabled="loading" @click="refresh">更新</button>
     </div>
 
-    <p v-if="!githubWorkspace" class="github-empty-hint">
-      Sessionを選択すると、そのリポジトリが自動的に対象になります（画面右上に表示されます）。
+    <p v-if="!selectedRepository" class="github-empty-hint">
+      画面右上でリポジトリを選択してください。
     </p>
     <p v-else-if="error" class="github-error">{{ error }}</p>
     <p v-else-if="loading" class="github-hint">読み込み中…</p>

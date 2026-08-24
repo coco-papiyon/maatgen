@@ -9,6 +9,7 @@ import type {
   GitHubMonitorEvent,
   GitHubMonitorEventListResponse,
   GitHubRepositoryMonitor,
+  GitHubRepositoryMonitorListResponse,
   GitHubRepositoryResolution,
   GitHubSyncResult,
   GitHubTriggerRule,
@@ -92,12 +93,15 @@ export interface AgentApi {
 
   // GitHub monitoring (ADR-007).
   resolveGitHubRepository(workspace: string): Promise<GitHubRepositoryResolution>;
+  listGitHubMonitors(): Promise<GitHubRepositoryMonitor[]>;
   getGitHubMonitor(workspace: string): Promise<GitHubRepositoryMonitor>;
   createGitHubMonitor(request: CreateGitHubMonitorRequest): Promise<GitHubRepositoryMonitor>;
   updateGitHubMonitor(request: UpdateGitHubMonitorRequest): Promise<GitHubRepositoryMonitor>;
   deleteGitHubMonitor(workspace: string): Promise<void>;
   syncGitHubMonitorNow(workspace: string): Promise<GitHubSyncResult>;
-  listGitHubTriggerRules(workspace: string): Promise<GitHubTriggerRule[]>;
+  // Omitting workspace lists trigger rules across every registered repository
+  // (the Settings screen's cross-repository rule table).
+  listGitHubTriggerRules(workspace?: string): Promise<GitHubTriggerRule[]>;
   createGitHubTriggerRule(request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule>;
   getGitHubTriggerRule(id: string): Promise<GitHubTriggerRule>;
   updateGitHubTriggerRule(id: string, request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule>;
@@ -253,6 +257,10 @@ export const httpAgentApi: AgentApi = {
   resolveGitHubRepository(workspace) {
     return request(`/api/v1/github/repository?workspace=${encodeURIComponent(workspace)}`);
   },
+  async listGitHubMonitors() {
+    const response = await request<GitHubRepositoryMonitorListResponse>('/api/v1/github/monitors');
+    return response.monitors;
+  },
   getGitHubMonitor(workspace) {
     return request(`/api/v1/github/monitor?workspace=${encodeURIComponent(workspace)}`);
   },
@@ -269,7 +277,8 @@ export const httpAgentApi: AgentApi = {
     return request(`/api/v1/github/monitor/sync?workspace=${encodeURIComponent(workspace)}`, { method: 'POST' });
   },
   async listGitHubTriggerRules(workspace) {
-    const response = await request<GitHubTriggerRuleListResponse>(`/api/v1/github/rules?workspace=${encodeURIComponent(workspace)}`);
+    const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+    const response = await request<GitHubTriggerRuleListResponse>(`/api/v1/github/rules${query}`);
     return response.rules;
   },
   createGitHubTriggerRule(requestBody) {

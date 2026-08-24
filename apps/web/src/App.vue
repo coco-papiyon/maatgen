@@ -1246,6 +1246,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           許可ルール（引数ごとに空白で区切り、<code>*</code>を使用可能）
           <input v-model="approvalRule" type="text" autocomplete="off" spellcheck="false">
         </label>
+        <div v-if="error" class="error-banner" role="alert">{{ error }}</div>
         <div class="approval-actions">
           <button type="button" class="deny-button" :disabled="busy" @click="decideApproval('deny')">不許可</button>
           <button type="button" :disabled="busy" @click="decideApproval('allow_once')">今回のみ許可</button>

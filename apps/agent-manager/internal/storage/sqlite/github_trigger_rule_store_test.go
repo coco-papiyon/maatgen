@@ -87,6 +87,34 @@ func TestTriggerRuleCreateGetList(t *testing.T) {
 	}
 }
 
+func TestTriggerRuleListAllAcrossRepositories(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	createdAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	monitorA := testMonitor("C:/workspace/a", createdAt)
+	monitorB := testMonitor("C:/workspace/b", createdAt)
+	if err := store.CreateRepositoryMonitor(ctx, monitorA); err != nil {
+		t.Fatalf("create monitor a: %v", err)
+	}
+	if err := store.CreateRepositoryMonitor(ctx, monitorB); err != nil {
+		t.Fatalf("create monitor b: %v", err)
+	}
+	if err := store.CreateTriggerRule(ctx, testTriggerRule("rule-a", monitorA.Repository, createdAt)); err != nil {
+		t.Fatalf("create rule a: %v", err)
+	}
+	if err := store.CreateTriggerRule(ctx, testTriggerRule("rule-b", monitorB.Repository, createdAt.Add(time.Minute))); err != nil {
+		t.Fatalf("create rule b: %v", err)
+	}
+
+	rules, err := store.ListAllTriggerRules(ctx)
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(rules) != 2 {
+		t.Fatalf("rules = %#v, want both repositories' rules", rules)
+	}
+}
+
 func TestTriggerRuleRequiresExistingRepository(t *testing.T) {
 	rule := testTriggerRule("rule-1", "missing-repository", time.Now().UTC())
 	if err := newTestStore(t).CreateTriggerRule(context.Background(), rule); err == nil {

@@ -47,6 +47,7 @@ type RepositoryValidator interface {
 type Store interface {
 	CreateRepositoryMonitor(ctx context.Context, monitor protocol.GitHubRepositoryMonitor) error
 	GetRepositoryMonitor(ctx context.Context, repository string) (protocol.GitHubRepositoryMonitor, error)
+	ListRepositoryMonitors(ctx context.Context) ([]protocol.GitHubRepositoryMonitor, error)
 	UpdateRepositoryMonitorSettings(ctx context.Context, monitor protocol.GitHubRepositoryMonitor, updatedAt time.Time) error
 	DeleteRepositoryMonitor(ctx context.Context, repository string) error
 
@@ -54,6 +55,7 @@ type Store interface {
 	UpdateTriggerRule(ctx context.Context, rule protocol.GitHubTriggerRule) error
 	GetTriggerRule(ctx context.Context, id string) (protocol.GitHubTriggerRule, error)
 	ListTriggerRules(ctx context.Context, repository string) ([]protocol.GitHubTriggerRule, error)
+	ListAllTriggerRules(ctx context.Context) ([]protocol.GitHubTriggerRule, error)
 	DeleteTriggerRule(ctx context.Context, id string) error
 
 	ListMonitorEvents(ctx context.Context, repository string, limit int) ([]protocol.GitHubMonitorEvent, error)
@@ -255,12 +257,25 @@ func (s *Service) SyncNow(ctx context.Context, workspace string) (protocol.GitHu
 	}, nil
 }
 
+// ListRules returns the trigger rules for workspace's repository, or, when
+// workspace is empty, every rule across every registered repository (the
+// Settings screen's cross-repository rule table).
 func (s *Service) ListRules(ctx context.Context, workspace string) ([]protocol.GitHubTriggerRule, error) {
+	if workspace == "" {
+		return s.store.ListAllTriggerRules(ctx)
+	}
 	repository, err := s.validator.ValidateRepository(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
 	return s.store.ListTriggerRules(ctx, repository)
+}
+
+// ListMonitors returns every registered repository monitor (the Settings
+// screen's multi-repository table), regardless of which repository is
+// currently selected in the UI.
+func (s *Service) ListMonitors(ctx context.Context) ([]protocol.GitHubRepositoryMonitor, error) {
+	return s.store.ListRepositoryMonitors(ctx)
 }
 
 func (s *Service) CreateRule(ctx context.Context, request protocol.GitHubTriggerRuleRequest) (protocol.GitHubTriggerRule, error) {

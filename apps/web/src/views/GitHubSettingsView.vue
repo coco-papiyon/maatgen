@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import type {
   GitHubConcurrencyPolicy,
   GitHubItemKind,
@@ -9,49 +9,33 @@ import type {
 } from '@maatgen/protocol';
 import { AgentApiError } from '../api';
 import { useAgentApi } from '../github/useAgentApi';
-import { githubWorkspace } from '../github/workspace';
+import { refreshRepositories, repositories } from '../github/repositories';
 
 const api = useAgentApi();
 
-const resolution = ref<GitHubRepositoryResolution>();
 const rules = ref<GitHubTriggerRule[]>([]);
 const loading = ref(false);
 const error = ref('');
-const syncing = ref(false);
-const syncMessage = ref('');
 
-const remoteNameChoice = ref('');
-const pollIntervalSeconds = ref(300);
-const coalesceQueueLimit = ref(20);
-const projectName = ref('');
-const monitorEnabled = ref(true);
-const savingMonitor = ref(false);
-
-const monitor = computed<GitHubRepositoryMonitor | undefined>(() => resolution.value?.monitor);
-const hasAmbiguousRemote = computed(() => !monitor.value && !resolution.value?.selected && (resolution.value?.candidates.length ?? 0) > 1);
-const hasNoRemote = computed(() => !monitor.value && (resolution.value?.candidates.length ?? 0) === 0 && resolution.value !== undefined);
+// ポーリング間隔とcoalesce保留上限はリポジトリごとに変える理由がないため、
+// 全リポジトリ共通の一つの設定として扱う（個別編集はしない）。
+const commonPollIntervalSeconds = ref(300);
+const commonCoalesceQueueLimit = ref(20);
+const applyingCommonSettings = ref(false);
+const projectNameDrafts = ref<Record<string, string>>({});
 
 async function refresh() {
-  if (!githubWorkspace.value) {
-    resolution.value = undefined;
-    rules.value = [];
-    return;
-  }
   loading.value = true;
   error.value = '';
   try {
-    resolution.value = await api.resolveGitHubRepository(githubWorkspace.value);
-    if (resolution.value.monitor) {
-      monitorEnabled.value = resolution.value.monitor.enabled;
-      pollIntervalSeconds.value = resolution.value.monitor.pollIntervalSeconds;
-      coalesceQueueLimit.value = resolution.value.monitor.coalesceQueueLimit;
-      projectName.value = resolution.value.monitor.projectName ?? '';
-      remoteNameChoice.value = resolution.value.monitor.remoteName;
-      rules.value = await api.listGitHubTriggerRules(githubWorkspace.value);
-    } else {
-      rules.value = [];
-      remoteNameChoice.value = resolution.value.selected?.remoteName ?? resolution.value.candidates[0]?.remoteName ?? '';
+    await refreshRepositories(api);
+    const first = repositories.value[0];
+    if (first) {
+      commonPollIntervalSeconds.value = first.pollIntervalSeconds;
+      commonCoalesceQueueLimit.value = first.coalesceQueueLimit;
     }
+    projectNameDrafts.value = Object.fromEntries(repositories.value.map((monitor) => [monitor.repository, monitor.projectName ?? '']));
+    rules.value = await api.listGitHubTriggerRules();
   } catch (cause) {
     error.value = describeError(cause);
   } finally {
@@ -59,75 +43,162 @@ async function refresh() {
   }
 }
 
-async function createMonitor() {
-  savingMonitor.value = true;
+async function applyCommonSettings() {
+  applyingCommonSettings.value = true;
   error.value = '';
   try {
-    await api.createGitHubMonitor({
-      workspace: githubWorkspace.value,
-      ...(remoteNameChoice.value ? { remoteName: remoteNameChoice.value } : {}),
-      pollIntervalSeconds: pollIntervalSeconds.value,
-      coalesceQueueLimit: coalesceQueueLimit.value,
-      ...(projectName.value.trim() ? { projectName: projectName.value.trim() } : {}),
-    });
+    for (const monitor of repositories.value) {
+      await api.updateGitHubMonitor({
+        workspace: monitor.repository,
+        enabled: monitor.enabled,
+        pollIntervalSeconds: commonPollIntervalSeconds.value,
+        coalesceQueueLimit: commonCoalesceQueueLimit.value,
+        projectName: monitor.projectName ?? '',
+      });
+    }
     await refresh();
   } catch (cause) {
     error.value = describeError(cause);
   } finally {
-    savingMonitor.value = false;
+    applyingCommonSettings.value = false;
   }
 }
 
-async function updateMonitor() {
-  savingMonitor.value = true;
+function repositoryLabel(monitor: GitHubRepositoryMonitor): string {
+  return `${monitor.host}/${monitor.owner}/${monitor.name}`;
+}
+
+function ruleRepositoryLabel(repository: string): string {
+  const monitor = repositories.value.find((candidate) => candidate.repository === repository);
+  return monitor ? repositoryLabel(monitor) : repository;
+}
+
+async function toggleEnabled(monitor: GitHubRepositoryMonitor) {
   error.value = '';
   try {
     await api.updateGitHubMonitor({
-      workspace: githubWorkspace.value,
-      enabled: monitorEnabled.value,
-      pollIntervalSeconds: pollIntervalSeconds.value,
-      coalesceQueueLimit: coalesceQueueLimit.value,
-      ...(projectName.value.trim() ? { projectName: projectName.value.trim() } : { projectName: '' }),
-      ...(remoteNameChoice.value ? { remoteName: remoteNameChoice.value } : {}),
+      workspace: monitor.repository,
+      enabled: !monitor.enabled,
+      pollIntervalSeconds: monitor.pollIntervalSeconds,
+      coalesceQueueLimit: monitor.coalesceQueueLimit,
+      projectName: monitor.projectName ?? '',
+    });
+    await refresh();
+  } catch (cause) {
+    error.value = describeError(cause);
+  }
+}
+
+const syncingRepository = ref('');
+async function syncNow(monitor: GitHubRepositoryMonitor) {
+  syncingRepository.value = monitor.repository;
+  error.value = '';
+  try {
+    await api.syncGitHubMonitorNow(monitor.repository);
+    await refresh();
+  } catch (cause) {
+    error.value = describeError(cause);
+  } finally {
+    syncingRepository.value = '';
+  }
+}
+
+async function deleteMonitor(monitor: GitHubRepositoryMonitor) {
+  if (!confirm(`「${repositoryLabel(monitor)}」の監視を削除しますか？関連する監視ルールも削除されます。`)) return;
+  error.value = '';
+  try {
+    await api.deleteGitHubMonitor(monitor.repository);
+    await refresh();
+  } catch (cause) {
+    error.value = describeError(cause);
+  }
+}
+
+// --- Project name (the only per-repository field left to edit; poll
+// interval/coalesce limit are common settings above, and remote is always
+// whatever the local repository's Git remote resolves to — never
+// user-editable, see resolveNewRepository/registerNewRepository). --------
+
+const savingProjectName = ref('');
+
+async function saveProjectName(monitor: GitHubRepositoryMonitor) {
+  savingProjectName.value = monitor.repository;
+  error.value = '';
+  try {
+    await api.updateGitHubMonitor({
+      workspace: monitor.repository,
+      enabled: monitor.enabled,
+      pollIntervalSeconds: monitor.pollIntervalSeconds,
+      coalesceQueueLimit: monitor.coalesceQueueLimit,
+      projectName: projectNameDrafts.value[monitor.repository] ?? '',
     });
     await refresh();
   } catch (cause) {
     error.value = describeError(cause);
   } finally {
-    savingMonitor.value = false;
+    savingProjectName.value = '';
   }
 }
 
-async function deleteMonitor() {
-  if (!confirm('この監視設定を削除しますか？関連する監視ルールも削除されます。')) return;
-  error.value = '';
-  try {
-    await api.deleteGitHubMonitor(githubWorkspace.value);
-    await refresh();
-  } catch (cause) {
-    error.value = describeError(cause);
-  }
-}
+// --- Add a repository -----------------------------------------------------
 
-async function syncNow() {
-  syncing.value = true;
-  syncMessage.value = '';
-  error.value = '';
+const newRepositoryPath = ref('');
+const addResolution = ref<GitHubRepositoryResolution>();
+const addRemoteChoice = ref('');
+const addError = ref('');
+const resolvingNewRepository = ref(false);
+const registeringRepository = ref(false);
+
+const addHasNoRemote = computed(() => addResolution.value !== undefined && addResolution.value.candidates.length === 0);
+const addSingleCandidate = computed(() => (addResolution.value?.candidates.length === 1 ? addResolution.value.candidates[0] : undefined));
+const addAlreadyRegistered = computed(
+  () => addResolution.value !== undefined && repositories.value.some((monitor) => monitor.repository === addResolution.value!.repository),
+);
+
+async function resolveNewRepository() {
+  const path = newRepositoryPath.value.trim();
+  if (!path) return;
+  resolvingNewRepository.value = true;
+  addError.value = '';
+  addResolution.value = undefined;
   try {
-    const result = await api.syncGitHubMonitorNow(githubWorkspace.value);
-    syncMessage.value = `Issue ${result.issuesProcessed}件、PR ${result.pullRequestsProcessed}件を確認し、${result.eventsMatched}件のイベントが一致しました。`;
-    await refresh();
+    const resolution = await api.resolveGitHubRepository(path);
+    addResolution.value = resolution;
+    addRemoteChoice.value = resolution.selected?.remoteName ?? resolution.candidates[0]?.remoteName ?? '';
   } catch (cause) {
-    error.value = describeError(cause);
+    addError.value = describeError(cause);
   } finally {
-    syncing.value = false;
+    resolvingNewRepository.value = false;
   }
 }
 
-// --- Trigger Rule editor -------------------------------------------------
+async function registerNewRepository() {
+  const resolution = addResolution.value;
+  if (!resolution) return;
+  registeringRepository.value = true;
+  addError.value = '';
+  try {
+    await api.createGitHubMonitor({
+      workspace: resolution.repository,
+      ...(addRemoteChoice.value ? { remoteName: addRemoteChoice.value } : {}),
+      pollIntervalSeconds: commonPollIntervalSeconds.value,
+      coalesceQueueLimit: commonCoalesceQueueLimit.value,
+    });
+    newRepositoryPath.value = '';
+    addResolution.value = undefined;
+    await refresh();
+  } catch (cause) {
+    addError.value = describeError(cause);
+  } finally {
+    registeringRepository.value = false;
+  }
+}
+
+// --- Trigger Rule editor (cross-repository) -------------------------------
 
 interface RuleForm {
   id: string;
+  repository: string;
   name: string;
   enabled: boolean;
   eventKinds: GitHubItemKind[];
@@ -147,7 +218,7 @@ interface RuleForm {
 
 function blankRuleForm(): RuleForm {
   return {
-    id: '', name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
+    id: '', repository: repositories.value[0]?.repository ?? '', name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
     provider: 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce',
     labels: '', assignees: '', reviewers: '', projectTitle: '', projectField: '', projectValue: '',
   };
@@ -160,7 +231,7 @@ const includesIssues = computed(() => editingRule.value?.eventKinds.includes('is
 const includesPullRequests = computed(() => editingRule.value?.eventKinds.includes('pull_request') ?? false);
 
 function focusRuleDialog() {
-  void nextTick(() => ruleDialog.value?.querySelector<HTMLElement>('input')?.focus());
+  void nextTick(() => ruleDialog.value?.querySelector<HTMLElement>('input, select')?.focus());
 }
 
 function startCreateRule() {
@@ -170,7 +241,7 @@ function startCreateRule() {
 
 function startEditRule(rule: GitHubTriggerRule) {
   editingRule.value = {
-    id: rule.id, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
+    id: rule.id, repository: rule.repository, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider as RuleForm['provider'],
     model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', concurrencyPolicy: rule.concurrencyPolicy,
     labels: (rule.filters.labels ?? []).join(', '),
@@ -196,7 +267,7 @@ async function saveRule() {
     const assignees = parseCommaSeparated(form.assignees);
     const reviewers = parseCommaSeparated(form.reviewers);
     const request = {
-      workspace: githubWorkspace.value,
+      workspace: form.repository,
       name: form.name,
       enabled: form.enabled,
       eventKinds: form.eventKinds,
@@ -221,7 +292,7 @@ async function saveRule() {
       await api.createGitHubTriggerRule(request);
     }
     editingRule.value = undefined;
-    rules.value = await api.listGitHubTriggerRules(githubWorkspace.value);
+    rules.value = await api.listGitHubTriggerRules();
   } catch (cause) {
     error.value = describeError(cause);
   } finally {
@@ -238,7 +309,7 @@ async function deleteRule(rule: GitHubTriggerRule) {
   error.value = '';
   try {
     await api.deleteGitHubTriggerRule(rule.id);
-    rules.value = await api.listGitHubTriggerRules(githubWorkspace.value);
+    rules.value = await api.listGitHubTriggerRules();
   } catch (cause) {
     error.value = describeError(cause);
   }
@@ -249,7 +320,6 @@ function describeError(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-watch(githubWorkspace, () => void refresh());
 onMounted(() => void refresh());
 </script>
 
@@ -257,151 +327,178 @@ onMounted(() => void refresh());
   <div class="github-view">
     <h1 class="github-view-title">GitHub監視設定</h1>
 
-    <p v-if="!githubWorkspace" class="github-empty-hint">
-      Sessionを選択すると、そのリポジトリが自動的に対象になります（画面右上に表示されます）。
-    </p>
+    <p v-if="error" class="github-error">{{ error }}</p>
+    <p v-if="loading" class="github-hint">読み込み中…</p>
 
-    <template v-else>
-      <p v-if="error" class="github-error">{{ error }}</p>
-      <p v-if="loading" class="github-hint">読み込み中…</p>
+    <section class="github-card">
+      <h2>共通設定</h2>
+      <p class="github-hint">ポーリング間隔とcoalesce保留上限は全リポジトリで共通です。remoteは各ローカルリポジトリのGit remoteが自動的に使われ、ここでは変更できません。</p>
+      <div class="github-form-row">
+        <label>ポーリング間隔（秒）<input v-model.number="commonPollIntervalSeconds" type="number" min="60" /></label>
+        <label>coalesce保留上限<input v-model.number="commonCoalesceQueueLimit" type="number" min="1" /></label>
+      </div>
+      <div class="github-form-actions">
+        <button type="button" :disabled="applyingCommonSettings || !repositories.length" @click="applyCommonSettings">全リポジトリに適用</button>
+      </div>
+    </section>
 
-      <section v-if="resolution" class="github-card">
-        <h2>対象リポジトリ</h2>
-        <dl class="github-kv">
-          <dt>ローカルパス</dt><dd>{{ resolution.repository }}</dd>
-          <dt v-if="resolution.selected || monitor">GitHub</dt>
-          <dd v-if="monitor">{{ monitor.host }}/{{ monitor.owner }}/{{ monitor.name }} (remote: {{ monitor.remoteName }})</dd>
-          <dd v-else-if="resolution.selected">{{ resolution.selected.host }}/{{ resolution.selected.owner }}/{{ resolution.selected.name }} (remote: {{ resolution.selected.remoteName }})</dd>
-          <dt>プロジェクト名</dt>
-          <dd>
-            <div class="github-inline-field">
-              <input v-model="projectName" placeholder="Roadmap（任意）" aria-label="プロジェクト名" />
-              <button v-if="monitor" type="button" :disabled="savingMonitor" @click="updateMonitor">プロジェクト名を保存</button>
-            </div>
-            <small v-if="!monitor" class="github-field-hint">監視を開始すると保存できます。</small>
-          </dd>
-        </dl>
+    <section class="github-card">
+      <h2>対象リポジトリ</h2>
+      <p v-if="!repositories.length" class="github-hint">まだリポジトリが登録されていません。</p>
+      <table v-else class="github-table">
+        <thead>
+          <tr>
+            <th>ローカルパス</th><th>GitHub</th><th>プロジェクト名</th><th>有効</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="monitor in repositories" :key="monitor.repository">
+            <td :title="monitor.repository">{{ monitor.repository }}</td>
+            <td>{{ repositoryLabel(monitor) }}</td>
+            <td>
+              <div class="github-inline-field">
+                <input v-model="projectNameDrafts[monitor.repository]" placeholder="Roadmap（任意）" :aria-label="`プロジェクト名 (${monitor.repository})`" />
+                <button type="button" :disabled="savingProjectName === monitor.repository" @click="saveProjectName(monitor)">保存</button>
+              </div>
+            </td>
+            <td>
+              <label class="github-checkbox">
+                <input type="checkbox" :checked="monitor.enabled" @change="toggleEnabled(monitor)" />
+              </label>
+            </td>
+            <td>
+              <div class="github-form-actions">
+                <button type="button" :disabled="syncingRepository === monitor.repository" @click="syncNow(monitor)">今すぐ同期</button>
+                <button type="button" class="github-danger" @click="deleteMonitor(monitor)">削除</button>
+              </div>
+              <p v-if="monitor.lastError" class="github-error">{{ monitor.lastError }}</p>
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-        <p v-if="hasNoRemote" class="github-error">このリポジトリにはGitHubを指すremoteが見つかりません。</p>
-
-        <div v-if="hasAmbiguousRemote || !monitor" class="github-form-row">
-          <label>
-            remote
-            <select v-model="remoteNameChoice">
-              <option v-for="candidate in resolution.candidates" :key="candidate.remoteName" :value="candidate.remoteName">
-                {{ candidate.remoteName }} ({{ candidate.owner }}/{{ candidate.name }})
-              </option>
-            </select>
+      <div class="github-add-repository">
+        <form class="github-form-row" @submit.prevent="resolveNewRepository">
+          <label>ローカルパスを追加
+            <input v-model="newRepositoryPath" placeholder="C:/path/to/repository" />
           </label>
-        </div>
-      </section>
-
-      <section v-if="resolution && resolution.candidates.length > 0" class="github-card">
-        <h2>{{ monitor ? '監視設定' : '監視を開始' }}</h2>
-        <div class="github-form-row">
-          <label>ポーリング間隔（秒）<input v-model.number="pollIntervalSeconds" type="number" min="60" /></label>
-          <label>coalesce保留上限<input v-model.number="coalesceQueueLimit" type="number" min="1" /></label>
-          <label v-if="monitor" class="github-checkbox"><input v-model="monitorEnabled" type="checkbox" /> 有効</label>
-        </div>
-        <div class="github-form-actions">
-          <button v-if="!monitor" type="button" :disabled="savingMonitor" @click="createMonitor">監視を開始する</button>
-          <template v-else>
-            <button type="button" :disabled="savingMonitor" @click="updateMonitor">設定を保存</button>
-            <button type="button" :disabled="syncing" @click="syncNow">今すぐ同期</button>
-            <button type="button" class="github-danger" @click="deleteMonitor">監視を削除</button>
-          </template>
-        </div>
-        <p v-if="syncMessage" class="github-hint">{{ syncMessage }}</p>
-        <p v-if="monitor?.lastSyncedAt" class="github-meta">最終同期: {{ monitor.lastSyncedAt }}</p>
-        <p v-if="monitor?.lastError" class="github-error">直近のエラー: {{ monitor.lastError }}</p>
-      </section>
-
-      <section v-if="monitor" class="github-card">
-        <div class="github-card-header">
-          <h2>監視ルール</h2>
-          <button type="button" @click="startCreateRule">新しいルール</button>
-        </div>
-
-        <ul v-if="rules.length" class="github-rule-list">
-          <li v-for="rule in rules" :key="rule.id" class="github-rule">
-            <div>
-              <strong>{{ rule.name }}</strong>
-              <span class="github-meta">{{ rule.eventKinds.join(', ') }} / {{ rule.provider }} / {{ rule.concurrencyPolicy }}</span>
-              <span v-if="!rule.enabled" class="github-badge">無効</span>
-            </div>
-            <div class="github-form-actions">
-              <button type="button" @click="startEditRule(rule)">編集</button>
-              <button type="button" class="github-danger" @click="deleteRule(rule)">削除</button>
-            </div>
-          </li>
-        </ul>
-        <p v-else class="github-hint">ルールはまだありません。</p>
-
-      </section>
-
-      <div v-if="editingRule" class="github-modal-backdrop" @click.self="cancelEditRule">
-        <section
-          ref="ruleDialog"
-          class="github-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="github-rule-dialog-title"
-          @keydown.esc="cancelEditRule"
-        >
-          <form class="github-rule-form" @submit.prevent="saveRule">
-            <div class="github-modal-header">
-              <h2 id="github-rule-dialog-title">{{ editingRule.id ? '監視ルールを編集' : '監視ルールを作成' }}</h2>
-              <button type="button" aria-label="閉じる" @click="cancelEditRule">×</button>
-            </div>
-            <label>ルール名<input v-model="editingRule.name" required /></label>
-            <fieldset class="github-checkbox-group">
-              <legend>対象</legend>
-              <label class="github-checkbox"><input v-model="editingRule.eventKinds" type="checkbox" value="issue" /> Issue</label>
-              <label class="github-checkbox"><input v-model="editingRule.eventKinds" type="checkbox" value="pull_request" /> Pull Request</label>
-            </fieldset>
-            <div v-if="includesIssues || includesPullRequests" class="github-form-row">
-              <label>アサイン（GitHub login、カンマ区切り）
-                <input v-model="editingRule.assignees" aria-label="アサイン" placeholder="octocat, hubot" />
-              </label>
-              <label v-if="includesPullRequests">レビューア（GitHub login、カンマ区切り）
-                <input v-model="editingRule.reviewers" aria-label="レビューア" placeholder="reviewer1, reviewer2" />
-              </label>
-            </div>
-            <label>label条件（カンマ区切り、任意）<input v-model="editingRule.labels" placeholder="bug, needs-design" /></label>
-            <div class="github-form-row">
-              <label>Project名（任意）<input v-model="editingRule.projectTitle" placeholder="Roadmap" /></label>
-              <label>フィールド名<input v-model="editingRule.projectField" placeholder="Status" /></label>
-              <label>値<input v-model="editingRule.projectValue" placeholder="Ready" /></label>
-            </div>
-            <label>Promptテンプレート
-              <textarea v-model="editingRule.promptTemplate" rows="4" required placeholder="Design {{.Title}} (#{{.Number}})"></textarea>
-            </label>
-            <label class="github-checkbox"><input v-model="editingRule.includeBody" type="checkbox" /> Issue/PR本文をPromptに含める</label>
-            <div class="github-form-row">
-              <label>Provider
-                <select v-model="editingRule.provider">
-                  <option value="codex">codex</option>
-                  <option value="claude">claude</option>
-                  <option value="copilot">copilot</option>
-                </select>
-              </label>
-              <label>model（任意）<input v-model="editingRule.model" /></label>
-              <label>reasoningEffort（任意）<input v-model="editingRule.reasoningEffort" /></label>
-            </div>
-            <label>同時実行時の扱い
-              <select v-model="editingRule.concurrencyPolicy">
-                <option value="coalesce">coalesce（保留して後で再評価）</option>
-                <option value="skip">skip（今回はスキップ）</option>
+          <button type="submit" :disabled="resolvingNewRepository || !newRepositoryPath.trim()">解決</button>
+        </form>
+        <p v-if="addError" class="github-error">{{ addError }}</p>
+        <p v-else-if="addAlreadyRegistered" class="github-hint">このリポジトリは既に登録されています。</p>
+        <p v-else-if="addHasNoRemote" class="github-error">このリポジトリにはGitHubを指すremoteが見つかりません。</p>
+        <template v-else-if="addResolution && addResolution.candidates.length">
+          <div v-if="addResolution.candidates.length > 1" class="github-form-row">
+            <label>remote（複数見つかったため選択してください）
+              <select v-model="addRemoteChoice">
+                <option v-for="candidate in addResolution.candidates" :key="candidate.remoteName" :value="candidate.remoteName">
+                  {{ candidate.remoteName }} ({{ candidate.owner }}/{{ candidate.name }})
+                </option>
               </select>
             </label>
-            <label class="github-checkbox"><input v-model="editingRule.enabled" type="checkbox" /> 有効</label>
-            <div class="github-form-actions github-modal-actions">
-              <button type="button" @click="cancelEditRule">キャンセル</button>
-              <button type="submit" :disabled="savingRule">保存</button>
-            </div>
-          </form>
-        </section>
+          </div>
+          <p v-else class="github-meta">
+            remote: {{ addSingleCandidate?.remoteName }} ({{ addSingleCandidate?.owner }}/{{ addSingleCandidate?.name }})
+          </p>
+          <div class="github-form-actions">
+            <button type="button" :disabled="registeringRepository" @click="registerNewRepository">このリポジトリを登録する</button>
+          </div>
+        </template>
       </div>
-    </template>
+    </section>
+
+    <section class="github-card">
+      <div class="github-card-header">
+        <h2>監視ルール</h2>
+        <button type="button" :disabled="!repositories.length" @click="startCreateRule">新しいルール</button>
+      </div>
+
+      <ul v-if="rules.length" class="github-rule-list">
+        <li v-for="rule in rules" :key="rule.id" class="github-rule">
+          <div>
+            <strong>{{ rule.name }}</strong>
+            <span class="github-meta">{{ ruleRepositoryLabel(rule.repository) }} / {{ rule.eventKinds.join(', ') }} / {{ rule.provider }} / {{ rule.concurrencyPolicy }}</span>
+            <span v-if="!rule.enabled" class="github-badge">無効</span>
+          </div>
+          <div class="github-form-actions">
+            <button type="button" @click="startEditRule(rule)">編集</button>
+            <button type="button" class="github-danger" @click="deleteRule(rule)">削除</button>
+          </div>
+        </li>
+      </ul>
+      <p v-else class="github-hint">ルールはまだありません。</p>
+    </section>
+
+    <div v-if="editingRule" class="github-modal-backdrop" @click.self="cancelEditRule">
+      <section
+        ref="ruleDialog"
+        class="github-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="github-rule-dialog-title"
+        @keydown.esc="cancelEditRule"
+      >
+        <form class="github-rule-form" @submit.prevent="saveRule">
+          <div class="github-modal-header">
+            <h2 id="github-rule-dialog-title">{{ editingRule.id ? '監視ルールを編集' : '監視ルールを作成' }}</h2>
+            <button type="button" aria-label="閉じる" @click="cancelEditRule">×</button>
+          </div>
+          <label>ローカルパス
+            <select v-if="!editingRule.id" v-model="editingRule.repository" required>
+              <option v-for="monitor in repositories" :key="monitor.repository" :value="monitor.repository">
+                {{ monitor.repository }} ({{ repositoryLabel(monitor) }})
+              </option>
+            </select>
+            <input v-else :value="editingRule.repository" disabled />
+          </label>
+          <label>ルール名<input v-model="editingRule.name" required /></label>
+          <fieldset class="github-checkbox-group">
+            <legend>対象</legend>
+            <label class="github-checkbox"><input v-model="editingRule.eventKinds" type="checkbox" value="issue" /> Issue</label>
+            <label class="github-checkbox"><input v-model="editingRule.eventKinds" type="checkbox" value="pull_request" /> Pull Request</label>
+          </fieldset>
+          <div v-if="includesIssues || includesPullRequests" class="github-form-row">
+            <label>アサイン（GitHub login、カンマ区切り）
+              <input v-model="editingRule.assignees" aria-label="アサイン" placeholder="octocat, hubot" />
+            </label>
+            <label v-if="includesPullRequests">レビューア（GitHub login、カンマ区切り）
+              <input v-model="editingRule.reviewers" aria-label="レビューア" placeholder="reviewer1, reviewer2" />
+            </label>
+          </div>
+          <label>label条件（カンマ区切り、任意）<input v-model="editingRule.labels" placeholder="bug, needs-design" /></label>
+          <div class="github-form-row">
+            <label>Project名（任意）<input v-model="editingRule.projectTitle" placeholder="Roadmap" /></label>
+            <label>フィールド名<input v-model="editingRule.projectField" placeholder="Status" /></label>
+            <label>値<input v-model="editingRule.projectValue" placeholder="Ready" /></label>
+          </div>
+          <label>Promptテンプレート
+            <textarea v-model="editingRule.promptTemplate" rows="4" required placeholder="Design {{.Title}} (#{{.Number}})"></textarea>
+          </label>
+          <label class="github-checkbox"><input v-model="editingRule.includeBody" type="checkbox" /> Issue/PR本文をPromptに含める</label>
+          <div class="github-form-row">
+            <label>Provider
+              <select v-model="editingRule.provider">
+                <option value="codex">codex</option>
+                <option value="claude">claude</option>
+                <option value="copilot">copilot</option>
+              </select>
+            </label>
+            <label>model（任意）<input v-model="editingRule.model" /></label>
+            <label>reasoningEffort（任意）<input v-model="editingRule.reasoningEffort" /></label>
+          </div>
+          <label>同時実行時の扱い
+            <select v-model="editingRule.concurrencyPolicy">
+              <option value="coalesce">coalesce（保留して後で再評価）</option>
+              <option value="skip">skip（今回はスキップ）</option>
+            </select>
+          </label>
+          <label class="github-checkbox"><input v-model="editingRule.enabled" type="checkbox" /> 有効</label>
+          <div class="github-form-actions github-modal-actions">
+            <button type="button" @click="cancelEditRule">キャンセル</button>
+            <button type="submit" :disabled="savingRule">保存</button>
+          </div>
+        </form>
+      </section>
+    </div>
   </div>
 </template>

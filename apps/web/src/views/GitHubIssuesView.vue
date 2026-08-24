@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useGitHubItemList } from '../github/useGitHubItemList';
-import { githubWorkspace } from '../github/workspace';
+import { selectedRepository } from '../github/repositories';
 
 const { items, loading, error, projectsUnavailable, fetchedAt, state, assignee, author, labelsText, text, project, status, refresh } =
   useGitHubItemList('issue');
@@ -18,8 +18,8 @@ function statusValue(item: (typeof items.value)[number]): string {
       <button type="button" :disabled="loading" @click="refresh">再取得</button>
     </div>
 
-    <p v-if="!githubWorkspace" class="github-empty-hint">
-      Sessionを選択すると、そのリポジトリが自動的に対象になります（画面右上に表示されます）。
+    <p v-if="!selectedRepository" class="github-empty-hint">
+      画面右上でリポジトリを選択してください。
     </p>
 
     <template v-else>

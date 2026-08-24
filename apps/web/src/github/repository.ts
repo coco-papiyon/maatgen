@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue';
 import type { AgentApi } from '../api';
 import { githubWorkspace } from './workspace';
+import { refreshRepositories, selectedRepository } from './repositories';
 
 export type GitHubRepositoryStatus = 'idle' | 'resolving' | 'resolved' | 'ambiguous' | 'unavailable';
 
@@ -20,6 +21,12 @@ export const githubRepositoryStatus = ref<GitHubRepositoryStatus>('idle');
 // triggers it automatically instead of requiring a trip to the Settings
 // screen first. The Settings screen remains the place to adjust the poll
 // interval, disable monitoring, or pick a different remote.
+//
+// A resolved repository also becomes the top-right selector's default
+// selection (selectedRepository, github/repositories.ts) — switching
+// Sessions follows you to that repository's Issues/PRs/Events, but the
+// selector can still be changed independently to browse a different
+// registered repository without switching Sessions.
 //
 // Call this from Shell.vue's setup (it needs a concrete AgentApi instance,
 // which is only available via inject() inside a component). Vue ties the
@@ -58,6 +65,8 @@ export function watchGitHubRepository(api: AgentApi): void {
             // user retry once it is.
           }
         }
+        await refreshRepositories(api);
+        selectedRepository.value = resolution.repository;
       } catch {
         githubRepositoryLabel.value = '';
         githubRepositoryStatus.value = 'unavailable';

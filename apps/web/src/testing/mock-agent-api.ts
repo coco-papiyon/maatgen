@@ -398,9 +398,15 @@ export class MockAgentApi implements AgentApi {
   }
 
   async resolveGitHubRepository(workspace: string): Promise<GitHubRepositoryResolution> {
-    const selected = { host: 'github.com', owner: 'octo-demo', name: 'example-repo', remoteName: 'origin' };
+    const selected = workspace === GITHUB_DEMO_WORKSPACE
+      ? { host: 'github.com', owner: 'octo-demo', name: 'example-repo', remoteName: 'origin' }
+      : { host: 'github.com', owner: 'octo-demo', name: mockRepoNameFromWorkspace(workspace), remoteName: 'origin' };
     const monitor = this.githubMonitors.get(workspace);
     return { repository: workspace, candidates: [selected], selected, ...(monitor ? { monitor: clone(monitor) } : {}) };
+  }
+
+  async listGitHubMonitors(): Promise<GitHubRepositoryMonitor[]> {
+    return [...this.githubMonitors.values()].map(clone);
   }
 
   async getGitHubMonitor(workspace: string): Promise<GitHubRepositoryMonitor> {
@@ -411,9 +417,10 @@ export class MockAgentApi implements AgentApi {
 
   async createGitHubMonitor(request: CreateGitHubMonitorRequest): Promise<GitHubRepositoryMonitor> {
     const nowIso = now;
+    const name = request.workspace === GITHUB_DEMO_WORKSPACE ? 'example-repo' : mockRepoNameFromWorkspace(request.workspace);
     const monitor: GitHubRepositoryMonitor = {
-      repository: request.workspace, host: 'github.com', owner: 'octo-demo', name: 'example-repo',
-      remoteName: request.remoteName ?? 'origin', enabled: true,
+      repository: request.workspace, host: 'github.com', owner: 'octo-demo', name,
+      remoteName: request.remoteName ?? 'origin', enabled: true, projectName: request.projectName ?? '',
       pollIntervalSeconds: request.pollIntervalSeconds, coalesceQueueLimit: request.coalesceQueueLimit ?? 20,
       createdAt: nowIso, updatedAt: nowIso,
     };
@@ -427,6 +434,7 @@ export class MockAgentApi implements AgentApi {
     const updated: GitHubRepositoryMonitor = {
       ...existing, enabled: request.enabled, pollIntervalSeconds: request.pollIntervalSeconds,
       coalesceQueueLimit: request.coalesceQueueLimit, remoteName: request.remoteName ?? existing.remoteName,
+      projectName: request.projectName ?? existing.projectName ?? '',
       updatedAt: now,
     };
     this.githubMonitors.set(request.workspace, updated);
@@ -446,8 +454,9 @@ export class MockAgentApi implements AgentApi {
     return { issuesProcessed: this.githubIssues.length, pullRequestsProcessed: this.githubPulls.length, eventsMatched: 0 };
   }
 
-  async listGitHubTriggerRules(workspace: string): Promise<GitHubTriggerRule[]> {
-    return [...this.githubRules.values()].filter((rule) => rule.repository === workspace).map(clone);
+  async listGitHubTriggerRules(workspace?: string): Promise<GitHubTriggerRule[]> {
+    const rules = [...this.githubRules.values()];
+    return (workspace ? rules.filter((rule) => rule.repository === workspace) : rules).map(clone);
   }
 
   async createGitHubTriggerRule(request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule> {
@@ -541,8 +550,7 @@ export class MockAgentApi implements AgentApi {
   }
 }
 
-export function createMockEnvironment(): { agentApi: AgentApi; eventStreamFactory: EventStreamFactory } {
-  const agentApi = new MockAgentApi();
+export function createMockEnvironment(agentApi: MockAgentApi = new MockAgentApi()): { agentApi: AgentApi; eventStreamFactory: EventStreamFactory } {
   return {
     agentApi,
     eventStreamFactory: (options) => {
@@ -650,6 +658,11 @@ function multiHunk(sessionId: string): ChangeSet {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function mockRepoNameFromWorkspace(workspace: string): string {
+  const segment = workspace.split(/[/\\]/).filter(Boolean).pop() ?? workspace;
+  return segment.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
 }
 
 function matchesMockGitHubQuery(item: GitHubItem, query?: GitHubItemQuery): boolean {

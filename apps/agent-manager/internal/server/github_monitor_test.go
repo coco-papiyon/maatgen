@@ -13,6 +13,7 @@ import (
 
 type fakeGitHubMonitorController struct {
 	resolution protocol.GitHubRepositoryResolution
+	monitors   []protocol.GitHubRepositoryMonitor
 	monitor    protocol.GitHubRepositoryMonitor
 	syncResult protocol.GitHubSyncResult
 	rules      []protocol.GitHubTriggerRule
@@ -38,6 +39,9 @@ type fakeGitHubMonitorController struct {
 func (f *fakeGitHubMonitorController) ResolveRepository(ctx context.Context, workspace string) (protocol.GitHubRepositoryResolution, error) {
 	f.lastWorkspace = workspace
 	return f.resolution, f.err
+}
+func (f *fakeGitHubMonitorController) ListMonitors(ctx context.Context) ([]protocol.GitHubRepositoryMonitor, error) {
+	return f.monitors, f.err
 }
 func (f *fakeGitHubMonitorController) CreateMonitor(ctx context.Context, request protocol.CreateGitHubMonitorRequest) (protocol.GitHubRepositoryMonitor, error) {
 	f.lastCreateMonitor = request
@@ -135,6 +139,29 @@ func TestGitHubResolveRepositoryAPI(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(response.Candidates) != 1 || response.Candidates[0].Owner != "octo-org" {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestGitHubListMonitorsAPI(t *testing.T) {
+	controller := &fakeGitHubMonitorController{monitors: []protocol.GitHubRepositoryMonitor{
+		{Repository: "/repo-a", Host: "github.com", Owner: "octo-org", Name: "a", Enabled: true},
+		{Repository: "/repo-b", Host: "github.com", Owner: "octo-org", Name: "b", Enabled: false},
+	}}
+	config := testConfig()
+	config.GitHubMonitorController = controller
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/monitors"))
+	if recorder.Code != 200 {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response protocol.GitHubRepositoryMonitorListResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(response.Monitors) != 2 {
 		t.Fatalf("response = %#v", response)
 	}
 }
