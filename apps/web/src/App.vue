@@ -36,6 +36,9 @@ const createEventStream =
   props.eventStreamFactory ?? inject<EventStreamFactory>('eventStreamFactory', (options) => new SessionEventStream(options));
 
 const sessions = ref<AgentSession[]>([]);
+const unreadSessionIDs = ref<Set<string>>(new Set());
+const sessionReadSequenceKey = 'maatgen.sessionReadSequences';
+const sessionReadSequences = loadSessionReadSequences();
 const providers = ref<Provider[]>([]);
 const providerStorageKey = 'maatgen.provider';
 const storedProvider = localStorage.getItem(providerStorageKey) as AgentSession['agent'] | null;
@@ -292,6 +295,20 @@ function shortPath(path: string): string {
   return parts.slice(-2).join('/');
 }
 
+function loadSessionReadSequences(): Record<string, number> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(sessionReadSequenceKey) ?? '{}') as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value === 'number' && Number.isSafeInteger(value)));
+  } catch {
+    return {};
+  }
+}
+
+function isUnreadEvent(event: SessionEvent): boolean {
+  return ['assistant_message', 'reasoning_summary', 'run_completed', 'run_failed', 'run_cancelled', 'command_approval_requested'].includes(event.type);
+}
+
 function changePath(file: ChangeSet['files'][number]): string {
   return file.newPath ?? file.oldPath ?? 'unknown';
 }
@@ -410,6 +427,30 @@ async function refreshSessions(reset = false) {
   if (selected.value) {
     selected.value = sessions.value.find((item) => item.id === selected.value?.id) ?? selected.value;
   }
+  await refreshUnreadSessions(sessions.value);
+}
+
+async function refreshUnreadSessions(items: AgentSession[]) {
+  const unread = new Set(unreadSessionIDs.value);
+  await Promise.all(items.map(async (session) => {
+    if (selected.value?.id === session.id) return;
+    const readSequence = sessionReadSequences[session.id] ?? 0;
+    try {
+      const newEvents = await api.getEvents(session.id, readSequence);
+      if (newEvents.some(isUnreadEvent)) unread.add(session.id);
+    } catch {
+      // A failed background check must not make the session list unusable.
+    }
+  }));
+  unreadSessionIDs.value = unread;
+}
+
+function markSessionRead(sessionID: string, sequence: number) {
+  sessionReadSequences[sessionID] = Math.max(sessionReadSequences[sessionID] ?? 0, sequence);
+  localStorage.setItem(sessionReadSequenceKey, JSON.stringify(sessionReadSequences));
+  const unread = new Set(unreadSessionIDs.value);
+  unread.delete(sessionID);
+  unreadSessionIDs.value = unread;
 }
 
 async function loadMoreSessions() {
@@ -420,6 +461,7 @@ async function loadMoreSessions() {
     const known = new Set(sessions.value.map((session) => session.id));
     sessions.value.push(...page.sessions.filter((session) => !known.has(session.id)));
     nextSessionCursor.value = page.nextCursor ?? '';
+    await refreshUnreadSessions(page.sessions);
   } catch (cause) {
     handleFailure(cause);
   } finally {
@@ -459,6 +501,7 @@ async function selectSession(session: AgentSession) {
   error.value = '';
   diagnostic.value = undefined;
   await refreshSelected(true);
+  markSessionRead(session.id, events.value.at(-1)?.sequence ?? 0);
   // Counted once at session creation, so fetch it once here rather than on every poll.
   try {
     const stats = await api.getSourceStats(session.id);
@@ -548,6 +591,7 @@ function startEventStream(sessionId: string) {
     onEvent: (event) => {
       if (selected.value?.id !== sessionId || event.sequence <= lastSequence.value) return;
       events.value.push(event);
+      markSessionRead(sessionId, event.sequence);
       streamError.value = '';
       restoreActiveRun(events.value);
       updateDiagnosticFromEvents([event]);
@@ -948,6 +992,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           :title="session.workspace"
         >
           <span class="session-title">{{ shortPath(session.workspace) }}</span>
+          <span v-if="unreadSessionIDs.has(session.id)" class="unread-mark" title="未読">未読</span>
           <span class="session-meta">
             <span :class="['mini-dot', session.status]" />{{ formatSessionStatus(session.status) }} · {{ session.agent }}
           </span>

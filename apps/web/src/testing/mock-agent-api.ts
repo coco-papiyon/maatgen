@@ -98,6 +98,7 @@ export class MockAgentApi implements AgentApi {
       agent: request.agent,
       workspace: request.workspace,
       status: 'active',
+      triggerSource: 'manual',
       createdAt: new Date().toISOString(),
     };
     this.sessions.set(id, session);
@@ -606,6 +607,7 @@ function scenario(
       agent,
       workspace,
       status: 'active' as const,
+      triggerSource: 'manual' as const,
       createdAt: now,
     },
     events,
