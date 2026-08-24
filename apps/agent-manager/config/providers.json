@@ -11,7 +11,7 @@
         "gpt-5.4",
         "gpt-5.4-mini"
       ],
-      "defaultModel": "gpt-5.6-luna",
+      "defaultModel": "gpt-5.6-sol",
       "pricing": {
         "gpt-5.6-luna": {
           "inputPerMillion": 0.2,

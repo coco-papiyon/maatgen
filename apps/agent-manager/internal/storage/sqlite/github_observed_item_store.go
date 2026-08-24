@@ -25,18 +25,23 @@ func upsertObservedItem(ctx context.Context, exec execer, item protocol.GitHubOb
 	if err != nil {
 		return fmt.Errorf("upsert github observed item: encode snapshot: %w", err)
 	}
+	evaluatedRuleVersions, err := json.Marshal(item.EvaluatedRuleVersions)
+	if err != nil {
+		return fmt.Errorf("upsert github observed item: encode evaluated rule versions: %w", err)
+	}
 	_, err = exec.ExecContext(ctx, `INSERT INTO github_observed_items(
 		repository, kind, number, state_hash, last_action, projects_available, snapshot_json,
-		first_synced_at, observed_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		evaluated_rule_versions_json, first_synced_at, observed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(repository, kind, number) DO UPDATE SET
 		state_hash = excluded.state_hash,
 		last_action = excluded.last_action,
 		projects_available = excluded.projects_available,
 		snapshot_json = excluded.snapshot_json,
+		evaluated_rule_versions_json = excluded.evaluated_rule_versions_json,
 		observed_at = excluded.observed_at`,
 		item.Repository, item.Kind, item.Number, item.StateHash, item.LastAction,
-		boolToInt(item.ProjectsAvailable), string(snapshot),
+		boolToInt(item.ProjectsAvailable), string(snapshot), string(evaluatedRuleVersions),
 		formatTime(item.FirstSyncedAt), formatTime(item.ObservedAt))
 	if err != nil {
 		return fmt.Errorf("upsert github observed item: %w", err)
@@ -85,15 +90,15 @@ func (s *Store) ClearRepositoryObservations(ctx context.Context, repository stri
 }
 
 const observedItemSelect = `SELECT repository, kind, number, state_hash, last_action,
-	projects_available, snapshot_json, first_synced_at, observed_at FROM github_observed_items`
+	projects_available, snapshot_json, evaluated_rule_versions_json, first_synced_at, observed_at FROM github_observed_items`
 
 func scanObservedItem(row scanner) (protocol.GitHubObservedItem, error) {
 	var item protocol.GitHubObservedItem
 	var projectsAvailable int
-	var snapshot string
+	var snapshot, evaluatedRuleVersions string
 	var firstSyncedAt, observedAt string
 	if err := row.Scan(&item.Repository, &item.Kind, &item.Number, &item.StateHash, &item.LastAction,
-		&projectsAvailable, &snapshot, &firstSyncedAt, &observedAt); err != nil {
+		&projectsAvailable, &snapshot, &evaluatedRuleVersions, &firstSyncedAt, &observedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return protocol.GitHubObservedItem{}, storage.ErrNotFound
 		}
@@ -102,6 +107,9 @@ func scanObservedItem(row scanner) (protocol.GitHubObservedItem, error) {
 	item.ProjectsAvailable = projectsAvailable != 0
 	if err := json.Unmarshal([]byte(snapshot), &item.Snapshot); err != nil {
 		return protocol.GitHubObservedItem{}, fmt.Errorf("scan github observed item snapshot: %w", err)
+	}
+	if err := json.Unmarshal([]byte(evaluatedRuleVersions), &item.EvaluatedRuleVersions); err != nil {
+		return protocol.GitHubObservedItem{}, fmt.Errorf("scan github observed item evaluated rule versions: %w", err)
 	}
 	var err error
 	if item.FirstSyncedAt, err = parseTime(firstSyncedAt); err != nil {

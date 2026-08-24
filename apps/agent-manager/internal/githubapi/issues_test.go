@@ -1,12 +1,15 @@
 package githubapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/go-github/v69/github"
@@ -77,6 +80,46 @@ func TestListIssuesExcludesPullRequestsAndPaginates(t *testing.T) {
 	}
 	if items[1].Number != 3 || items[1].State != protocol.GitHubItemClosed {
 		t.Fatalf("items[1] = %#v", items[1])
+	}
+}
+
+func TestListIssuesAndPullRequestsLogFetches(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	client := newTestRESTClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/octo-org/example/issues":
+			writeJSON(t, w, []map[string]any{{"number": 1, "title": "issue", "state": "open"}})
+		case "/repos/octo-org/example/pulls":
+			writeJSON(t, w, []map[string]any{{"number": 2, "title": "pull", "state": "open"}})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	})
+
+	if _, err := client.ListIssues(context.Background(), "octo-org", "example", ListOptions{State: "open"}); err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if _, err := client.ListPullRequests(context.Background(), "octo-org", "example", ListOptions{State: "open"}); err != nil {
+		t.Fatalf("ListPullRequests: %v", err)
+	}
+
+	output := logs.String()
+	for _, expected := range []string{
+		"github issue list fetch started",
+		"github issue list fetch completed",
+		"github pull request list fetch started",
+		"github pull request list fetch completed",
+		"owner=octo-org",
+		"repository=example",
+		"count=1",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("log output %q does not contain %q", output, expected)
+		}
 	}
 }
 

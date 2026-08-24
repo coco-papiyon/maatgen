@@ -39,7 +39,7 @@ func testRepositoryMonitor(repository string, lastSyncedAt *time.Time) protocol.
 
 func createReadyRule(t *testing.T, store *sqlite.Store, repository string) protocol.GitHubTriggerRule {
 	t.Helper()
-	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
 	rule := protocol.GitHubTriggerRule{
 		ID:             "rule-ready",
 		Repository:     repository,
@@ -211,5 +211,104 @@ func TestEvaluateItemUnchangedProducesNoEvents(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("events = %#v, want none: item did not change between polls", events)
+	}
+}
+
+func TestEvaluateItemFiresOnceWhenRuleIsAddedAfterIssueWasObserved(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	repository := "C:/workspace/example"
+	syncedAt := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+	monitor := testRepositoryMonitor(repository, &syncedAt)
+	if err := store.CreateRepositoryMonitor(ctx, monitor); err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+
+	item := baseItem()
+	item.Assignees = []protocol.GitHubUser{{Login: "coco-papiyon"}}
+	evaluator := NewEvaluator(store)
+	evaluator.now = func() time.Time { return time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC) }
+	if _, err := evaluator.EvaluateItem(ctx, monitor, item); err != nil {
+		t.Fatalf("EvaluateItem (baseline): %v", err)
+	}
+
+	ruleTime := time.Date(2026, 8, 24, 11, 0, 0, 0, time.UTC)
+	rule := protocol.GitHubTriggerRule{
+		ID: "rule-added-after-issue", Repository: repository, Name: "Implement assigned issue", Enabled: true,
+		EventKinds:     []protocol.GitHubItemKind{protocol.GitHubItemIssue},
+		Filters:        protocol.GitHubMonitorFilters{Assignees: []string{"coco-papiyon"}},
+		PromptTemplate: "Implement issue #{{.Number}}", Provider: protocol.AgentCodex,
+		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce, CreatedAt: ruleTime, UpdatedAt: ruleTime,
+	}
+	if err := store.CreateTriggerRule(ctx, rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	evaluator.now = func() time.Time { return time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC) }
+	events, err := evaluator.EvaluateItem(ctx, monitor, item)
+	if err != nil {
+		t.Fatalf("EvaluateItem (new rule): %v", err)
+	}
+	if len(events) != 1 || events[0].RuleID == nil || *events[0].RuleID != rule.ID {
+		t.Fatalf("events = %#v, want one event for the newly added rule", events)
+	}
+	if events[0].Action != "opened" {
+		t.Fatalf("event.Action = %q, want opened for the current open issue", events[0].Action)
+	}
+
+	evaluator.now = func() time.Time { return time.Date(2026, 8, 24, 13, 0, 0, 0, time.UTC) }
+	events, err = evaluator.EvaluateItem(ctx, monitor, item)
+	if err != nil {
+		t.Fatalf("EvaluateItem (same rule version): %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want no duplicate for the same rule version", events)
+	}
+}
+
+func TestEvaluateItemFiresAgainWhenMatchingRuleIsUpdated(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	repository := "C:/workspace/example"
+	syncedAt := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+	monitor := testRepositoryMonitor(repository, &syncedAt)
+	if err := store.CreateRepositoryMonitor(ctx, monitor); err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+
+	item := baseItem()
+	item.Assignees = []protocol.GitHubUser{{Login: "coco-papiyon"}}
+	rule := protocol.GitHubTriggerRule{
+		ID: "rule-updated", Repository: repository, Name: "Implement assigned issue", Enabled: true,
+		EventKinds:     []protocol.GitHubItemKind{protocol.GitHubItemIssue},
+		Filters:        protocol.GitHubMonitorFilters{Assignees: []string{"coco-papiyon"}},
+		PromptTemplate: "Implement issue #{{.Number}}", Provider: protocol.AgentCodex,
+		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce,
+		CreatedAt:         time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC),
+		UpdatedAt:         time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC),
+	}
+	if err := store.CreateTriggerRule(ctx, rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	evaluator := NewEvaluator(store)
+	evaluator.now = func() time.Time { return time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC) }
+	first, err := evaluator.EvaluateItem(ctx, monitor, item)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("EvaluateItem (initial rule): events=%#v err=%v", first, err)
+	}
+
+	rule.PromptTemplate = "Implement and test issue #{{.Number}}"
+	rule.UpdatedAt = time.Date(2026, 8, 24, 11, 0, 0, 0, time.UTC)
+	if err := store.UpdateTriggerRule(ctx, rule); err != nil {
+		t.Fatalf("update rule: %v", err)
+	}
+	evaluator.now = func() time.Time { return time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC) }
+	second, err := evaluator.EvaluateItem(ctx, monitor, item)
+	if err != nil || len(second) != 1 {
+		t.Fatalf("EvaluateItem (updated rule): events=%#v err=%v", second, err)
+	}
+	if *first[0].DeliveryKey == *second[0].DeliveryKey {
+		t.Fatalf("updated rule version must produce a distinct delivery key")
 	}
 }

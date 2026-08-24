@@ -3,6 +3,7 @@ package githubapi
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/go-github/v69/github"
 
@@ -27,6 +28,7 @@ type ListOptions struct {
 // ADR-007 section 2 keeps them as separate normalized kinds, so Pull
 // Requests are filtered out here and must be fetched via ListPullRequests.
 func (c *Client) ListIssues(ctx context.Context, owner, repo string, opts ListOptions) ([]protocol.GitHubItem, error) {
+	slog.Info("github issue list fetch started", "host", c.Host, "owner", owner, "repository", repo, "state", opts.State)
 	options := &github.IssueListByRepoOptions{
 		State:       opts.State,
 		ListOptions: github.ListOptions{PerPage: 100},
@@ -35,6 +37,7 @@ func (c *Client) ListIssues(ctx context.Context, owner, repo string, opts ListOp
 	for page := 0; page < maxPages; page++ {
 		issues, resp, err := c.rest.Issues.ListByRepo(ctx, owner, repo, options)
 		if err != nil {
+			slog.Warn("github issue list fetch failed", "host", c.Host, "owner", owner, "repository", repo, "state", opts.State, "error", err)
 			return nil, fmt.Errorf("list issues: %w", err)
 		}
 		for _, issue := range issues {
@@ -48,6 +51,7 @@ func (c *Client) ListIssues(ctx context.Context, owner, repo string, opts ListOp
 		}
 		options.Page = resp.NextPage
 	}
+	slog.Info("github issue list fetch completed", "host", c.Host, "owner", owner, "repository", repo, "state", opts.State, "count", len(items))
 	return items, nil
 }
 
@@ -62,6 +66,7 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 
 // ListPullRequests returns the repository's Pull Requests.
 func (c *Client) ListPullRequests(ctx context.Context, owner, repo string, opts ListOptions) ([]protocol.GitHubItem, error) {
+	slog.Info("github pull request list fetch started", "host", c.Host, "owner", owner, "repository", repo, "state", opts.State)
 	options := &github.PullRequestListOptions{
 		State:       opts.State,
 		ListOptions: github.ListOptions{PerPage: 100},
@@ -70,6 +75,7 @@ func (c *Client) ListPullRequests(ctx context.Context, owner, repo string, opts 
 	for page := 0; page < maxPages; page++ {
 		pulls, resp, err := c.rest.PullRequests.List(ctx, owner, repo, options)
 		if err != nil {
+			slog.Warn("github pull request list fetch failed", "host", c.Host, "owner", owner, "repository", repo, "state", opts.State, "error", err)
 			return nil, fmt.Errorf("list pull requests: %w", err)
 		}
 		for _, pull := range pulls {
@@ -80,6 +86,7 @@ func (c *Client) ListPullRequests(ctx context.Context, owner, repo string, opts 
 		}
 		options.Page = resp.NextPage
 	}
+	slog.Info("github pull request list fetch completed", "host", c.Host, "owner", owner, "repository", repo, "state", opts.State, "count", len(items))
 	return items, nil
 }
 

@@ -1,8 +1,11 @@
 package githubmonitor
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +29,7 @@ type fakeSchedulerPoller struct {
 	mu     sync.Mutex
 	synced []string
 	err    error
+	result SyncResult
 }
 
 func (f *fakeSchedulerPoller) SyncRepository(ctx context.Context, repository string) (SyncResult, error) {
@@ -35,7 +39,7 @@ func (f *fakeSchedulerPoller) SyncRepository(ctx context.Context, repository str
 	if f.err != nil {
 		return SyncResult{}, f.err
 	}
-	return SyncResult{}, nil
+	return f.result, nil
 }
 
 func (f *fakeSchedulerPoller) syncedRepositories() []string {
@@ -63,6 +67,35 @@ func TestSchedulerTickSyncsDueAndNeverSyncedMonitors(t *testing.T) {
 	synced := poller.syncedRepositories()
 	if len(synced) != 2 {
 		t.Fatalf("synced = %#v, want both monitors", synced)
+	}
+}
+
+func TestSchedulerTickLogsPollStartAndCompletion(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	store := &fakeSchedulerStore{monitors: []protocol.GitHubRepositoryMonitor{{
+		Repository: "/repo", Owner: "octo-org", Name: "example", Enabled: true,
+	}}}
+	poller := &fakeSchedulerPoller{result: SyncResult{IssuesProcessed: 2, PullRequestsProcessed: 3, EventsMatched: 1}}
+	if err := NewScheduler(store, poller).Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	output := logs.String()
+	for _, expected := range []string{
+		"scheduled github repository poll started",
+		"scheduled github repository poll completed",
+		"github_owner=octo-org",
+		"issues=2",
+		"pull_requests=3",
+		"events_matched=1",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("log output %q does not contain %q", output, expected)
+		}
 	}
 }
 

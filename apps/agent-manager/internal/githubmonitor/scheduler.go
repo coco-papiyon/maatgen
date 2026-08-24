@@ -126,9 +126,24 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 		if monitor.NextSyncAt != nil && monitor.NextSyncAt.After(now) {
 			continue
 		}
-		if _, err := s.poller.SyncRepository(ctx, monitor.Repository); err != nil {
+		slog.Info("scheduled github repository poll started",
+			"repository", monitor.Repository,
+			"github_owner", monitor.Owner,
+			"github_repository", monitor.Name,
+		)
+		result, err := s.poller.SyncRepository(ctx, monitor.Repository)
+		if err != nil {
 			slog.Warn("scheduled github repository sync failed", "repository", monitor.Repository, "error", err)
+			continue
 		}
+		slog.Info("scheduled github repository poll completed",
+			"repository", monitor.Repository,
+			"github_owner", monitor.Owner,
+			"github_repository", monitor.Name,
+			"issues", result.IssuesProcessed,
+			"pull_requests", result.PullRequestsProcessed,
+			"events_matched", result.EventsMatched,
+		)
 	}
 	return nil
 }

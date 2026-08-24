@@ -113,6 +113,8 @@ interface GitHubTriggerRule {
 
 Trigger Ruleに一致した場合、Agent Managerは対象リポジトリに対して新しい通常のAgent Sessionを作成し、そのSessionでRunを起動する。自動実行された処理を既存の手動Sessionや他の監視ルールのSessionへ混在させない。作成されたSessionには、監視ルール、検出したGitHub item、発火イベント、`triggerSource: github_monitor`、選択したProvider／modelへの関連を保存し、通常のSessionと同じライフサイクル、履歴、Checkpoint、Usage、ChangeSet、Restoreの扱いを適用する。
 
+Issue／PRの観測後にTrigger Ruleを作成または更新した場合、次回ポーリングでそのルールの新しい版を現在のitem状態へ一度だけ評価する。item自体が未変更でも、一致すれば発火する。同じルール版をポーリングごとに再発火させず、ルールを再更新した場合は新しい版として再評価する。初回同期時に既に存在するルールとitemについては、従来どおり観測基準点の作成だけを行う。
+
 Promptは利用者が設定したテンプレートから生成する。テンプレートには、少なくともrepository、kind、number、title、URL、author、assignees、labels、Project情報、検出actionを構造化データとして展開できるようにする。テンプレートの未定義変数は空値とし、本文全体や機密情報を暗黙に追加しない。
 
 自動起動されたRunも通常のRunと同じく、次を実行する。
@@ -219,6 +221,8 @@ Web版の監視設定画面には次を表示する。
    - GitHub上のPRを開くリンクを提供するが、GitHubへのコメント、ラベル変更、レビュー投稿などの書き戻しは行わない
 
 画面上の保存・同期・有効化操作はAgent ManagerのAPIを通じて行う。ブラウザからGitHub APIへ直接アクセスせず、認証情報やremote URLに含まれる資格情報を画面へ表示しない。自動実行Sessionの詳細画面では、通常Sessionと同じConversation、Run、Usage、Event、ChangeSetを表示する。
+
+Agent Managerは、定期ポーリングの開始・完了・失敗と、GitHub APIからのIssue／PR一覧取得の開始・完了・失敗を構造化ログへ出力する。ログには対象host、owner、repository、取得種別、state、取得件数を含めるが、tokenやIssue／PR本文は含めない。
 
 Issue／PR一覧と詳細は表示要求ごとにAgent ManagerがGitHub APIから取得する。GitHub APIへアクセスできない場合は保存済みデータへフォールバックせず、取得エラー、認証状態、レート制限情報を表示する。同じ画面を開いている間の一時的なメモリキャッシュは許可するが、再起動後に利用する永続キャッシュは作らない。Project情報など一部だけ取得できない場合は、そのレスポンスで欠損状態を表示し、Issue／PR本体の表示を隠さない。
 

@@ -204,15 +204,16 @@ type GitHubTriggerRule struct {
 // never back an Issue/PR list or detail screen (those always fetch fresh
 // from GitHub, see ADR-007 section 2).
 type GitHubObservedItem struct {
-	Repository        string         `json:"repository"`
-	Kind              GitHubItemKind `json:"kind"`
-	Number            int            `json:"number"`
-	StateHash         string         `json:"stateHash"`
-	LastAction        string         `json:"lastAction"`
-	ProjectsAvailable bool           `json:"projectsAvailable"`
-	Snapshot          GitHubItem     `json:"snapshot"`
-	FirstSyncedAt     time.Time      `json:"firstSyncedAt"`
-	ObservedAt        time.Time      `json:"observedAt"`
+	Repository            string            `json:"repository"`
+	Kind                  GitHubItemKind    `json:"kind"`
+	Number                int               `json:"number"`
+	StateHash             string            `json:"stateHash"`
+	LastAction            string            `json:"lastAction"`
+	ProjectsAvailable     bool              `json:"projectsAvailable"`
+	Snapshot              GitHubItem        `json:"snapshot"`
+	EvaluatedRuleVersions map[string]string `json:"evaluatedRuleVersions"`
+	FirstSyncedAt         time.Time         `json:"firstSyncedAt"`
+	ObservedAt            time.Time         `json:"observedAt"`
 }
 
 // GitHubMonitorEventStatus is the Outbox lifecycle state of a detected

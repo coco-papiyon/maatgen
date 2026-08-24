@@ -44,7 +44,14 @@ func NewEvaluator(store Store) *Evaluator {
 //     relative to. If an item was observed before (even in a partial first
 //     sync that later failed), its state changes are evaluated normally.
 //   - When nothing changed since the last poll (same normalized state
-//     hash): there is no new change to evaluate rules against.
+//     hash) and no rule was created or updated after that observation:
+//     there is no new item or rule state to evaluate.
+//
+// A rule created or updated after the item's previous observation is
+// evaluated once against the current item even when the item itself is
+// unchanged. This lets users add monitoring to an existing Issue/PR. The
+// observation timestamp and rule-versioned delivery key prevent the same
+// rule version from firing on every subsequent poll.
 //
 // The returned events are only the ones newly inserted this call: if
 // re-evaluating the exact same detected change against the exact same rule
@@ -65,28 +72,32 @@ func (e *Evaluator) EvaluateItem(ctx context.Context, monitor protocol.GitHubRep
 
 	change := DetectChange(previousPtr, item)
 	now := e.now().UTC()
+	evaluationAction := change.Action
+	if !change.Changed && previousPtr != nil {
+		evaluationAction = previousPtr.LastAction
+		if evaluationAction == "" {
+			evaluationAction = actionForCurrentState(item)
+		}
+	}
 	firstSyncedAt := now
+	evaluatedRuleVersions := map[string]string{}
 	if previousPtr != nil {
 		firstSyncedAt = previousPtr.FirstSyncedAt
+		for ruleID, version := range previousPtr.EvaluatedRuleVersions {
+			evaluatedRuleVersions[ruleID] = version
+		}
 	}
 	observed := protocol.GitHubObservedItem{
-		Repository:        monitor.Repository,
-		Kind:              item.Kind,
-		Number:            item.Number,
-		StateHash:         change.StateHash,
-		LastAction:        change.Action,
-		ProjectsAvailable: item.HasProjectData(),
-		Snapshot:          item,
-		FirstSyncedAt:     firstSyncedAt,
-		ObservedAt:        now,
-	}
-
-	isItemNewInFirstSync := monitor.LastSyncedAt == nil && previousPtr == nil
-	if isItemNewInFirstSync || !change.Changed {
-		if _, err := e.store.ApplyItemObservation(ctx, observed, nil); err != nil {
-			return nil, fmt.Errorf("evaluate github item: %w", err)
-		}
-		return nil, nil
+		Repository:            monitor.Repository,
+		Kind:                  item.Kind,
+		Number:                item.Number,
+		StateHash:             change.StateHash,
+		LastAction:            evaluationAction,
+		ProjectsAvailable:     item.HasProjectData(),
+		Snapshot:              item,
+		EvaluatedRuleVersions: evaluatedRuleVersions,
+		FirstSyncedAt:         firstSyncedAt,
+		ObservedAt:            now,
 	}
 
 	rules, err := e.store.ListTriggerRules(ctx, monitor.Repository)
@@ -94,9 +105,25 @@ func (e *Evaluator) EvaluateItem(ctx context.Context, monitor protocol.GitHubRep
 		return nil, fmt.Errorf("evaluate github item: list trigger rules: %w", err)
 	}
 
+	isItemNewInFirstSync := monitor.LastSyncedAt == nil && previousPtr == nil
+	if isItemNewInFirstSync {
+		for _, rule := range rules {
+			observed.EvaluatedRuleVersions[rule.ID] = ruleVersion(rule)
+		}
+		if _, err := e.store.ApplyItemObservation(ctx, observed, nil); err != nil {
+			return nil, fmt.Errorf("evaluate github item: %w", err)
+		}
+		return nil, nil
+	}
+
 	candidates := make([]protocol.GitHubMonitorEvent, 0, len(rules))
 	for _, rule := range rules {
-		if !RuleMatches(rule, item, change.Action) {
+		version := ruleVersion(rule)
+		if !change.Changed && observed.EvaluatedRuleVersions[rule.ID] == version {
+			continue
+		}
+		observed.EvaluatedRuleVersions[rule.ID] = version
+		if !RuleMatches(rule, item, evaluationAction) {
 			continue
 		}
 		id, err := e.newID()
@@ -104,14 +131,14 @@ func (e *Evaluator) EvaluateItem(ctx context.Context, monitor protocol.GitHubRep
 			return nil, fmt.Errorf("evaluate github item: generate event id: %w", err)
 		}
 		ruleID := rule.ID
-		key := DeliveryKey(monitor.Repository, item.Kind, item.Number, change.Action, item.UpdatedAt, change.StateHash, rule.ID)
+		key := DeliveryKey(monitor.Repository, item.Kind, item.Number, evaluationAction, item.UpdatedAt, change.StateHash, rule.ID, rule.UpdatedAt)
 		candidates = append(candidates, protocol.GitHubMonitorEvent{
 			ID:              id,
 			Repository:      monitor.Repository,
 			RuleID:          &ruleID,
 			Kind:            item.Kind,
 			Number:          item.Number,
-			Action:          change.Action,
+			Action:          evaluationAction,
 			BeforeStateHash: change.BeforeStateHash,
 			AfterStateHash:  change.StateHash,
 			DeliveryKey:     &key,
@@ -134,6 +161,17 @@ func (e *Evaluator) EvaluateItem(ctx context.Context, monitor protocol.GitHubRep
 		}
 	}
 	return result, nil
+}
+
+func ruleVersion(rule protocol.GitHubTriggerRule) string {
+	return rule.UpdatedAt.UTC().Format(time.RFC3339Nano)
+}
+
+func actionForCurrentState(item protocol.GitHubItem) string {
+	if item.State == protocol.GitHubItemClosed {
+		return "closed"
+	}
+	return "opened"
 }
 
 func generateEventID() (string, error) {
