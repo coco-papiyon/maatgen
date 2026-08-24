@@ -24,6 +24,12 @@ import (
 var (
 	ErrInvalidRequest = errors.New("invalid run request")
 	ErrRunActive      = errors.New("session already has an active run")
+	// ErrRepositoryBusy is returned when another session's Run already holds
+	// the repository's execution lock (ADR-007 section 5): Working Tree,
+	// Checkpoint, ChangeSet, and Restore are shared per repository, so only
+	// one Run — manual or automated — may run against a given repository at
+	// a time.
+	ErrRepositoryBusy = errors.New("repository already has an active run")
 	ErrRunNotActive   = errors.New("run is not active")
 	ErrSessionClosed  = errors.New("session is closed")
 	ErrServiceClosed  = errors.New("run service is closed")
@@ -56,8 +62,9 @@ type CheckpointManager interface {
 }
 
 type activeRun struct {
-	sessionID string
-	cancel    context.CancelFunc
+	sessionID  string
+	repository string
+	cancel     context.CancelFunc
 }
 
 type Service struct {
@@ -66,16 +73,18 @@ type Service struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 
-	mu              sync.Mutex
-	activeByRun     map[string]activeRun
-	activeBySession map[string]string
-	wg              sync.WaitGroup
-	now             func() time.Time
-	newID           func(string) (string, error)
-	changeDetector  ChangeDetector
-	checkpoints     CheckpointManager
-	pricing         PricingReader
-	approval        agent.ApprovalHandler
+	mu                 sync.Mutex
+	activeByRun        map[string]activeRun
+	activeBySession    map[string]string
+	activeByRepository map[string]string
+	wg                 sync.WaitGroup
+	now                func() time.Time
+	newID              func(string) (string, error)
+	changeDetector     ChangeDetector
+	checkpoints        CheckpointManager
+	pricing            PricingReader
+	approval           agent.ApprovalHandler
+	terminalObserver   func(protocol.AgentRun)
 }
 
 type Option func(*Service)
@@ -98,6 +107,16 @@ func WithApprovalHandler(handler agent.ApprovalHandler) Option {
 	return func(service *Service) { service.approval = handler }
 }
 
+// WithTerminalObserver registers a callback invoked once, after every Run
+// (manual or automated) finishes and its terminal state is fully
+// persisted — completed, failed, or cancelled. It exists so other
+// subsystems (the GitHub monitoring Outbox dispatcher; see
+// internal/githuboutbox) can track a Run they started without run.Service
+// needing to know anything about them.
+func WithTerminalObserver(observer func(protocol.AgentRun)) Option {
+	return func(service *Service) { service.terminalObserver = observer }
+}
+
 func New(store Store, adapter agent.Adapter, options ...Option) *Service {
 	return NewMulti(store, []agent.Adapter{adapter}, options...)
 }
@@ -107,7 +126,8 @@ func NewMulti(store Store, adapters []agent.Adapter, options ...Option) *Service
 	service := &Service{
 		store: store, adapters: make(map[protocol.AgentName]agent.Adapter), ctx: ctx, cancel: cancel,
 		activeByRun: make(map[string]activeRun), activeBySession: make(map[string]string),
-		now: time.Now, newID: generateID,
+		activeByRepository: make(map[string]string),
+		now:                time.Now, newID: generateID,
 	}
 	for _, adapter := range adapters {
 		if adapter != nil {
@@ -154,9 +174,16 @@ func (s *Service) StartRun(ctx context.Context, sessionID string, request protoc
 		s.mu.Unlock()
 		return protocol.AgentRun{}, ErrRunActive
 	}
+	// A session with no active run of its own (just confirmed above) can
+	// only find its repository locked if a *different* session holds it.
+	if _, busy := s.activeByRepository[session.Workspace]; busy {
+		s.mu.Unlock()
+		return protocol.AgentRun{}, ErrRepositoryBusy
+	}
 	runCtx, cancel := context.WithCancel(s.ctx)
 	s.activeBySession[sessionID] = id
-	s.activeByRun[id] = activeRun{sessionID: sessionID, cancel: cancel}
+	s.activeByRepository[session.Workspace] = sessionID
+	s.activeByRun[id] = activeRun{sessionID: sessionID, repository: session.Workspace, cancel: cancel}
 	s.mu.Unlock()
 
 	run := protocol.AgentRun{ID: id, SessionID: sessionID, Status: protocol.RunQueued, Prompt: message}
@@ -454,6 +481,9 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		slog.Error("agent run failed due to checkpoint capture error", "run", run.ID, "session", session.ID, "agent", session.Agent, "error", snapshotErr)
 	}
 	_ = s.store.UpdateRun(persistCtx, run)
+	if s.terminalObserver != nil {
+		s.terminalObserver(run)
+	}
 	// Release the per-session execution slot before publishing the terminal event.
 	// The Web UI enables the composer as soon as it receives that event, so keeping
 	// the slot until the goroutine returns creates a small window where a valid
@@ -470,6 +500,9 @@ func (s *Service) finishPersistenceFailure(run protocol.AgentRun, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = s.store.UpdateRun(ctx, run)
+	if s.terminalObserver != nil {
+		s.terminalObserver(run)
+	}
 }
 
 func (s *Service) appendEvent(ctx context.Context, sessionID, runID string, source protocol.EventSource, eventType string, data any) (protocol.SessionEvent, error) {
@@ -578,6 +611,9 @@ func (s *Service) release(runID, sessionID string) {
 	active, exists := s.activeByRun[runID]
 	if exists {
 		active.cancel()
+		if s.activeByRepository[active.repository] == sessionID {
+			delete(s.activeByRepository, active.repository)
+		}
 	}
 	delete(s.activeByRun, runID)
 	if s.activeBySession[sessionID] == runID {

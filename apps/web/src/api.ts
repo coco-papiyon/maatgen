@@ -2,12 +2,24 @@ import type {
   AgentRun,
   AgentSession,
   ChangeSet,
+  CreateGitHubMonitorRequest,
   CreateSessionRequest,
+  GitHubItem,
+  GitHubItemListResponse,
+  GitHubMonitorEvent,
+  GitHubMonitorEventListResponse,
+  GitHubRepositoryMonitor,
+  GitHubRepositoryResolution,
+  GitHubSyncResult,
+  GitHubTriggerRule,
+  GitHubTriggerRuleListResponse,
+  GitHubTriggerRuleRequest,
   SendMessageRequest,
   SessionEvent,
   SessionListResponse,
   ProviderListResponse,
   ProviderUsage,
+  UpdateGitHubMonitorRequest,
   WsTicketResponse,
   CommandApproval,
   ApprovalDecisionRequest,
@@ -41,6 +53,16 @@ export interface SourceStats {
   total: SourceStatsLanguage;
 }
 
+export interface GitHubItemQuery {
+  state?: 'open' | 'closed' | 'all';
+  assignee?: string;
+  author?: string;
+  labels?: string[];
+  text?: string;
+  project?: string;
+  status?: string;
+}
+
 export interface AgentApi {
   getDefaultWorkspace(): Promise<string>;
   listProviders(): Promise<ProviderListResponse>;
@@ -67,6 +89,25 @@ export interface AgentApi {
   restoreFile(sessionId: string, checkpointId: string, fileId: string): Promise<ChangeSet>;
   restoreAllChanges(sessionId: string, checkpointId: string): Promise<ChangeSet>;
   searchWorkspaceFiles(sessionId: string, query: string): Promise<string[]>;
+
+  // GitHub monitoring (ADR-007).
+  resolveGitHubRepository(workspace: string): Promise<GitHubRepositoryResolution>;
+  getGitHubMonitor(workspace: string): Promise<GitHubRepositoryMonitor>;
+  createGitHubMonitor(request: CreateGitHubMonitorRequest): Promise<GitHubRepositoryMonitor>;
+  updateGitHubMonitor(request: UpdateGitHubMonitorRequest): Promise<GitHubRepositoryMonitor>;
+  deleteGitHubMonitor(workspace: string): Promise<void>;
+  syncGitHubMonitorNow(workspace: string): Promise<GitHubSyncResult>;
+  listGitHubTriggerRules(workspace: string): Promise<GitHubTriggerRule[]>;
+  createGitHubTriggerRule(request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule>;
+  getGitHubTriggerRule(id: string): Promise<GitHubTriggerRule>;
+  updateGitHubTriggerRule(id: string, request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule>;
+  deleteGitHubTriggerRule(id: string): Promise<void>;
+  listGitHubMonitorEvents(workspace: string, limit?: number): Promise<GitHubMonitorEvent[]>;
+  replayGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent>;
+  listGitHubIssues(workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse>;
+  getGitHubIssue(workspace: string, number: number): Promise<GitHubItem>;
+  listGitHubPullRequests(workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse>;
+  getGitHubPullRequest(workspace: string, number: number): Promise<GitHubItem>;
 }
 
 interface ApiErrorEnvelope {
@@ -207,4 +248,71 @@ export const httpAgentApi: AgentApi = {
     );
     return response.files;
   },
+
+  resolveGitHubRepository(workspace) {
+    return request(`/api/v1/github/repository?workspace=${encodeURIComponent(workspace)}`);
+  },
+  getGitHubMonitor(workspace) {
+    return request(`/api/v1/github/monitor?workspace=${encodeURIComponent(workspace)}`);
+  },
+  createGitHubMonitor(requestBody) {
+    return request('/api/v1/github/monitor', { method: 'POST', body: JSON.stringify(requestBody) });
+  },
+  updateGitHubMonitor(requestBody) {
+    return request('/api/v1/github/monitor', { method: 'PUT', body: JSON.stringify(requestBody) });
+  },
+  deleteGitHubMonitor(workspace) {
+    return request(`/api/v1/github/monitor?workspace=${encodeURIComponent(workspace)}`, { method: 'DELETE' });
+  },
+  syncGitHubMonitorNow(workspace) {
+    return request(`/api/v1/github/monitor/sync?workspace=${encodeURIComponent(workspace)}`, { method: 'POST' });
+  },
+  async listGitHubTriggerRules(workspace) {
+    const response = await request<GitHubTriggerRuleListResponse>(`/api/v1/github/rules?workspace=${encodeURIComponent(workspace)}`);
+    return response.rules;
+  },
+  createGitHubTriggerRule(requestBody) {
+    return request('/api/v1/github/rules', { method: 'POST', body: JSON.stringify(requestBody) });
+  },
+  getGitHubTriggerRule(id) {
+    return request(`/api/v1/github/rules/${encodeURIComponent(id)}`);
+  },
+  updateGitHubTriggerRule(id, requestBody) {
+    return request(`/api/v1/github/rules/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(requestBody) });
+  },
+  deleteGitHubTriggerRule(id) {
+    return request(`/api/v1/github/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async listGitHubMonitorEvents(workspace, limit = 100) {
+    const query = new URLSearchParams({ workspace, limit: String(limit) });
+    const response = await request<GitHubMonitorEventListResponse>(`/api/v1/github/events?${query}`);
+    return response.events;
+  },
+  replayGitHubMonitorEvent(eventId) {
+    return request(`/api/v1/github/events/${encodeURIComponent(eventId)}/replay`, { method: 'POST' });
+  },
+  listGitHubIssues(workspace, query) {
+    return request(`/api/v1/github/issues?${githubItemQueryString(workspace, query)}`);
+  },
+  getGitHubIssue(workspace, number) {
+    return request(`/api/v1/github/issues/${number}?workspace=${encodeURIComponent(workspace)}`);
+  },
+  listGitHubPullRequests(workspace, query) {
+    return request(`/api/v1/github/pulls?${githubItemQueryString(workspace, query)}`);
+  },
+  getGitHubPullRequest(workspace, number) {
+    return request(`/api/v1/github/pulls/${number}?workspace=${encodeURIComponent(workspace)}`);
+  },
 };
+
+function githubItemQueryString(workspace: string, query?: GitHubItemQuery): string {
+  const params = new URLSearchParams({ workspace });
+  if (query?.state) params.set('state', query.state);
+  if (query?.assignee) params.set('assignee', query.assignee);
+  if (query?.author) params.set('author', query.author);
+  if (query?.text) params.set('text', query.text);
+  if (query?.project) params.set('project', query.project);
+  if (query?.status) params.set('status', query.status);
+  for (const label of query?.labels ?? []) params.append('label', label);
+  return params.toString();
+}

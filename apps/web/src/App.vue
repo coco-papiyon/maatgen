@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, ProviderUsage, SessionEvent, TokenUsage, ApprovalDecision, UsageSummary } from '@maatgen/protocol';
 import { AgentApiError, httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from './api';
+import { githubWorkspace } from './github/workspace';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import { renderMarkdown } from './markdown';
 import UsageBarChart, { type UsageSeriesDef, type UsageStackedPeriod } from './UsageBarChart.vue';
@@ -26,8 +27,13 @@ const props = defineProps<{
   agentApi?: AgentApi;
   eventStreamFactory?: EventStreamFactory;
 }>();
-const api = props.agentApi ?? httpAgentApi;
-const createEventStream = props.eventStreamFactory ?? ((options) => new SessionEventStream(options));
+// The app shell (see Shell.vue/router.ts) mounts this component through
+// vue-router, where props can't be passed directly; it provides these same
+// two values instead. Direct props still win, so existing tests that mount
+// App.vue standalone with props are unaffected.
+const api = props.agentApi ?? inject<AgentApi>('agentApi', httpAgentApi);
+const createEventStream =
+  props.eventStreamFactory ?? inject<EventStreamFactory>('eventStreamFactory', (options) => new SessionEventStream(options));
 
 const sessions = ref<AgentSession[]>([]);
 const providers = ref<Provider[]>([]);
@@ -428,6 +434,10 @@ async function selectSession(session: AgentSession) {
   eventStream = undefined;
   selected.value = session;
   selectedRunId.value = '';
+  // The GitHub monitoring area (see Shell.vue/github/repository.ts) tracks
+  // whichever repository the selected Session is backed by, so switching
+  // sessions re-targets monitoring/Issue/PR without a separate picker.
+  githubWorkspace.value = session.workspace;
   const provider = providers.value.find((item) => item.id === session.agent);
   selectedModel.value = provider?.defaultModel && provider.models.includes(provider.defaultModel)
     ? provider.defaultModel
@@ -848,7 +858,15 @@ onMounted(async () => {
       newSessionProvider.value = providers.value[0].id;
     }
     persistNewSessionProvider();
-    const firstActive = sessions.value.find((session) => session.status === 'active') ?? sessions.value[0];
+    // A GitHub monitoring event-history link (see GitHubEventsView.vue) opens
+    // "?session=<id>" to jump straight to the Session it created/used
+    // (ADR-007 section 7: reuse the normal Session detail screen, not a
+    // separate view). Read this with the plain URL API, not vue-router's
+    // useRoute(), so App.vue stays mountable without a router (existing
+    // tests mount it standalone).
+    const linkedSessionId = new URLSearchParams(window.location.search).get('session');
+    const linkedSession = linkedSessionId ? await api.getSession(linkedSessionId).catch(() => undefined) : undefined;
+    const firstActive = linkedSession ?? sessions.value.find((session) => session.status === 'active') ?? sessions.value[0];
     if (firstActive) await selectSession(firstActive);
   });
   startSessionPolling();

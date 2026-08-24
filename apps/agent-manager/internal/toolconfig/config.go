@@ -23,6 +23,17 @@ var defaultConfig []byte
 type Config struct {
 	Providers       []protocol.Provider   `json:"providers"`
 	CommandApproval CommandApprovalConfig `json:"commandApproval"`
+	GitHub          GitHubConfig          `json:"github"`
+}
+
+// GitHubConfig holds the credential and host allowlist GitHub monitoring
+// (ADR-007) uses to authenticate against the GitHub API. Token is never
+// logged or exposed to a Prompt. AllowedEnterpriseHosts lists the GitHub
+// Enterprise Server hostnames, besides github.com, that
+// gitworktree.ResolveGitHubRemote and the GitHub adapter may target.
+type GitHubConfig struct {
+	Token                  string   `json:"token"`
+	AllowedEnterpriseHosts []string `json:"allowedEnterpriseHosts"`
 }
 
 type AllowedCommand struct {
@@ -55,6 +66,14 @@ func SaveAllowedCommand(path string, config *Config, argv []string) error {
 		}
 	}
 	config.CommandApproval.AllowedCommands = append(config.CommandApproval.AllowedCommands, AllowedCommand{Argv: normalized})
+	return writeConfigFile(path, config)
+}
+
+// writeConfigFile atomically replaces the tool config file at path with
+// config's current contents: encode, write to a sibling temp file with
+// owner-only permissions, then rename into place. A crash mid-write leaves
+// the previous file untouched rather than a half-written config.
+func writeConfigFile(path string, config *Config) error {
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode tool config: %w", err)
@@ -83,6 +102,24 @@ func SaveAllowedCommand(path string, config *Config, argv []string) error {
 		return fmt.Errorf("replace tool config: %w", err)
 	}
 	return nil
+}
+
+// normalizeHosts trims, lowercases, and deduplicates a list of hostnames,
+// dropping empty entries.
+func normalizeHosts(hosts []string) []string {
+	result := make([]string, 0, len(hosts))
+	seen := make(map[string]struct{}, len(hosts))
+	for _, host := range hosts {
+		host = strings.ToLower(strings.TrimSpace(host))
+		if host == "" {
+			continue
+		}
+		if _, exists := seen[host]; !exists {
+			result = append(result, host)
+			seen[host] = struct{}{}
+		}
+	}
+	return result
 }
 
 func normalizeArgv(argv []string) []string {
@@ -122,6 +159,16 @@ func SaveDefaultModel(path string, config *Config, providerID protocol.AgentName
 	return fmt.Errorf("provider %q is not configured", providerID)
 }
 
+// SaveGitHubConfig persists the GitHub token and Enterprise host allowlist
+// used by GitHub monitoring (ADR-007). It follows the same atomic
+// write-then-rename pattern as the rest of this file so a crash mid-write
+// cannot corrupt the config file the manager reads at startup.
+func SaveGitHubConfig(path string, config *Config, token string, allowedEnterpriseHosts []string) error {
+	config.GitHub.Token = strings.TrimSpace(token)
+	config.GitHub.AllowedEnterpriseHosts = normalizeHosts(allowedEnterpriseHosts)
+	return writeConfigFile(path, config)
+}
+
 func contains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -144,6 +191,28 @@ func DiscoverCodexModels(ctx context.Context, binaryName string) ([]string, erro
 		return nil, err
 	}
 	return parseModelCatalog(output)
+}
+
+// DiscoverGitHubToken reads the credential managed by GitHub CLI. It does not
+// persist or log the token; callers should keep it in memory only.
+func DiscoverGitHubToken(ctx context.Context, hostname string) (string, error) {
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		return "", fmt.Errorf("find gh: %w", err)
+	}
+	args := []string{"auth", "token"}
+	if hostname = strings.TrimSpace(hostname); hostname != "" && hostname != "github.com" {
+		args = append(args, "--hostname", hostname)
+	}
+	output, err := exec.CommandContext(ctx, path, args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("read gh authentication: %w", err)
+	}
+	token := strings.TrimSpace(string(output))
+	if token == "" {
+		return "", errors.New("gh returned an empty GitHub token")
+	}
+	return token, nil
 }
 
 func ApplyCodexModels(config Config, models []string) Config {
@@ -340,6 +409,8 @@ func parse(data []byte) (Config, error) {
 			return Config{}, errors.New("commandApproval.allowedCommands argv is required")
 		}
 	}
+	config.GitHub.Token = strings.TrimSpace(config.GitHub.Token)
+	config.GitHub.AllowedEnterpriseHosts = normalizeHosts(config.GitHub.AllowedEnterpriseHosts)
 	for providerID, model := range approval.Reviewer.ModelByProvider {
 		model = strings.TrimSpace(model)
 		found := false

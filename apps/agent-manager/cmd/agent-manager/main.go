@@ -25,6 +25,10 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/changeset"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/eventbroker"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubapi"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubcontroller"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubmonitor"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githuboutbox"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/pricing"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/providerusage"
@@ -225,7 +229,12 @@ func run() error {
 		},
 	})
 	defer approvals.Close()
-	runs := runservice.NewMulti(store, adapters, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle))
+	// dispatcher is assigned below, once runs exists; the terminal observer
+	// closure only runs asynchronously (after a Run finishes), by which
+	// time dispatcher is always set.
+	var dispatcher *githuboutbox.Dispatcher
+	runs := runservice.NewMulti(store, adapters, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle),
+		runservice.WithTerminalObserver(func(run protocol.AgentRun) { dispatcher.ObserveRunTerminal(run) }))
 	providerUsage := providerusage.New(adapters)
 	restores, err := restoreservice.New(store, checkpointManager)
 	if err != nil {
@@ -235,6 +244,57 @@ func run() error {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = runs.Close(closeCtx)
+	}()
+
+	// GitHub monitoring (ADR-007): the Outbox dispatcher turns queued
+	// monitor events into ordinary Sessions/Runs through the same sessions
+	// and runs services constructed above, so an automated Run is
+	// indistinguishable from a manual one downstream.
+	dispatcher = githuboutbox.NewDispatcher(store, sessions, runs)
+	if reconcileErr := dispatcher.Reconcile(context.Background()); reconcileErr != nil {
+		slog.Warn("github monitor outbox reconciliation failed", "error", reconcileErr)
+	}
+	dispatcher.Start()
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = dispatcher.Close(closeCtx)
+	}()
+
+	configuredGitHubToken := toolConfig.GitHub.Token
+	githubClients := func(host string) (*githubapi.Client, error) {
+		token := configuredGitHubToken
+		if token == "" {
+			// Read gh's credential for each client creation so a user can run
+			// `gh auth login` while the manager is already running. If it is
+			// unavailable, NewClient returns a typed authentication error that
+			// the Web API turns into an actionable message.
+			discovered, discoverErr := toolconfig.DiscoverGitHubToken(context.Background(), host)
+			if discoverErr != nil {
+				slog.Warn("github cli authentication unavailable", "error", discoverErr)
+			} else {
+				token = discovered
+			}
+		}
+		return githubapi.NewClient(host, token)
+	}
+	evaluator := githubmonitor.NewEvaluator(store)
+	poller := githubmonitor.NewPoller(store, evaluator, func(host string) (githubmonitor.GitHubClient, error) {
+		return githubClients(host)
+	})
+	githubMonitor := githubcontroller.New(store, checkpointManager, checkpointManager.GitPath(), toolConfig.GitHub.AllowedEnterpriseHosts, poller,
+		func(host string) (githubcontroller.GitHubClient, error) { return githubClients(host) })
+
+	// Periodic polling (ADR-007 section 2): separate from the manual "sync
+	// now" action (which calls the same Poller directly through
+	// githubMonitor.SyncNow), this makes each enabled repository monitor
+	// sync automatically on its own configured interval.
+	githubScheduler := githubmonitor.NewScheduler(store, poller)
+	githubScheduler.Start()
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = githubScheduler.Close(closeCtx)
 	}()
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *port))
@@ -275,13 +335,14 @@ func run() error {
 				defer modelConfigMu.Unlock()
 				return toolconfig.SaveDefaultModel(resolvedConfigPath, &toolConfig, provider, model)
 			},
-			UsageReader:         store,
-			ProviderUsageReader: providerUsage,
-			UsageSummaryReader:  store,
-			SourceStatsReader:   store,
-			ApprovalController:  approvals,
-			WorkspaceReader:     sessions,
-			StaticFS:            staticFS,
+			UsageReader:             store,
+			ProviderUsageReader:     providerUsage,
+			UsageSummaryReader:      store,
+			SourceStatsReader:       store,
+			ApprovalController:      approvals,
+			WorkspaceReader:         sessions,
+			GitHubMonitorController: githubMonitor,
+			StaticFS:                staticFS,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

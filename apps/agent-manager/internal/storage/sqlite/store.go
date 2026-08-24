@@ -387,6 +387,13 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+// execer abstracts over *sql.DB and *sql.Tx so a write helper can run
+// either standalone or as part of a caller-managed transaction (see
+// ApplyItemObservation, which needs the latter for atomicity).
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 func scanSession(row scanner) (protocol.AgentSession, error) {
 	var session protocol.AgentSession
 	var threadID, closedAt sql.NullString

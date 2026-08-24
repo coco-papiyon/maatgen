@@ -33,5 +33,9 @@
       { "argv": ["go", "test", "*"] },
       { "argv": ["npm", "test", "*"] }
     ]
+  },
+  "github": {
+    "token": "",
+    "allowedEnterpriseHosts": []
   }
 }

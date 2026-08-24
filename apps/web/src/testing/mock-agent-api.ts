@@ -3,16 +3,28 @@ import type {
   AgentSession,
   ChangeSet,
   CommandApproval,
+  CreateGitHubMonitorRequest,
   CreateSessionRequest,
+  GitHubItem,
+  GitHubItemListResponse,
+  GitHubMonitorEvent,
+  GitHubRepositoryMonitor,
+  GitHubRepositoryResolution,
+  GitHubSyncResult,
+  GitHubTriggerRule,
+  GitHubTriggerRuleRequest,
   ProviderUsage,
   RestoreStatus,
   SendMessageRequest,
   SessionEvent,
+  UpdateGitHubMonitorRequest,
   UsageSummary,
   WsTicketResponse,
 } from '@maatgen/protocol';
-import type { AgentApi, SessionStatusFilter, SessionUsage, SourceStats, UsageGranularity } from '../api';
+import { AgentApiError, type AgentApi, type GitHubItemQuery, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from '../api';
 import type { EventStreamFactory } from '../event-stream';
+
+const GITHUB_DEMO_WORKSPACE = 'C:/demo/current-repository';
 
 type EventListener = (event: SessionEvent) => void;
 
@@ -27,12 +39,27 @@ export class MockAgentApi implements AgentApi {
   private readonly runs = new Map<string, AgentRun>();
   private readonly runTimers = new Map<string, number[]>();
 
+  private readonly githubMonitors = new Map<string, GitHubRepositoryMonitor>();
+  private readonly githubRules = new Map<string, GitHubTriggerRule>();
+  private readonly githubEvents = new Map<string, GitHubMonitorEvent>();
+  private readonly githubIssues: GitHubItem[] = mockGitHubIssues();
+  private readonly githubPulls: GitHubItem[] = mockGitHubPullRequests();
+
   constructor() {
     for (const scenario of mockScenarios()) {
       this.sessions.set(scenario.session.id, scenario.session);
       this.events.set(scenario.session.id, scenario.events);
       this.changes.set(scenario.session.id, scenario.changes);
       this.sourceStats.set(scenario.session.id, scenario.sourceStats);
+    }
+    for (const monitor of mockGitHubMonitors()) {
+      this.githubMonitors.set(monitor.repository, monitor);
+    }
+    for (const rule of mockGitHubTriggerRules()) {
+      this.githubRules.set(rule.id, rule);
+    }
+    for (const githubEvent of mockGitHubMonitorEvents()) {
+      this.githubEvents.set(githubEvent.id, githubEvent);
     }
   }
 
@@ -368,6 +395,138 @@ export class MockAgentApi implements AgentApi {
   async searchWorkspaceFiles(): Promise<string[]> {
     return [];
   }
+
+  async resolveGitHubRepository(workspace: string): Promise<GitHubRepositoryResolution> {
+    const selected = { host: 'github.com', owner: 'octo-demo', name: 'example-repo', remoteName: 'origin' };
+    const monitor = this.githubMonitors.get(workspace);
+    return { repository: workspace, candidates: [selected], selected, ...(monitor ? { monitor: clone(monitor) } : {}) };
+  }
+
+  async getGitHubMonitor(workspace: string): Promise<GitHubRepositoryMonitor> {
+    const monitor = this.githubMonitors.get(workspace);
+    if (!monitor) throw new AgentApiError('github monitor was not found', 404, 'not_found');
+    return clone(monitor);
+  }
+
+  async createGitHubMonitor(request: CreateGitHubMonitorRequest): Promise<GitHubRepositoryMonitor> {
+    const nowIso = now;
+    const monitor: GitHubRepositoryMonitor = {
+      repository: request.workspace, host: 'github.com', owner: 'octo-demo', name: 'example-repo',
+      remoteName: request.remoteName ?? 'origin', enabled: true,
+      pollIntervalSeconds: request.pollIntervalSeconds, coalesceQueueLimit: request.coalesceQueueLimit ?? 20,
+      createdAt: nowIso, updatedAt: nowIso,
+    };
+    this.githubMonitors.set(request.workspace, monitor);
+    return clone(monitor);
+  }
+
+  async updateGitHubMonitor(request: UpdateGitHubMonitorRequest): Promise<GitHubRepositoryMonitor> {
+    const existing = this.githubMonitors.get(request.workspace);
+    if (!existing) throw new AgentApiError('github monitor was not found', 404, 'not_found');
+    const updated: GitHubRepositoryMonitor = {
+      ...existing, enabled: request.enabled, pollIntervalSeconds: request.pollIntervalSeconds,
+      coalesceQueueLimit: request.coalesceQueueLimit, remoteName: request.remoteName ?? existing.remoteName,
+      updatedAt: now,
+    };
+    this.githubMonitors.set(request.workspace, updated);
+    return clone(updated);
+  }
+
+  async deleteGitHubMonitor(workspace: string): Promise<void> {
+    this.githubMonitors.delete(workspace);
+  }
+
+  async syncGitHubMonitorNow(workspace: string): Promise<GitHubSyncResult> {
+    const monitor = this.githubMonitors.get(workspace);
+    if (monitor) {
+      monitor.lastSyncedAt = now;
+      monitor.nextSyncAt = now;
+    }
+    return { issuesProcessed: this.githubIssues.length, pullRequestsProcessed: this.githubPulls.length, eventsMatched: 0 };
+  }
+
+  async listGitHubTriggerRules(workspace: string): Promise<GitHubTriggerRule[]> {
+    return [...this.githubRules.values()].filter((rule) => rule.repository === workspace).map(clone);
+  }
+
+  async createGitHubTriggerRule(request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule> {
+    const id = `mock-rule-${this.githubRules.size + 1}`;
+    const rule: GitHubTriggerRule = {
+      id, repository: request.workspace, name: request.name, enabled: request.enabled,
+      eventKinds: request.eventKinds, filters: request.filters, promptTemplate: request.promptTemplate,
+      includeBody: request.includeBody, provider: request.provider, concurrencyPolicy: request.concurrencyPolicy,
+      ...(request.model !== undefined ? { model: request.model } : {}),
+      ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
+      createdAt: now, updatedAt: now,
+    };
+    this.githubRules.set(id, rule);
+    return clone(rule);
+  }
+
+  async getGitHubTriggerRule(id: string): Promise<GitHubTriggerRule> {
+    const rule = this.githubRules.get(id);
+    if (!rule) throw new AgentApiError('trigger rule was not found', 404, 'not_found');
+    return clone(rule);
+  }
+
+  async updateGitHubTriggerRule(id: string, request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule> {
+    const existing = this.githubRules.get(id);
+    if (!existing) throw new AgentApiError('trigger rule was not found', 404, 'not_found');
+    const { model: existingModel, reasoningEffort: existingReasoningEffort, ...existingRest } = existing;
+    void existingModel;
+    void existingReasoningEffort;
+    const updated: GitHubTriggerRule = {
+      ...existingRest, name: request.name, enabled: request.enabled, eventKinds: request.eventKinds,
+      filters: request.filters, promptTemplate: request.promptTemplate, includeBody: request.includeBody,
+      provider: request.provider, concurrencyPolicy: request.concurrencyPolicy,
+      ...(request.model !== undefined ? { model: request.model } : {}),
+      ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
+      updatedAt: now,
+    };
+    this.githubRules.set(id, updated);
+    return clone(updated);
+  }
+
+  async deleteGitHubTriggerRule(id: string): Promise<void> {
+    this.githubRules.delete(id);
+  }
+
+  async listGitHubMonitorEvents(workspace: string, limit = 100): Promise<GitHubMonitorEvent[]> {
+    return [...this.githubEvents.values()]
+      .filter((githubEvent) => githubEvent.repository === workspace)
+      .slice(0, limit)
+      .map(clone);
+  }
+
+  async replayGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent> {
+    const original = this.githubEvents.get(eventId);
+    if (!original) throw new AgentApiError('monitor event was not found', 404, 'not_found');
+    const { deliveryKey: _deliveryKey, sessionId: _sessionId, runId: _runId, ...rest } = original;
+    const id = `${eventId}-replay-${this.githubEvents.size + 1}`;
+    const replay: GitHubMonitorEvent = { ...rest, id, status: 'queued', replayOfEventId: eventId, createdAt: now, updatedAt: now };
+    this.githubEvents.set(id, replay);
+    return clone(replay);
+  }
+
+  async listGitHubIssues(_workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse> {
+    return { items: this.githubIssues.filter((item) => matchesMockGitHubQuery(item, query)).map(clone), fetchedAt: now };
+  }
+
+  async getGitHubIssue(_workspace: string, itemNumber: number): Promise<GitHubItem> {
+    const item = this.githubIssues.find((candidate) => candidate.number === itemNumber);
+    if (!item) throw new AgentApiError('issue was not found', 404, 'not_found');
+    return clone(item);
+  }
+
+  async listGitHubPullRequests(_workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse> {
+    return { items: this.githubPulls.filter((item) => matchesMockGitHubQuery(item, query)).map(clone), fetchedAt: now };
+  }
+
+  async getGitHubPullRequest(_workspace: string, itemNumber: number): Promise<GitHubItem> {
+    const item = this.githubPulls.find((candidate) => candidate.number === itemNumber);
+    if (!item) throw new AgentApiError('pull request was not found', 404, 'not_found');
+    return clone(item);
+  }
 }
 
 export function createMockEnvironment(): { agentApi: AgentApi; eventStreamFactory: EventStreamFactory } {
@@ -478,6 +637,100 @@ function multiHunk(sessionId: string): ChangeSet {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function matchesMockGitHubQuery(item: GitHubItem, query?: GitHubItemQuery): boolean {
+  if (!query) return true;
+  if (query.state && query.state !== 'all' && item.state !== query.state) return false;
+  if (query.assignee && !item.assignees.some((assignee) => assignee.login.toLowerCase() === query.assignee!.toLowerCase())) return false;
+  if (query.author && item.author.login.toLowerCase() !== query.author.toLowerCase()) return false;
+  if (query.labels?.length && !query.labels.every((label) => item.labels.some((itemLabel) => itemLabel.name.toLowerCase() === label.toLowerCase()))) {
+    return false;
+  }
+  if (query.text) {
+    const needle = query.text.toLowerCase();
+    if (!item.title.toLowerCase().includes(needle) && !item.body.toLowerCase().includes(needle)) return false;
+  }
+  if (query.project || query.status) {
+    const matched = (item.projectFields ?? []).some((field) => {
+      if (query.project && field.projectTitle.toLowerCase() !== query.project.toLowerCase()) return false;
+      if (query.status && (field.fieldName.toLowerCase() !== 'status' || field.value.toLowerCase() !== query.status.toLowerCase())) return false;
+      return true;
+    });
+    if (!matched) return false;
+  }
+  return true;
+}
+
+function mockGitHubMonitors(): GitHubRepositoryMonitor[] {
+  return [{
+    repository: GITHUB_DEMO_WORKSPACE, host: 'github.com', owner: 'octo-demo', name: 'example-repo',
+    remoteName: 'origin', enabled: true, pollIntervalSeconds: 300, coalesceQueueLimit: 20,
+    lastSyncedAt: now, nextSyncAt: now, createdAt: now, updatedAt: now,
+  }];
+}
+
+function mockGitHubTriggerRules(): GitHubTriggerRule[] {
+  return [{
+    id: 'mock-rule-1', repository: GITHUB_DEMO_WORKSPACE, name: 'Ready になったら設計する', enabled: true,
+    eventKinds: ['issue'], filters: { project: { projectTitle: 'Roadmap', fieldName: 'Status', value: 'Ready' } },
+    promptTemplate: 'Design {{.Title}} (#{{.Number}})\n\n{{.ExternalDataBlock}}', includeBody: false, provider: 'codex',
+    concurrencyPolicy: 'coalesce', createdAt: now, updatedAt: now,
+  }, {
+    id: 'mock-rule-2', repository: GITHUB_DEMO_WORKSPACE, name: 'PRが作成されたらレビューする', enabled: true,
+    eventKinds: ['pull_request'], filters: { actions: ['opened'] },
+    promptTemplate: 'Review pull request #{{.Number}}: {{.Title}}', includeBody: false, provider: 'claude',
+    concurrencyPolicy: 'skip', createdAt: now, updatedAt: now,
+  }];
+}
+
+function mockGitHubMonitorEvents(): GitHubMonitorEvent[] {
+  return [
+    {
+      id: 'mock-event-1', repository: GITHUB_DEMO_WORKSPACE, ruleId: 'mock-rule-1', kind: 'issue', number: 42,
+      action: 'updated', afterStateHash: 'hash-1', status: 'completed',
+      itemSnapshot: mockGitHubIssues()[0]!, sessionId: 'mock-success', runId: 'mock-success-run',
+      createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'mock-event-2', repository: GITHUB_DEMO_WORKSPACE, ruleId: 'mock-rule-2', kind: 'pull_request', number: 7,
+      action: 'opened', afterStateHash: 'hash-2', status: 'skipped', skipReason: 'repository execution lock is held by another run',
+      itemSnapshot: mockGitHubPullRequests()[0]!,
+      createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'mock-event-3', repository: GITHUB_DEMO_WORKSPACE, ruleId: 'mock-rule-1', kind: 'issue', number: 43,
+      action: 'opened', afterStateHash: 'hash-3', status: 'queued',
+      itemSnapshot: mockGitHubIssues()[1]!,
+      createdAt: now, updatedAt: now,
+    },
+  ];
+}
+
+function mockGitHubIssues(): GitHubItem[] {
+  return [
+    {
+      kind: 'issue', number: 42, title: 'ログイン画面のバリデーションを強化する', body: '不正な入力でエラーメッセージが表示されない。',
+      state: 'open', author: { login: 'alice' }, assignees: [{ login: 'bob' }], labels: [{ name: 'bug' }],
+      createdAt: now, updatedAt: now, url: 'https://github.com/octo-demo/example-repo/issues/42',
+      projectFields: [{ projectTitle: 'Roadmap', fieldName: 'Status', value: 'Ready' }],
+    },
+    {
+      kind: 'issue', number: 43, title: 'ダークモードのコントラストを改善する', body: '',
+      state: 'open', author: { login: 'carol' }, assignees: [], labels: [{ name: 'enhancement' }],
+      createdAt: now, updatedAt: now, url: 'https://github.com/octo-demo/example-repo/issues/43',
+      projectsError: 'GraphQL error: Resource not accessible by integration',
+    },
+  ];
+}
+
+function mockGitHubPullRequests(): GitHubItem[] {
+  return [{
+    kind: 'pull_request', number: 7, title: 'Add retry logic to the sync client', body: '',
+    state: 'open', author: { login: 'dave' }, assignees: [{ login: 'alice' }], labels: [],
+    createdAt: now, updatedAt: now, url: 'https://github.com/octo-demo/example-repo/pull/7',
+    pullRequest: { draft: false, base: { ref: 'main', sha: 'abc123' }, head: { ref: 'feature/retry', sha: 'def456' } },
+  }];
 }
 
 function usagePeriodKey(timestamp: string, granularity: UsageGranularity): string {

@@ -10,7 +10,7 @@ artifacts/
 # Go
 bin/
 *.test
-.gocache/
+.gocache*
 /apps/agent-manager/agent-manager
 
 # Runtime data

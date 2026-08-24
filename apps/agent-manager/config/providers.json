@@ -36,7 +36,7 @@
         "claude-sonnet-4-6",
         "claude-haiku-4-5"
       ],
-      "defaultModel": "claude-sonnet-5",
+      "defaultModel": "claude-haiku-4-5",
       "pricing": {
         "claude-haiku-4-5": {
           "inputPerMillion": 0.8,
@@ -145,5 +145,9 @@
         ]
       }
     ]
+  },
+  "github": {
+    "token": "",
+    "allowedEnterpriseHosts": []
   }
 }

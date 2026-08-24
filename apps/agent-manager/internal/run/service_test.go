@@ -241,6 +241,84 @@ func TestRunServiceRejectsConcurrentRunAndCancels(t *testing.T) {
 	}
 }
 
+// TestRunServiceRejectsRunForBusyRepositoryAcrossSessions covers ADR-007
+// section 5: Working Tree/Checkpoint/ChangeSet/Restore are shared per
+// repository, so a second session pointed at the *same* repository must not
+// be able to start a Run while another session's Run against it is active
+// — this applies even though the two Runs belong to different Sessions and
+// would otherwise pass the per-session ErrRunActive check.
+func TestRunServiceRejectsRunForBusyRepositoryAcrossSessions(t *testing.T) {
+	store, first := createRunTestStore(t)
+	second := protocol.AgentSession{
+		ID: "session-2", Agent: protocol.AgentCodex, Workspace: first.Workspace,
+		Status: protocol.SessionActive, CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateSession(context.Background(), second); err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+
+	adapter := &fakeAdapter{block: true}
+	service := New(store, adapter, WithCheckpointManager(&fakeCheckpointManager{}))
+	defer service.Close(context.Background())
+
+	firstRun, err := service.StartRun(context.Background(), first.ID, protocol.SendMessageRequest{Message: "First"})
+	if err != nil {
+		t.Fatalf("start first run: %v", err)
+	}
+	if _, err := service.StartRun(context.Background(), second.ID, protocol.SendMessageRequest{Message: "Second"}); !errors.Is(err, ErrRepositoryBusy) {
+		t.Fatalf("second session run error = %v, want ErrRepositoryBusy", err)
+	}
+
+	if err := service.CancelRun(context.Background(), firstRun.ID); err != nil {
+		t.Fatalf("cancel first run: %v", err)
+	}
+	waitForRunStatus(t, store, firstRun.ID, protocol.RunCancelled)
+
+	secondRun, err := service.StartRun(context.Background(), second.ID, protocol.SendMessageRequest{Message: "Now allowed"})
+	if err != nil {
+		t.Fatalf("start second run after repository lock released: %v", err)
+	}
+	if err := service.CancelRun(context.Background(), secondRun.ID); err != nil {
+		t.Fatalf("cancel second run: %v", err)
+	}
+	waitForRunStatus(t, store, secondRun.ID, protocol.RunCancelled)
+}
+
+func TestRunServiceTerminalObserverFiresOnCompletionAndFailure(t *testing.T) {
+	store, session := createRunTestStore(t)
+	var mu sync.Mutex
+	var observed []protocol.AgentRun
+	observer := func(run protocol.AgentRun) {
+		mu.Lock()
+		observed = append(observed, run)
+		mu.Unlock()
+	}
+	service := New(store, &fakeAdapter{}, WithCheckpointManager(&fakeCheckpointManager{}), WithTerminalObserver(observer))
+	defer service.Close(context.Background())
+
+	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Do it"})
+	if err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	waitForRunStatus(t, store, run.ID, protocol.RunCompleted)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		count := len(observed)
+		mu.Unlock()
+		if count > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(observed) != 1 || observed[0].ID != run.ID || observed[0].Status != protocol.RunCompleted {
+		t.Fatalf("observed = %#v", observed)
+	}
+}
+
 func TestRunServiceAcceptsFollowUpAsSoonAsTerminalEventIsPublished(t *testing.T) {
 	store, session := createRunTestStore(t)
 	blockingStore := &terminalBlockingStore{

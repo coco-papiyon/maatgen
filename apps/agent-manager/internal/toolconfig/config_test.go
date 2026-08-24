@@ -85,6 +85,25 @@ func TestSaveAllowedCommandPersistsNormalizedArgvWithoutDuplicates(t *testing.T)
 	}
 }
 
+func TestSaveGitHubConfigNormalizesAndPersists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config", "providers.json")
+	config := Config{Providers: []protocol.Provider{{ID: protocol.AgentCodex, Label: "Codex", Models: []string{"model-a"}}}}
+	if err := SaveGitHubConfig(path, &config, "  ghp_secret  ", []string{" GitHub.Example.com ", "github.example.com", ""}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := Load(filepath.Join(dir, "agent-manager.exe"), DefaultRelativePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.GitHub.Token != "ghp_secret" {
+		t.Fatalf("token = %q", loaded.GitHub.Token)
+	}
+	if want := []string{"github.example.com"}; len(loaded.GitHub.AllowedEnterpriseHosts) != 1 || loaded.GitHub.AllowedEnterpriseHosts[0] != want[0] {
+		t.Fatalf("allowedEnterpriseHosts = %#v, want %#v (trimmed, lowercased, deduplicated)", loaded.GitHub.AllowedEnterpriseHosts, want)
+	}
+}
+
 func TestLoadFromUsesWorkingDirectoryForGoRunExecutable(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")

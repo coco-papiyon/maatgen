@@ -22,27 +22,28 @@ import (
 )
 
 type Config struct {
-	Version             string
-	SchemaVersion       int
-	DefaultWorkspace    string
-	AuthToken           string
-	AllowedOrigins      []string
-	TicketTTL           time.Duration
-	EventSubscriber     EventSubscriber
-	SessionCreator      SessionCreator
-	SessionCloser       SessionCloser
-	SessionReopener     SessionReopener
-	RunController       RunController
-	ChangeReader        ChangeReader
-	RestoreController   RestoreController
-	Providers           []protocol.Provider
-	ModelSetter         ModelSetter
-	UsageReader         UsageReader
-	ProviderUsageReader ProviderUsageReader
-	UsageSummaryReader  UsageSummaryReader
-	SourceStatsReader   SourceStatsReader
-	ApprovalController  ApprovalController
-	WorkspaceReader     WorkspaceReader
+	Version                 string
+	SchemaVersion           int
+	DefaultWorkspace        string
+	AuthToken               string
+	AllowedOrigins          []string
+	TicketTTL               time.Duration
+	EventSubscriber         EventSubscriber
+	SessionCreator          SessionCreator
+	SessionCloser           SessionCloser
+	SessionReopener         SessionReopener
+	RunController           RunController
+	ChangeReader            ChangeReader
+	RestoreController       RestoreController
+	Providers               []protocol.Provider
+	ModelSetter             ModelSetter
+	UsageReader             UsageReader
+	ProviderUsageReader     ProviderUsageReader
+	UsageSummaryReader      UsageSummaryReader
+	SourceStatsReader       SourceStatsReader
+	ApprovalController      ApprovalController
+	WorkspaceReader         WorkspaceReader
+	GitHubMonitorController GitHubMonitorController
 	// StaticFS serves the built Web UI. Requests outside /api and /ws fall
 	// back to index.html so client-side routes resolve on a fresh load.
 	// Static serving is disabled when nil.
@@ -513,6 +514,8 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 		})))
 	}
 
+	registerGitHubMonitorRoutes(mux, authenticate, config.GitHubMonitorController)
+
 	static := staticHandler(config.StaticFS)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/ws" || strings.HasPrefix(r.URL.Path, "/api/") || static == nil {
@@ -640,6 +643,8 @@ func writeRunError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
 	case errors.Is(err, runservice.ErrRunActive):
 		writeAPIError(w, http.StatusConflict, "run_already_active", "session already has an active run", nil)
+	case errors.Is(err, runservice.ErrRepositoryBusy):
+		writeAPIError(w, http.StatusConflict, "repository_busy", "repository already has an active run", nil)
 	case errors.Is(err, runservice.ErrSessionClosed):
 		writeAPIError(w, http.StatusConflict, "session_closed", "session is closed", nil)
 	case errors.Is(err, runservice.ErrRunNotActive):

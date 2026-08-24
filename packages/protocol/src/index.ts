@@ -89,3 +89,213 @@ export type EventListResponse = GeneratedEventListResponse;
 export type ProviderListResponse = GeneratedProviderListResponse;
 export type Provider = ProviderListResponse['providers'][number];
 export type WsTicketResponse = GeneratedWsTicketResponse;
+
+// GitHub monitoring (ADR-007). These mirror apps/agent-manager/internal/protocol/github.go
+// by hand, following the same precedent as SessionUsage/ProviderUsage above: request/response
+// DTOs that don't need Ajv-validated golden fixtures are hand-written here rather than
+// generated from a JSON Schema. GitHubObservedItem is deliberately not mirrored: it is
+// monitoring-only internal state (ADR-007 section 3) and must never back a UI screen.
+
+export type GitHubItemKind = 'issue' | 'pull_request';
+export type GitHubItemState = 'open' | 'closed';
+export type GitHubConcurrencyPolicy = 'skip' | 'coalesce';
+export type GitHubMonitorEventStatus =
+  | 'detected'
+  | 'matched'
+  | 'queued'
+  | 'session_created'
+  | 'run_started'
+  | 'skipped'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface GitHubUser {
+  login: string;
+}
+
+export interface GitHubLabel {
+  name: string;
+}
+
+export interface GitHubMilestone {
+  title: string;
+}
+
+export interface GitHubBranchRef {
+  ref: string;
+  sha: string;
+}
+
+export interface GitHubProjectFieldValue {
+  projectTitle: string;
+  fieldName: string;
+  value: string;
+}
+
+export interface GitHubPullRequestDetails {
+  draft: boolean;
+  base: GitHubBranchRef;
+  head: GitHubBranchRef;
+}
+
+export interface GitHubItem {
+  kind: GitHubItemKind;
+  number: number;
+  title: string;
+  body: string;
+  state: GitHubItemState;
+  author: GitHubUser;
+  assignees: GitHubUser[];
+  labels: GitHubLabel[];
+  milestone?: GitHubMilestone;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+  pullRequest?: GitHubPullRequestDetails;
+  projectFields?: GitHubProjectFieldValue[];
+  projectsError?: string;
+}
+
+export interface GitHubRepositoryMonitor {
+  repository: string;
+  host: string;
+  owner: string;
+  name: string;
+  remoteName: string;
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  coalesceQueueLimit: number;
+  lastSyncedAt?: string;
+  nextSyncAt?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitHubProjectFilterCondition {
+  projectTitle: string;
+  fieldName: string;
+  value: string;
+}
+
+export interface GitHubMonitorFilters {
+  actions?: string[];
+  numbers?: number[];
+  titleContains?: string;
+  bodyContains?: string;
+  authors?: string[];
+  assignees?: string[];
+  labels?: string[];
+  milestones?: string[];
+  states?: GitHubItemState[];
+  draft?: boolean;
+  baseBranches?: string[];
+  headBranches?: string[];
+  project?: GitHubProjectFilterCondition;
+  createdAfter?: string;
+  createdBefore?: string;
+  updatedAfter?: string;
+  updatedBefore?: string;
+}
+
+export interface GitHubTriggerRule {
+  id: string;
+  repository: string;
+  name: string;
+  enabled: boolean;
+  eventKinds: GitHubItemKind[];
+  filters: GitHubMonitorFilters;
+  promptTemplate: string;
+  includeBody: boolean;
+  provider: AgentName;
+  model?: string;
+  reasoningEffort?: string;
+  concurrencyPolicy: GitHubConcurrencyPolicy;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitHubMonitorEvent {
+  id: string;
+  repository: string;
+  ruleId?: string;
+  kind: GitHubItemKind;
+  number: number;
+  action: string;
+  beforeStateHash?: string;
+  afterStateHash: string;
+  deliveryKey?: string;
+  status: GitHubMonitorEventStatus;
+  skipReason?: string;
+  replayOfEventId?: string;
+  itemSnapshot: GitHubItem;
+  sessionId?: string;
+  runId?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitHubRemoteCandidate {
+  host: string;
+  owner: string;
+  name: string;
+  remoteName: string;
+}
+
+export interface GitHubRepositoryResolution {
+  repository: string;
+  candidates: GitHubRemoteCandidate[];
+  selected?: GitHubRemoteCandidate;
+  monitor?: GitHubRepositoryMonitor;
+}
+
+export interface CreateGitHubMonitorRequest {
+  workspace: string;
+  remoteName?: string;
+  pollIntervalSeconds: number;
+  coalesceQueueLimit?: number;
+}
+
+export interface UpdateGitHubMonitorRequest {
+  workspace: string;
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  coalesceQueueLimit: number;
+  remoteName?: string;
+}
+
+export interface GitHubSyncResult {
+  issuesProcessed: number;
+  pullRequestsProcessed: number;
+  eventsMatched: number;
+}
+
+export interface GitHubTriggerRuleRequest {
+  workspace: string;
+  name: string;
+  enabled: boolean;
+  eventKinds: GitHubItemKind[];
+  filters: GitHubMonitorFilters;
+  promptTemplate: string;
+  includeBody: boolean;
+  provider: AgentName;
+  model?: string;
+  reasoningEffort?: string;
+  concurrencyPolicy: GitHubConcurrencyPolicy;
+}
+
+export interface GitHubTriggerRuleListResponse {
+  rules: GitHubTriggerRule[];
+}
+
+export interface GitHubMonitorEventListResponse {
+  events: GitHubMonitorEvent[];
+}
+
+export interface GitHubItemListResponse {
+  items: GitHubItem[];
+  fetchedAt: string;
+  projectsUnavailable?: boolean;
+}
