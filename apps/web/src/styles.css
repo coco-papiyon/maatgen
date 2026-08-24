@@ -52,6 +52,10 @@ button { color: inherit; }
 
 .github-view { height: 100%; overflow: auto; padding: 22px 28px 40px; }
 .github-view-title { margin: 0; font-size: 18px; }
+.github-view a { color: #8fd3ff; text-decoration-color: rgba(143, 211, 255, .55); text-underline-offset: 2px; }
+.github-view a:visited { color: #c7b1ff; text-decoration-color: rgba(199, 177, 255, .55); }
+.github-view a:hover { color: #b8f0c5; text-decoration-color: currentColor; }
+.github-view a:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 2px; }
 .github-empty-hint, .github-hint { color: var(--muted); font-size: 13px; }
 .github-error { color: var(--danger); font-size: 13px; }
 .github-meta { color: #7f8c81; font: 11px ui-monospace, monospace; }
