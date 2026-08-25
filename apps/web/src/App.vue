@@ -2,6 +2,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, ProviderUsage, SessionEvent, TokenUsage, ApprovalDecision, UsageSummary } from '@maatgen/protocol';
 import { httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
+import { reasoningEffortOptions } from './constants';
 import { githubWorkspace } from './github/workspace';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import { renderMarkdown } from './markdown';
@@ -46,10 +47,6 @@ const storedProvider = localStorage.getItem(providerStorageKey) as AgentSession[
 const newSessionProvider = ref<AgentSession['agent']>(storedProvider || 'codex');
 const selectedModel = ref('');
 const reasoningEffort = ref<ReasoningEffort | ''>('');
-const reasoningEffortOptions: Array<{ value: ReasoningEffort | ''; label: string }> = [
-  { value: '', label: 'Default' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' }, { value: 'xhigh', label: 'XHigh' }, { value: 'max', label: 'Max' },
-];
 const nextSessionCursor = ref('');
 const loadingMoreSessions = ref(false);
 const sessionStatusFilterKey = 'maatgen.sessionStatusFilter';

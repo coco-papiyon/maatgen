@@ -84,7 +84,23 @@ describe('GitHubSettingsView', () => {
     await flushPromises();
 
     const rules = await api.listGitHubTriggerRules(DEMO_WORKSPACE);
-    expect(rules.some((rule) => rule.name === '新しいルール')).toBe(true);
+    const rule = rules.find((candidate) => candidate.name === '新しいルール');
+    expect(rule?.priority).toBe('medium');
+  });
+
+  it("lets the user set a rule's priority", async () => {
+    const { wrapper, api } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+    await wrapper.get('.github-rule-form select').setValue(DEMO_WORKSPACE);
+    await wrapper.get('.github-rule-form input:not([disabled])').setValue('優先度ルール');
+    await wrapper.get('.github-rule-form textarea').setValue('Design {{.Title}}');
+    const prioritySelect = wrapper.findAll('.github-rule-form select').find((select) => select.text().includes('高'));
+    await prioritySelect!.setValue('high');
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const rule = (await api.listGitHubTriggerRules(DEMO_WORKSPACE)).find((candidate) => candidate.name === '優先度ルール');
+    expect(rule?.priority).toBe('high');
   });
 
   it('opens rule creation in a dialog and saves assignee and PR reviewer filters', async () => {
@@ -159,6 +175,7 @@ describe('GitHubSettingsView', () => {
       model: 'gpt-4-legacy',
       reasoningEffort: 'ultra-legacy',
       concurrencyPolicy: 'coalesce',
+      priority: 'medium',
     });
     const { wrapper } = await mountSettings(api);
 
