@@ -358,6 +358,25 @@ func TestCreateRuleValidatesTemplateAndProvider(t *testing.T) {
 	if created.ConcurrencyPolicy != protocol.GitHubConcurrencyCoalesce {
 		t.Fatalf("default concurrencyPolicy = %v, want coalesce", created.ConcurrencyPolicy)
 	}
+	if created.Priority != protocol.GitHubPriorityMedium {
+		t.Fatalf("default priority = %v, want medium", created.Priority)
+	}
+
+	badPriority := base
+	badPriority.Priority = "urgent"
+	if _, err := service.CreateRule(ctx, badPriority); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("bad priority err = %v", err)
+	}
+
+	highPriority := base
+	highPriority.Priority = protocol.GitHubPriorityHigh
+	createdHigh, err := service.CreateRule(ctx, highPriority)
+	if err != nil {
+		t.Fatalf("CreateRule with high priority: %v", err)
+	}
+	if createdHigh.Priority != protocol.GitHubPriorityHigh {
+		t.Fatalf("priority = %v, want high", createdHigh.Priority)
+	}
 }
 
 func TestListRulesEmptyWorkspaceListsAllRepositories(t *testing.T) {

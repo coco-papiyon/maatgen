@@ -107,6 +107,79 @@ describe('GitHubSettingsView', () => {
     expect(rule?.filters.reviewers).toEqual(['carol', 'dave']);
   });
 
+  it('offers only the installed providers, scopes the model dropdown to the selected provider, and offers a fixed reasoning-effort dropdown', async () => {
+    const { wrapper } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    const providerOptions = wrapper.findAll('select[aria-label="Provider"] option').map((option) => option.attributes('value'));
+    expect(providerOptions).toEqual(['codex', 'claude']);
+
+    const modelOptions = () => wrapper.findAll('select[aria-label="model"] option').map((option) => option.attributes('value'));
+    expect(modelOptions()).toEqual(['', 'gpt-5.6-sol']);
+
+    await wrapper.get('select[aria-label="Provider"]').setValue('claude');
+    expect(modelOptions()).toEqual(['', 'claude-opus-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5']);
+
+    const reasoningEffortOptions = wrapper.findAll('select[aria-label="reasoningEffort"] option').map((option) => option.attributes('value'));
+    expect(reasoningEffortOptions).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('clears the selected model when switching providers away from a model it does not offer', async () => {
+    const { wrapper, api } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+    await wrapper.get('.github-rule-form select').setValue(DEMO_WORKSPACE);
+    await wrapper.get('.github-rule-form input:not([disabled])').setValue('モデル指定ルール');
+    await wrapper.get('.github-rule-form textarea').setValue('Design {{.Title}}');
+    await wrapper.get('select[aria-label="model"]').setValue('gpt-5.6-sol');
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const created = (await api.listGitHubTriggerRules()).find((rule) => rule.name === 'モデル指定ルール');
+    expect(created?.provider).toBe('codex');
+    expect(created?.model).toBe('gpt-5.6-sol');
+
+    await wrapper.get('.github-rule-list li:last-child button').trigger('click');
+    expect((wrapper.get('select[aria-label="model"]').element as HTMLSelectElement).value).toBe('gpt-5.6-sol');
+
+    await wrapper.get('select[aria-label="Provider"]').setValue('claude');
+    expect((wrapper.get('select[aria-label="model"]').element as HTMLSelectElement).value).toBe('');
+  });
+
+  it('shows an out-of-list saved model/reasoningEffort as a selected option and keeps it unchanged when saving', async () => {
+    const api = new MockAgentApi();
+    await api.createGitHubTriggerRule({
+      workspace: DEMO_WORKSPACE,
+      name: '旧モデルルール',
+      enabled: true,
+      eventKinds: ['issue'],
+      filters: {},
+      promptTemplate: 'Design {{.Title}}',
+      includeBody: false,
+      provider: 'codex',
+      model: 'gpt-4-legacy',
+      reasoningEffort: 'ultra-legacy',
+      concurrencyPolicy: 'coalesce',
+    });
+    const { wrapper } = await mountSettings(api);
+
+    await wrapper.get('.github-rule-list li:last-child button').trigger('click');
+
+    const modelSelect = wrapper.get('select[aria-label="model"]');
+    expect((modelSelect.element as HTMLSelectElement).value).toBe('gpt-4-legacy');
+    expect(wrapper.findAll('select[aria-label="model"] option').map((option) => option.attributes('value'))).toContain('gpt-4-legacy');
+
+    const reasoningSelect = wrapper.get('select[aria-label="reasoningEffort"]');
+    expect((reasoningSelect.element as HTMLSelectElement).value).toBe('ultra-legacy');
+    expect(wrapper.findAll('select[aria-label="reasoningEffort"] option').map((option) => option.attributes('value'))).toContain('ultra-legacy');
+
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const saved = (await api.listGitHubTriggerRules()).find((rule) => rule.name === '旧モデルルール');
+    expect(saved?.model).toBe('gpt-4-legacy');
+    expect(saved?.reasoningEffort).toBe('ultra-legacy');
+  });
+
   it('deletes a repository monitor after confirmation', async () => {
     const originalConfirm = window.confirm;
     window.confirm = () => true;

@@ -84,6 +84,7 @@ func TestDispatcherEndToEndWithRealSessionAndRunServices(t *testing.T) {
 		PromptTemplate:    "Design {{.Title}} (#{{.Number}})",
 		Provider:          protocol.AgentCodex,
 		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce,
+		Priority:          protocol.GitHubPriorityMedium,
 		CreatedAt:         time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	if err := store.CreateTriggerRule(ctx, rule); err != nil {
