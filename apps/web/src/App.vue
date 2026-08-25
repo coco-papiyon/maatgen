@@ -65,6 +65,9 @@ const sourceStats = ref<SourceStats>(emptySourceStats(''));
 const approvals = ref<CommandApproval[]>([]);
 const approvalRule = ref('');
 const workspace = ref('');
+const workspaceHistoryKey = 'maatgen.workspaceHistory';
+const workspaceHistoryLimit = 20;
+const workspaceHistory = ref<string[]>(loadWorkspaceHistory());
 const prompt = ref('');
 const activeRun = ref<AgentRun>();
 const busy = ref(false);
@@ -303,6 +306,20 @@ function loadSessionReadSequences(): Record<string, number> {
   } catch {
     return {};
   }
+}
+
+function loadWorkspaceHistory(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(workspaceHistoryKey) ?? '[]') as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberWorkspace(path: string) {
+  workspaceHistory.value = [path, ...workspaceHistory.value.filter((item) => item !== path)].slice(0, workspaceHistoryLimit);
+  localStorage.setItem(workspaceHistoryKey, JSON.stringify(workspaceHistory.value));
 }
 
 function isUnreadEvent(event: SessionEvent): boolean {
@@ -620,9 +637,11 @@ async function decideApproval(decision: ApprovalDecision) {
 }
 
 async function createSession() {
-  if (!workspace.value.trim()) return;
+  const trimmedWorkspace = workspace.value.trim();
+  if (!trimmedWorkspace) return;
   await act(async () => {
-    const created = await api.createSession({ agent: newSessionProvider.value, workspace: workspace.value.trim() });
+    const created = await api.createSession({ agent: newSessionProvider.value, workspace: trimmedWorkspace });
+    rememberWorkspace(trimmedWorkspace);
     // Keep the workspace input value so the Repository path remains after creating a session.
     await refreshSessions(true);
     await selectSession(created);
@@ -972,7 +991,10 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
         </div>
         <label for="workspace">Repository path</label>
         <div class="field-row">
-          <input id="workspace" v-model="workspace" placeholder="C:/path/to/repository" :disabled="busy" />
+          <input id="workspace" v-model="workspace" list="workspace-history" autocomplete="off" placeholder="C:/path/to/repository" :disabled="busy" />
+          <datalist id="workspace-history">
+            <option v-for="path in workspaceHistory" :key="path" :value="path" />
+          </datalist>
           <button type="submit" class="icon-button" :disabled="busy || !workspace.trim()" aria-label="Sessionを作成">＋</button>
         </div>
       </form>

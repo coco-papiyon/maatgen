@@ -90,4 +90,25 @@ describe('Shell', () => {
     const select = wrapper.find('select.shell-repository.resolved').element as HTMLSelectElement;
     expect(select.value).toBe('github.com/octo-demo/example-repo');
   });
+
+  it('registers a new Repository path as a monitored repository when the ＋ button creates a Session', async () => {
+    const api = new MockAgentApi();
+    const { wrapper } = await mountShell('/', api);
+    await wrapper.find('#workspace').setValue('C:/demo/new-repository');
+    await wrapper.find('form.new-session').trigger('submit');
+    await flushPromises();
+    const monitors = await api.listGitHubMonitors();
+    expect(monitors.filter((monitor) => monitor.repository === 'C:/demo/new-repository')).toHaveLength(1);
+  });
+
+  it('does not register a repository a second time when it is already monitored', async () => {
+    const api = new MockAgentApi();
+    await api.createGitHubMonitor({ workspace: 'C:/demo/current-repository', pollIntervalSeconds: 300 });
+    const { wrapper } = await mountShell('/', api);
+    await wrapper.find('#workspace').setValue('C:/demo/current-repository');
+    await wrapper.find('form.new-session').trigger('submit');
+    await flushPromises();
+    const monitors = await api.listGitHubMonitors();
+    expect(monitors.filter((monitor) => monitor.repository === 'C:/demo/current-repository')).toHaveLength(1);
+  });
 });

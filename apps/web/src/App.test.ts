@@ -16,6 +16,7 @@ afterEach(() => {
   localStorage.removeItem('maatgen.provider');
   localStorage.removeItem('maatgen.sidePanel');
   localStorage.removeItem('maatgen.sessionStatusFilter');
+  localStorage.removeItem('maatgen.workspaceHistory');
   vi.restoreAllMocks();
 });
 
@@ -335,6 +336,36 @@ describe('App with MockAgentApi', () => {
     await flushPromises();
 
     expect((wrapper.find('.provider-fields select').element as HTMLSelectElement).value).toBe('other');
+  });
+
+  it('remembers a newly created Session workspace as a Repository path history entry', async () => {
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#workspace').setValue('C:/repo/new-project');
+    await mounted.wrapper.find('form.new-session').trigger('submit');
+    await flushPromises();
+    const options = mounted.wrapper.findAll('#workspace-history option').map((option) => option.attributes('value'));
+    expect(options).toContain('C:/repo/new-project');
+    expect(JSON.parse(localStorage.getItem('maatgen.workspaceHistory') ?? '[]')).toContain('C:/repo/new-project');
+  });
+
+  it('offers previously used Repository paths from history while still allowing free text entry', async () => {
+    localStorage.setItem('maatgen.workspaceHistory', JSON.stringify(['C:/repo/previous-project']));
+    const mounted = await mountApp();
+    const options = mounted.wrapper.findAll('#workspace-history option').map((option) => option.attributes('value'));
+    expect(options).toEqual(['C:/repo/previous-project']);
+    const input = mounted.wrapper.find('#workspace');
+    expect(input.attributes('list')).toBe('workspace-history');
+    await input.setValue('C:/repo/typed-freely');
+    expect((input.element as HTMLInputElement).value).toBe('C:/repo/typed-freely');
+  });
+
+  it('moves a repeated Repository path to the front of history instead of duplicating it', async () => {
+    localStorage.setItem('maatgen.workspaceHistory', JSON.stringify(['C:/repo/older', 'C:/repo/newer']));
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#workspace').setValue('C:/repo/older');
+    await mounted.wrapper.find('form.new-session').trigger('submit');
+    await flushPromises();
+    expect(JSON.parse(localStorage.getItem('maatgen.workspaceHistory') ?? '[]')).toEqual(['C:/repo/older', 'C:/repo/newer']);
   });
 
   it('keeps the composer available and continues the same session after a run completes', async () => {

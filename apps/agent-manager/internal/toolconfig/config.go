@@ -29,8 +29,11 @@ type Config struct {
 // GitHubConfig holds the credential and host allowlist GitHub monitoring
 // (ADR-007) uses to authenticate against the GitHub API. Token is never
 // logged or exposed to a Prompt. AllowedEnterpriseHosts lists the GitHub
-// Enterprise Server hostnames, besides github.com, that
-// gitworktree.ResolveGitHubRemote and the GitHub adapter may target.
+// Enterprise hostnames, besides github.com, that
+// gitworktree.ResolveGitHubRemote and the GitHub adapter may target. An
+// entry may be a "*.example.com" wildcard to allow every subdomain (e.g.
+// "*.ghe.com" for GitHub Enterprise Cloud with data residency, where each
+// tenant gets its own "tenant.ghe.com" host).
 type GitHubConfig struct {
 	Token                  string   `json:"token"`
 	AllowedEnterpriseHosts []string `json:"allowedEnterpriseHosts"`

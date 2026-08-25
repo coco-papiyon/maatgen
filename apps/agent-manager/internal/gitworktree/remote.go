@@ -90,12 +90,26 @@ func ResolveGitHubRemote(ctx context.Context, gitPath, repository string, allowe
 	return RemoteResolution{Candidates: candidates}, nil
 }
 
+// isAllowedGitHubHost reports whether host is github.com or matches an
+// entry in allowedHosts. An entry of the form "*.example.com" matches
+// example.com itself and any of its subdomains (e.g. "tenant.ghe.com" for
+// the "*.ghe.com" entry used by GitHub Enterprise Cloud with data
+// residency), so a single entry covers every tenant hostname without
+// listing each one individually.
 func isAllowedGitHubHost(host string, allowedHosts []string) bool {
 	if strings.EqualFold(host, "github.com") {
 		return true
 	}
+	host = strings.ToLower(host)
 	for _, allowed := range allowedHosts {
-		if strings.EqualFold(strings.TrimSpace(allowed), host) {
+		allowed = strings.ToLower(strings.TrimSpace(allowed))
+		if suffix, isWildcard := strings.CutPrefix(allowed, "*."); isWildcard {
+			if host == suffix || strings.HasSuffix(host, "."+suffix) {
+				return true
+			}
+			continue
+		}
+		if host == allowed {
 			return true
 		}
 	}

@@ -52,6 +52,21 @@ func TestIsAllowedGitHubHost(t *testing.T) {
 	if !isAllowedGitHubHost("github.example.com", []string{"other.invalid", "GitHub.Example.com"}) {
 		t.Fatalf("enterprise host listed (case-insensitively) in allowedHosts should be allowed")
 	}
+	if !isAllowedGitHubHost("tenant.ghe.com", []string{"*.ghe.com"}) {
+		t.Fatalf("subdomain of a wildcard entry should be allowed")
+	}
+	if !isAllowedGitHubHost("TENANT.GHE.COM", []string{"*.ghe.com"}) {
+		t.Fatalf("subdomain of a wildcard entry should be allowed case-insensitively")
+	}
+	if !isAllowedGitHubHost("ghe.com", []string{"*.ghe.com"}) {
+		t.Fatalf("wildcard entry's own domain should be allowed")
+	}
+	if isAllowedGitHubHost("evilghe.com", []string{"*.ghe.com"}) {
+		t.Fatalf("host merely sharing a suffix (no dot boundary) must not be allowed")
+	}
+	if isAllowedGitHubHost("other.invalid", []string{"*.ghe.com"}) {
+		t.Fatalf("unrelated host must not be allowed by an unrelated wildcard entry")
+	}
 }
 
 func TestResolveGitHubRemotePrefersOrigin(t *testing.T) {
@@ -148,6 +163,25 @@ func TestResolveGitHubRemoteEnterpriseHostRequiresAllowlist(t *testing.T) {
 		t.Fatalf("ResolveGitHubRemote: %v", err)
 	}
 	if resolution.Repository == nil || resolution.Repository.Host != "github.example.com" {
+		t.Fatalf("selected = %#v", resolution.Repository)
+	}
+}
+
+func TestResolveGitHubRemoteWildcardEnterpriseHost(t *testing.T) {
+	repo := t.TempDir()
+	gitPath := requireGit(t)
+	runGit(t, gitPath, repo, "init")
+	runGit(t, gitPath, repo, "remote", "add", "origin", "https://tenant.ghe.com/octo-org/example.git")
+
+	if _, err := ResolveGitHubRemote(context.Background(), gitPath, repo, []string{"other.ghe.com"}); !errors.Is(err, ErrNoGitHubRemote) {
+		t.Fatalf("err = %v, want ErrNoGitHubRemote when host does not match the wildcard's domain", err)
+	}
+
+	resolution, err := ResolveGitHubRemote(context.Background(), gitPath, repo, []string{"*.ghe.com"})
+	if err != nil {
+		t.Fatalf("ResolveGitHubRemote: %v", err)
+	}
+	if resolution.Repository == nil || resolution.Repository.Host != "tenant.ghe.com" {
 		t.Fatalf("selected = %#v", resolution.Repository)
 	}
 }
