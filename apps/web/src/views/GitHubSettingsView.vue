@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import type {
   GitHubConcurrencyPolicy,
   GitHubItemKind,
+  GitHubJobPriority,
   GitHubRepositoryMonitor,
   GitHubRepositoryResolution,
   GitHubTriggerRule,
@@ -10,6 +11,7 @@ import type {
 import { AgentApiError } from '../api';
 import { useAgentApi } from '../github/useAgentApi';
 import { refreshRepositories, repositories } from '../github/repositories';
+import { priorityLabel } from '../github/priority';
 
 const api = useAgentApi();
 
@@ -208,6 +210,7 @@ interface RuleForm {
   model: string;
   reasoningEffort: string;
   concurrencyPolicy: GitHubConcurrencyPolicy;
+  priority: GitHubJobPriority;
   labels: string;
   assignees: string;
   reviewers: string;
@@ -219,7 +222,7 @@ interface RuleForm {
 function blankRuleForm(): RuleForm {
   return {
     id: '', repository: repositories.value[0]?.repository ?? '', name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
-    provider: 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce',
+    provider: 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce', priority: 'medium',
     labels: '', assignees: '', reviewers: '', projectTitle: '', projectField: '', projectValue: '',
   };
 }
@@ -244,6 +247,7 @@ function startEditRule(rule: GitHubTriggerRule) {
     id: rule.id, repository: rule.repository, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider as RuleForm['provider'],
     model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', concurrencyPolicy: rule.concurrencyPolicy,
+    priority: rule.priority,
     labels: (rule.filters.labels ?? []).join(', '),
     assignees: (rule.filters.assignees ?? []).join(', '),
     reviewers: (rule.filters.reviewers ?? []).join(', '),
@@ -285,6 +289,7 @@ async function saveRule() {
       ...(form.model ? { model: form.model } : {}),
       ...(form.reasoningEffort ? { reasoningEffort: form.reasoningEffort } : {}),
       concurrencyPolicy: form.concurrencyPolicy,
+      priority: form.priority,
     };
     if (form.id) {
       await api.updateGitHubTriggerRule(form.id, request);
@@ -417,7 +422,7 @@ onMounted(() => void refresh());
         <li v-for="rule in rules" :key="rule.id" class="github-rule">
           <div>
             <strong>{{ rule.name }}</strong>
-            <span class="github-meta">{{ ruleRepositoryLabel(rule.repository) }} / {{ rule.eventKinds.join(', ') }} / {{ rule.provider }} / {{ rule.concurrencyPolicy }}</span>
+            <span class="github-meta">{{ ruleRepositoryLabel(rule.repository) }} / {{ rule.eventKinds.join(', ') }} / {{ rule.provider }} / {{ rule.concurrencyPolicy }} / 優先度: {{ priorityLabel(rule.priority) }}</span>
             <span v-if="!rule.enabled" class="github-badge">無効</span>
           </div>
           <div class="github-form-actions">
@@ -486,12 +491,21 @@ onMounted(() => void refresh());
             <label>model（任意）<input v-model="editingRule.model" /></label>
             <label>reasoningEffort（任意）<input v-model="editingRule.reasoningEffort" /></label>
           </div>
-          <label>同時実行時の扱い
-            <select v-model="editingRule.concurrencyPolicy">
-              <option value="coalesce">coalesce（保留して後で再評価）</option>
-              <option value="skip">skip（今回はスキップ）</option>
-            </select>
-          </label>
+          <div class="github-form-row">
+            <label>同時実行時の扱い
+              <select v-model="editingRule.concurrencyPolicy">
+                <option value="coalesce">coalesce（保留して後で再評価）</option>
+                <option value="skip">skip（今回はスキップ）</option>
+              </select>
+            </label>
+            <label>優先度
+              <select v-model="editingRule.priority">
+                <option value="high">高</option>
+                <option value="medium">中</option>
+                <option value="low">低</option>
+              </select>
+            </label>
+          </div>
           <label class="github-checkbox"><input v-model="editingRule.enabled" type="checkbox" /> 有効</label>
           <div class="github-form-actions github-modal-actions">
             <button type="button" @click="cancelEditRule">キャンセル</button>

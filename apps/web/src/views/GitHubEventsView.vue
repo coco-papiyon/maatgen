@@ -4,6 +4,7 @@ import type { GitHubMonitorEvent, GitHubTriggerRule } from '@maatgen/protocol';
 import { AgentApiError } from '../api';
 import { useAgentApi } from '../github/useAgentApi';
 import { selectedRepository } from '../github/repositories';
+import { priorityLabel } from '../github/priority';
 
 const api = useAgentApi();
 
@@ -20,6 +21,12 @@ const SKIPPABLE = new Set(['detected', 'matched', 'queued']);
 function ruleName(ruleId: string | undefined): string {
   if (!ruleId) return '（削除されたルール）';
   return rules.value.find((rule) => rule.id === ruleId)?.name ?? ruleId;
+}
+
+function rulePriority(ruleId: string | undefined): string {
+  if (!ruleId) return '—';
+  const rule = rules.value.find((candidate) => candidate.id === ruleId);
+  return rule ? priorityLabel(rule.priority) : '—';
 }
 
 function canReplay(event: GitHubMonitorEvent): boolean {
@@ -109,6 +116,7 @@ onMounted(() => void refresh());
           <th>Item</th>
           <th>action</th>
           <th>ルール</th>
+          <th>優先度</th>
           <th>Session / Run</th>
           <th></th>
         </tr>
@@ -127,6 +135,7 @@ onMounted(() => void refresh());
           </td>
           <td>{{ event.action }}</td>
           <td>{{ ruleName(event.ruleId) }}</td>
+          <td>{{ rulePriority(event.ruleId) }}</td>
           <td>
             <RouterLink v-if="event.sessionId" :to="`/?session=${event.sessionId}`">Sessionを見る</RouterLink>
             <span v-else class="github-meta">—</span>

@@ -296,6 +296,7 @@ func (s *Service) CreateRule(ctx context.Context, request protocol.GitHubTrigger
 		EventKinds: request.EventKinds, Filters: request.Filters, PromptTemplate: request.PromptTemplate,
 		IncludeBody: request.IncludeBody, Provider: request.Provider, Model: request.Model,
 		ReasoningEffort: request.ReasoningEffort, ConcurrencyPolicy: normalizeConcurrencyPolicy(request.ConcurrencyPolicy),
+		Priority:  normalizeJobPriority(request.Priority),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.store.CreateTriggerRule(ctx, rule); err != nil {
@@ -327,6 +328,7 @@ func (s *Service) UpdateRule(ctx context.Context, id string, request protocol.Gi
 	updated.Model = request.Model
 	updated.ReasoningEffort = request.ReasoningEffort
 	updated.ConcurrencyPolicy = normalizeConcurrencyPolicy(request.ConcurrencyPolicy)
+	updated.Priority = normalizeJobPriority(request.Priority)
 	updated.UpdatedAt = s.now().UTC()
 	if err := s.store.UpdateTriggerRule(ctx, updated); err != nil {
 		return protocol.GitHubTriggerRule{}, err
@@ -343,6 +345,13 @@ func normalizeConcurrencyPolicy(policy protocol.GitHubConcurrencyPolicy) protoco
 		return protocol.GitHubConcurrencyCoalesce
 	}
 	return policy
+}
+
+func normalizeJobPriority(priority protocol.GitHubJobPriority) protocol.GitHubJobPriority {
+	if priority == "" {
+		return protocol.GitHubPriorityMedium
+	}
+	return priority
 }
 
 func validateRuleRequest(request protocol.GitHubTriggerRuleRequest) error {
@@ -372,6 +381,11 @@ func validateRuleRequest(request protocol.GitHubTriggerRuleRequest) error {
 	case "", protocol.GitHubConcurrencySkip, protocol.GitHubConcurrencyCoalesce:
 	default:
 		return fmt.Errorf("%w: concurrencyPolicy is invalid", ErrInvalidRequest)
+	}
+	switch request.Priority {
+	case "", protocol.GitHubPriorityHigh, protocol.GitHubPriorityMedium, protocol.GitHubPriorityLow:
+	default:
+		return fmt.Errorf("%w: priority is invalid", ErrInvalidRequest)
 	}
 	return nil
 }

@@ -457,6 +457,50 @@ func TestReconcileFailsEventWhenRunIsGone(t *testing.T) {
 	}
 }
 
+func TestSortJobsByPriorityDispatchesHighBeforeLowRegardlessOfDetectionOrder(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.addMonitor(testMonitor("/repo"))
+
+	highRule := testRule("rule-high", "/repo", protocol.GitHubConcurrencyCoalesce)
+	highRule.Priority = protocol.GitHubPriorityHigh
+	store.addRule(highRule)
+
+	lowRule := testRule("rule-low", "/repo", protocol.GitHubConcurrencyCoalesce)
+	lowRule.Priority = protocol.GitHubPriorityLow
+	store.addRule(lowRule)
+
+	base := time.Now()
+	// The low-priority event is detected first (older CreatedAt), but the
+	// high-priority event's rule must still be dispatched first (issue #13).
+	lowEvent := testEvent("event-low", "/repo", "rule-low", protocol.GitHubMonitorEventQueued, base)
+	lowEvent.Number = 1
+	lowEvent.ItemSnapshot.Title = "Low priority item"
+	store.addEvent(lowEvent)
+
+	highEvent := testEvent("event-high", "/repo", "rule-high", protocol.GitHubMonitorEventQueued, base.Add(time.Minute))
+	highEvent.Number = 2
+	highEvent.ItemSnapshot.Number = 2
+	highEvent.ItemSnapshot.Title = "High priority item"
+	store.addEvent(highEvent)
+
+	runs := &fakeRuns{}
+	dispatcher := NewDispatcher(store, &fakeSessions{}, runs)
+	if err := dispatcher.Tick(ctx); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if len(runs.calls) != 2 {
+		t.Fatalf("runs.calls = %#v, want 2 dispatches", runs.calls)
+	}
+	if runs.calls[0].request.Message != "Design High priority item (#2)" {
+		t.Fatalf("first dispatched job = %q, want the high-priority job dispatched first", runs.calls[0].request.Message)
+	}
+	if runs.calls[1].request.Message != "Design Low priority item (#1)" {
+		t.Fatalf("second dispatched job = %q, want the low-priority job dispatched second", runs.calls[1].request.Message)
+	}
+}
+
 func TestReconcileCoalesceQueueSupersedesOlderEventsForSameItem(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()

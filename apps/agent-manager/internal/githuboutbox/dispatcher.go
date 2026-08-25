@@ -196,20 +196,66 @@ func (d *Dispatcher) sortJobsByProviderAvailability(ctx context.Context, jobs []
 	return sorted
 }
 
+// jobPriorityRank orders protocol.GitHubJobPriority values from most to
+// least urgent. An unrecognized or empty priority (e.g. a job whose rule was
+// deleted) ranks as medium, matching normalizeJobPriority's default.
+var jobPriorityRank = map[protocol.GitHubJobPriority]int{
+	protocol.GitHubPriorityHigh:   0,
+	protocol.GitHubPriorityMedium: 1,
+	protocol.GitHubPriorityLow:    2,
+}
+
+// sortJobsByPriority reorders jobs so that jobs matched by a higher-priority
+// rule are processed first (issue #13). It is a stable sort, so jobs with
+// the same priority keep the FIFO order Tick received them in.
+func (d *Dispatcher) sortJobsByPriority(ctx context.Context, jobs []protocol.GitHubMonitorEvent) []protocol.GitHubMonitorEvent {
+	type jobWithPriority struct {
+		event protocol.GitHubMonitorEvent
+		rank  int
+	}
+	jobsWithPriority := make([]jobWithPriority, len(jobs))
+	for i, job := range jobs {
+		rank := jobPriorityRank[protocol.GitHubPriorityMedium]
+		if job.RuleID != nil {
+			if rule, err := d.store.GetTriggerRule(ctx, *job.RuleID); err == nil {
+				if r, ok := jobPriorityRank[rule.Priority]; ok {
+					rank = r
+				}
+			}
+		}
+		jobsWithPriority[i] = jobWithPriority{event: job, rank: rank}
+	}
+
+	sort.SliceStable(jobsWithPriority, func(i, j int) bool {
+		return jobsWithPriority[i].rank < jobsWithPriority[j].rank
+	})
+
+	sorted := make([]protocol.GitHubMonitorEvent, len(jobsWithPriority))
+	for i, j := range jobsWithPriority {
+		sorted[i] = j.event
+	}
+	return sorted
+}
+
 // Tick processes one batch of pending Outbox jobs: it advances "queued"
 // jobs (create Session, start Run) and "session_created" jobs (a
 // Session exists from a previous, interrupted attempt; start its Run), in
 // each case honoring the matched rule's concurrency policy when the
 // repository's execution lock is held by another Run.
-// Jobs are processed in order of provider availability: if a provider's quota
-// is exhausted, jobs for other providers in the queue are processed first.
+// Jobs are ordered by the matched rule's priority (high before medium before
+// low, ties broken by detection order), then by provider availability: if a
+// provider's quota is exhausted, jobs for other providers in the queue are
+// processed first.
 func (d *Dispatcher) Tick(ctx context.Context) error {
 	queued, err := d.store.ListMonitorEventsByStatus(ctx, protocol.GitHubMonitorEventQueued, batchSize)
 	if err != nil {
 		return fmt.Errorf("list queued github monitor jobs: %w", err)
 	}
 	queued = d.reconcileCoalesceQueue(ctx, queued)
-	// Sort jobs by provider availability: prioritize jobs for providers with quota remaining.
+	// Sort jobs by rule priority first (stable, so detection order breaks ties),
+	// then by provider availability (stable, so priority order is preserved
+	// within each availability group).
+	queued = d.sortJobsByPriority(ctx, queued)
 	queued = d.sortJobsByProviderAvailability(ctx, queued)
 	for _, event := range queued {
 		d.dispatchQueued(ctx, event)
