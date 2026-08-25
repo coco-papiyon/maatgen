@@ -37,7 +37,7 @@ describe('Shell', () => {
     expect(wrapper.find('a.shell-nav-link.active').text()).toBe('Session');
   });
 
-  it('navigates to the GitHub event history view and highlights it', async () => {
+  it('navigates to the GitHub Job view and highlights it', async () => {
     // RouterLink's click-interception is vue-router's own tested behavior;
     // pushing the route directly isolates what this test actually owns:
     // Shell's reactive nav highlighting and view swap in response to a
@@ -45,14 +45,14 @@ describe('Shell', () => {
     const { wrapper, router } = await mountShell('/');
     await router.push({ name: 'github-events' });
     await flushPromises();
-    expect(wrapper.text()).toContain('イベント履歴');
+    expect(wrapper.text()).toContain('Job');
     expect(wrapper.find('a[href="/github/events"]').classes()).toContain('active');
   });
 
   it('renders the requested top menu order without a GitHub monitoring group', async () => {
     const { wrapper } = await mountShell('/');
     const labels = wrapper.findAll('.shell-nav > .shell-nav-link').map((link) => link.text());
-    expect(labels).toEqual(['Session', 'Issue', 'PR', 'イベント履歴', '設定']);
+    expect(labels).toEqual(['Session', 'Issue', 'PR', 'Job', '設定']);
     expect(wrapper.find('.shell-nav-group').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('GitHub監視');
   });

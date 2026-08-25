@@ -28,7 +28,7 @@ function onRemoteChange(event: Event) {
       <RouterLink to="/" class="shell-nav-link" :class="{ active: routeName() === 'sessions' }">Session</RouterLink>
       <RouterLink to="/github/issues" class="shell-nav-link" :class="{ active: isIssuesArea }">Issue</RouterLink>
       <RouterLink to="/github/pulls" class="shell-nav-link" :class="{ active: isPullsArea }">PR</RouterLink>
-      <RouterLink to="/github/events" class="shell-nav-link" :class="{ active: routeName() === 'github-events' }">イベント履歴</RouterLink>
+      <RouterLink to="/github/events" class="shell-nav-link" :class="{ active: routeName() === 'github-events' }">Job</RouterLink>
       <RouterLink to="/github/settings" class="shell-nav-link" :class="{ active: routeName() === 'github-settings' }">設定</RouterLink>
       <select
         v-if="remoteGroups.length"

@@ -284,6 +284,39 @@ func TestListMonitorEventsOrdersNewestFirstAndRespectsLimit(t *testing.T) {
 	}
 }
 
+func TestListAllMonitorEventsOrdersNewestFirstAcrossRepositoriesAndRespectsLimit(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	createdAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	monitorA := testMonitor("C:/workspace/repo-a", createdAt)
+	if err := store.CreateRepositoryMonitor(ctx, monitorA); err != nil {
+		t.Fatalf("create monitor a: %v", err)
+	}
+	monitorB := testMonitor("C:/workspace/repo-b", createdAt)
+	if err := store.CreateRepositoryMonitor(ctx, monitorB); err != nil {
+		t.Fatalf("create monitor b: %v", err)
+	}
+
+	repositories := []string{monitorA.Repository, monitorB.Repository, monitorA.Repository}
+	for i, id := range []string{"event-1", "event-2", "event-3"} {
+		event := testMonitorEvent(id, repositories[i], createdAt.Add(time.Duration(i)*time.Minute))
+		if inserted, err := store.InsertMonitorEvent(ctx, event); err != nil || !inserted {
+			t.Fatalf("insert %s: inserted=%v err=%v", id, inserted, err)
+		}
+	}
+
+	events, err := store.ListAllMonitorEvents(ctx, 2)
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(events) != 2 || events[0].ID != "event-3" || events[1].ID != "event-2" {
+		t.Fatalf("events = %#v, want [event-3, event-2]", events)
+	}
+	if events[0].Repository != monitorA.Repository || events[1].Repository != monitorB.Repository {
+		t.Fatalf("events repositories = %#v, want [%s, %s]", events, monitorA.Repository, monitorB.Repository)
+	}
+}
+
 func TestListMonitorEventsByStatusForOutboxDispatcher(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

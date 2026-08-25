@@ -4,8 +4,9 @@ import type { AgentApi } from '../api';
 
 // The full multi-repository registry (Settings screen's table) and the one
 // repository currently selected for the GitHub views that can only show one
-// repository at a time (Issue一覧, PR一覧, イベント履歴, and the top-right
-// selector in Shell.vue). Module-level singletons so every view and the
+// repository at a time (Issue一覧, PR一覧, and the top-right selector in
+// Shell.vue; the Job view shows every repository at once and does not read
+// selectedRepository). Module-level singletons so every view and the
 // common navigation stay in sync without prop drilling.
 export const repositories = ref<GitHubRepositoryMonitor[]>([]);
 export const selectedRepository = ref('');

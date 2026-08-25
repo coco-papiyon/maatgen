@@ -518,9 +518,9 @@ export class MockAgentApi implements AgentApi {
     this.githubRules.delete(id);
   }
 
-  async listGitHubMonitorEvents(workspace: string, limit = 100): Promise<GitHubMonitorEvent[]> {
-    return [...this.githubEvents.values()]
-      .filter((githubEvent) => githubEvent.repository === workspace)
+  async listGitHubMonitorEvents(workspace?: string, limit = 100): Promise<GitHubMonitorEvent[]> {
+    const events = [...this.githubEvents.values()];
+    return (workspace ? events.filter((githubEvent) => githubEvent.repository === workspace) : events)
       .slice(0, limit)
       .map(clone);
   }

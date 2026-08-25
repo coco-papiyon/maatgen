@@ -59,6 +59,7 @@ type Store interface {
 	DeleteTriggerRule(ctx context.Context, id string) error
 
 	ListMonitorEvents(ctx context.Context, repository string, limit int) ([]protocol.GitHubMonitorEvent, error)
+	ListAllMonitorEvents(ctx context.Context, limit int) ([]protocol.GitHubMonitorEvent, error)
 	GetMonitorEvent(ctx context.Context, id string) (protocol.GitHubMonitorEvent, error)
 	SkipMonitorEvent(ctx context.Context, id, reason string, updatedAt time.Time) error
 	CreateReplayEvent(ctx context.Context, originalEventID, newEventID string, createdAt time.Time) (protocol.GitHubMonitorEvent, error)
@@ -395,13 +396,19 @@ func validateRuleRequest(request protocol.GitHubTriggerRuleRequest) error {
 	return nil
 }
 
+// ListEvents returns the events for workspace's repository, or, when
+// workspace is empty, the most recent events across every registered
+// repository (the Job screen's cross-repository event table).
 func (s *Service) ListEvents(ctx context.Context, workspace string, limit int) ([]protocol.GitHubMonitorEvent, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if workspace == "" {
+		return s.store.ListAllMonitorEvents(ctx, limit)
+	}
 	repository, err := s.validator.ValidateRepository(ctx, workspace)
 	if err != nil {
 		return nil, err
-	}
-	if limit <= 0 {
-		limit = 100
 	}
 	return s.store.ListMonitorEvents(ctx, repository, limit)
 }
