@@ -2,6 +2,7 @@ package githuboutbox
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -134,8 +135,19 @@ func TestDispatcherEndToEndWithRealSessionAndRunServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if gotSession.Workspace != repository || gotSession.Agent != protocol.AgentCodex {
-		t.Fatalf("session = %#v", gotSession)
+	if gotSession.Agent != protocol.AgentCodex {
+		t.Fatalf("session.Agent = %q, want %q", gotSession.Agent, protocol.AgentCodex)
+	}
+	repositoryInfo, err := os.Stat(repository)
+	if err != nil {
+		t.Fatalf("stat repository: %v", err)
+	}
+	workspaceInfo, err := os.Stat(gotSession.Workspace)
+	if err != nil {
+		t.Fatalf("stat session workspace: %v", err)
+	}
+	if !os.SameFile(repositoryInfo, workspaceInfo) {
+		t.Fatalf("session.Workspace = %q, want same directory as %q", gotSession.Workspace, repository)
 	}
 	gotRun, err := store.GetRun(ctx, *got.RunID)
 	if err != nil {
