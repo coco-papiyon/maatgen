@@ -104,7 +104,7 @@ func TestDispatcherEndToEndWithRealSessionAndRunServices(t *testing.T) {
 
 	var dispatcher *Dispatcher
 	runs := runservice.New(store, noopAdapter{}, runservice.WithCheckpointManager(checkpointManager),
-		runservice.WithTerminalObserver(func(run protocol.AgentRun) { dispatcher.ObserveRunTerminal(run) }))
+		runservice.WithTerminalObserver(func(run protocol.AgentRun, workspace string) { dispatcher.ObserveRunTerminal(run) }))
 	defer runs.Close(context.Background())
 	dispatcher = NewDispatcher(store, sessions, runs)
 

@@ -39,6 +39,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/server"
 	sessionservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/session"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/sourcestats"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 	storesqlite "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage/sqlite"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/toolconfig"
 )
@@ -223,12 +224,32 @@ func run() error {
 		},
 	})
 	defer approvals.Close()
-	// dispatcher is assigned below, once runs exists; the terminal observer
-	// closure only runs asynchronously (after a Run finishes), by which
-	// time dispatcher is always set.
+	// dispatcher and githubMonitor are assigned below, once runs exists; the
+	// terminal observer closure only runs asynchronously (after a Run
+	// finishes), by which time both are always set.
 	var dispatcher *githuboutbox.Dispatcher
+	var githubMonitor *githubcontroller.Service
 	runs := runservice.NewMulti(store, adapters, runservice.WithCheckpointManager(checkpointManager), runservice.WithChangeDetector(changeDetector), runservice.WithPricingReader(store), runservice.WithApprovalHandler(approvals.Handle),
-		runservice.WithTerminalObserver(func(run protocol.AgentRun) { dispatcher.ObserveRunTerminal(run) }))
+		runservice.WithTerminalObserver(func(run protocol.AgentRun, workspace string) {
+			dispatcher.ObserveRunTerminal(run)
+			// Issue #15: trigger the same GitHub monitor sync the Settings
+			// screen's manual "今すぐ同期" button performs, so a rule matching
+			// what this Run just changed (e.g. a newly opened PR awaiting
+			// review) does not have to wait for the next scheduled poll. Run in
+			// the background so the GitHub API round-trip never delays
+			// releasing this repository's execution lock (done right after
+			// this observer returns).
+			if githubMonitor == nil {
+				return
+			}
+			go func() {
+				syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if _, err := githubMonitor.SyncNow(syncCtx, workspace); err != nil && !errors.Is(err, storage.ErrNotFound) {
+					slog.Warn("github monitor sync after run completion failed", "workspace", workspace, "error", err)
+				}
+			}()
+		}))
 	providerUsage := providerusage.New(adapters)
 	restores, err := restoreservice.New(store, checkpointManager)
 	if err != nil {
@@ -297,7 +318,7 @@ func run() error {
 	poller := githubmonitor.NewPoller(store, evaluator, func(host string) (githubmonitor.GitHubClient, error) {
 		return githubClients(host)
 	}, remoteResolver)
-	githubMonitor := githubcontroller.New(store, checkpointManager, checkpointManager.GitPath(), toolConfig.GitHub.AllowedEnterpriseHosts, poller,
+	githubMonitor = githubcontroller.New(store, checkpointManager, checkpointManager.GitPath(), toolConfig.GitHub.AllowedEnterpriseHosts, poller,
 		func(host string) (githubcontroller.GitHubClient, error) { return githubClients(host) })
 
 	// Periodic polling (ADR-007 section 2): separate from the manual "sync
