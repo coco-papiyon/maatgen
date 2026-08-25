@@ -127,7 +127,8 @@ export class MockAgentApi implements AgentApi {
   }
 
   async sendMessage(id: string, request: SendMessageRequest): Promise<AgentRun> {
-    this.requireSession(id);
+    const session = this.requireSession(id);
+    if (!session.firstPrompt) session.firstPrompt = request.message;
     const run: AgentRun = {
       id: `run-${Date.now()}`,
       sessionId: id,

@@ -17,4 +17,5 @@ export interface AgentSession {
   githubItemNumber?: number;
   createdAt: string;
   closedAt?: string;
+  firstPrompt?: string;
 }

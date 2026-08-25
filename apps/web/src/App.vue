@@ -354,6 +354,11 @@ function shortPath(path: string): string {
   return parts.slice(-2).join('/');
 }
 
+function directoryName(path: string): string {
+  const parts = path.replaceAll('\\', '/').split('/').filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
 function loadSessionReadSequences(): Record<string, number> {
   try {
     const parsed = JSON.parse(localStorage.getItem(sessionReadSequenceKey) ?? '{}') as unknown;
@@ -417,10 +422,6 @@ function formatRelativeTime(isoString: string, now: Date = new Date()): string {
   if (hours < 24) return `${hours}時間前`;
   if (days < 7) return `${days}日前`;
   return then.toLocaleDateString('ja-JP');
-}
-
-function formatSessionStatus(status: string): string {
-  return status === 'active' ? 'アクティブ' : 'クローズ';
 }
 
 function getSessionLastActivityTime(session: AgentSession, allRuns: Array<{ run: AgentRun }>): string | undefined {
@@ -1103,10 +1104,10 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           @click="selectSession(session)"
           :title="session.workspace"
         >
-          <span class="session-title">{{ shortPath(session.workspace) }}</span>
+          <span class="session-title">{{ session.firstPrompt ?? shortPath(session.workspace) }}</span>
           <span v-if="unreadSessionIDs.has(session.id)" class="unread-mark" title="未読">未読</span>
           <span class="session-meta">
-            <span :class="['mini-dot', session.status]" />{{ formatSessionStatus(session.status) }} · {{ session.agent }}
+            <span :class="['mini-dot', session.status]" />{{ directoryName(session.workspace) }} · {{ session.agent }}
           </span>
           <span class="session-time">{{ formatRelativeTime(session.createdAt) }}に作成</span>
         </button>
