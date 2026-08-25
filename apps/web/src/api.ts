@@ -123,7 +123,9 @@ export interface AgentApi {
   getGitHubTriggerRule(id: string): Promise<GitHubTriggerRule>;
   updateGitHubTriggerRule(id: string, request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule>;
   deleteGitHubTriggerRule(id: string): Promise<void>;
-  listGitHubMonitorEvents(workspace: string, limit?: number): Promise<GitHubMonitorEvent[]>;
+  // Omitting workspace lists monitor events across every registered
+  // repository (the Job screen's cross-repository event table).
+  listGitHubMonitorEvents(workspace?: string, limit?: number): Promise<GitHubMonitorEvent[]>;
   skipGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent>;
   replayGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent>;
   listGitHubIssues(workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse>;
@@ -327,7 +329,8 @@ export const httpAgentApi: AgentApi = {
     return request(`/api/v1/github/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
   async listGitHubMonitorEvents(workspace, limit = 100) {
-    const query = new URLSearchParams({ workspace, limit: String(limit) });
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (workspace) query.set('workspace', workspace);
     const response = await request<GitHubMonitorEventListResponse>(`/api/v1/github/events?${query}`);
     return response.events;
   },

@@ -137,6 +137,14 @@ func (f *fakeStore) ListMonitorEvents(ctx context.Context, repository string, li
 	return result, nil
 }
 
+func (f *fakeStore) ListAllMonitorEvents(ctx context.Context, limit int) ([]protocol.GitHubMonitorEvent, error) {
+	var result []protocol.GitHubMonitorEvent
+	for _, event := range f.events {
+		result = append(result, event)
+	}
+	return result, nil
+}
+
 func (f *fakeStore) GetMonitorEvent(ctx context.Context, id string) (protocol.GitHubMonitorEvent, error) {
 	event, ok := f.events[id]
 	if !ok {
@@ -441,6 +449,31 @@ func TestListRulesEmptyWorkspaceListsAllRepositories(t *testing.T) {
 	}
 	if len(all) != 2 {
 		t.Fatalf("all rules = %#v, want 2 across both repositories", all)
+	}
+}
+
+func TestListEventsEmptyWorkspaceListsAllRepositories(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	service := New(store, fakeValidator{}, "", nil, nil, nil)
+
+	store.events["event-a"] = protocol.GitHubMonitorEvent{ID: "event-a", Repository: "/repo-a", Status: protocol.GitHubMonitorEventDetected}
+	store.events["event-b"] = protocol.GitHubMonitorEvent{ID: "event-b", Repository: "/repo-b", Status: protocol.GitHubMonitorEventDetected}
+
+	scoped, err := service.ListEvents(ctx, "/repo-a", 0)
+	if err != nil {
+		t.Fatalf("ListEvents(/repo-a): %v", err)
+	}
+	if len(scoped) != 1 || scoped[0].Repository != "/repo-a" {
+		t.Fatalf("scoped events = %#v, want exactly the /repo-a event", scoped)
+	}
+
+	all, err := service.ListEvents(ctx, "", 0)
+	if err != nil {
+		t.Fatalf("ListEvents(\"\"): %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("all events = %#v, want 2 across both repositories", all)
 	}
 }
 

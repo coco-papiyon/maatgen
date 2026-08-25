@@ -13,8 +13,7 @@ afterEach(() => {
   selectedRepository.value = '';
 });
 
-async function mountEvents(workspace = 'C:/demo/current-repository', api = new MockAgentApi()) {
-  selectedRepository.value = workspace;
+async function mountEvents(api = new MockAgentApi()) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/', component: { template: '<div />' } }],
@@ -30,5 +29,24 @@ describe('GitHubEventsView', () => {
     const rows = wrapper.findAll('.github-table tbody tr');
     expect(rows.some((row) => row.text().includes('中'))).toBe(true);
     expect(rows.some((row) => row.text().includes('高'))).toBe(true);
+  });
+
+  it("shows each event's repository and rule provider, independent of the top-right repository selector", async () => {
+    selectedRepository.value = 'C:/some/other-repository-not-monitored';
+    const { wrapper } = await mountEvents();
+    const rows = wrapper.findAll('.github-table tbody tr');
+    // Events keep showing even though selectedRepository points elsewhere:
+    // the Job view no longer filters by the top-right repository selector.
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((row) => row.text().includes('octo-demo/example-repo'))).toBe(true);
+    expect(rows.some((row) => row.text().includes('Codex'))).toBe(true);
+    expect(rows.some((row) => row.text().includes('Claude Code'))).toBe(true);
+  });
+
+  it('renders the リポジトリ column right after 状態 and the プロバイダー column right after ルール', async () => {
+    const { wrapper } = await mountEvents();
+    const headers = wrapper.findAll('.github-table thead th').map((header) => header.text());
+    expect(headers.indexOf('リポジトリ')).toBe(headers.indexOf('状態') + 1);
+    expect(headers.indexOf('プロバイダー')).toBe(headers.indexOf('ルール') + 1);
   });
 });

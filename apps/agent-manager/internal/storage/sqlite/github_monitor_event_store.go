@@ -152,6 +152,31 @@ func (s *Store) ListMonitorEvents(ctx context.Context, repository string, limit 
 	return events, nil
 }
 
+// ListAllMonitorEvents returns the most recent events across every
+// repository, newest first, capped at limit. Used by the Job screen's
+// cross-repository event table, where events are shown independently of
+// whichever repository is currently selected in the UI.
+func (s *Store) ListAllMonitorEvents(ctx context.Context, limit int) ([]protocol.GitHubMonitorEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		monitorEventSelect+` ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list all github monitor events: %w", err)
+	}
+	defer rows.Close()
+	events := []protocol.GitHubMonitorEvent{}
+	for rows.Next() {
+		event, err := scanMonitorEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list all github monitor events: %w", err)
+	}
+	return events, nil
+}
+
 // ListMonitorEventsByStatus returns events in status across every
 // repository, oldest first. The Outbox dispatcher (ADR-007 section 6) uses
 // this to find queued events to turn into Sessions/Runs, including after a
