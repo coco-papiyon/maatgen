@@ -314,10 +314,15 @@ func (s *Service) UpdateRule(ctx context.Context, id string, request protocol.Gi
 	if err != nil {
 		return protocol.GitHubTriggerRule{}, err
 	}
+	repository, err := s.validator.ValidateRepository(ctx, request.Workspace)
+	if err != nil {
+		return protocol.GitHubTriggerRule{}, err
+	}
 	if err := validateRuleRequest(request); err != nil {
 		return protocol.GitHubTriggerRule{}, err
 	}
 	updated := existing
+	updated.Repository = repository
 	updated.Name = strings.TrimSpace(request.Name)
 	updated.Enabled = request.Enabled
 	updated.EventKinds = request.EventKinds

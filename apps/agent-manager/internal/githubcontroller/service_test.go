@@ -379,6 +379,34 @@ func TestCreateRuleValidatesTemplateAndProvider(t *testing.T) {
 	}
 }
 
+func TestUpdateRuleChangesRepository(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	service := New(store, fakeValidator{}, "", nil, nil, nil)
+
+	created, err := service.CreateRule(ctx, protocol.GitHubTriggerRuleRequest{
+		Workspace: "/repo-a", Name: "rule", EventKinds: []protocol.GitHubItemKind{protocol.GitHubItemIssue},
+		PromptTemplate: "Design {{.Title}}", Provider: protocol.AgentCodex,
+	})
+	if err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+	updated, err := service.UpdateRule(ctx, created.ID, protocol.GitHubTriggerRuleRequest{
+		Workspace: "/repo-b", Name: created.Name, Enabled: created.Enabled, EventKinds: created.EventKinds,
+		Filters: created.Filters, PromptTemplate: created.PromptTemplate, IncludeBody: created.IncludeBody,
+		Provider: created.Provider, ConcurrencyPolicy: created.ConcurrencyPolicy, Priority: created.Priority,
+	})
+	if err != nil {
+		t.Fatalf("UpdateRule: %v", err)
+	}
+	if updated.Repository != "/repo-b" {
+		t.Fatalf("updated.Repository = %q, want /repo-b", updated.Repository)
+	}
+	if store.rules[created.ID].Repository != "/repo-b" {
+		t.Fatalf("stored repository = %q, want /repo-b", store.rules[created.ID].Repository)
+	}
+}
+
 func TestListRulesEmptyWorkspaceListsAllRepositories(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()

@@ -88,6 +88,34 @@ describe('GitHubSettingsView', () => {
     expect(rule?.priority).toBe('medium');
   });
 
+  it('allows changing the local path when editing a trigger rule', async () => {
+    const api = new MockAgentApi();
+    await api.createGitHubMonitor({ workspace: 'C:/demo/another-repository', pollIntervalSeconds: 300 });
+    await api.createGitHubTriggerRule({
+      workspace: DEMO_WORKSPACE,
+      name: '移動可能なルール',
+      enabled: true,
+      eventKinds: ['issue'],
+      filters: {},
+      promptTemplate: 'Design {{.Title}}',
+      includeBody: false,
+      provider: 'codex',
+      concurrencyPolicy: 'coalesce',
+      priority: 'medium',
+    });
+    const { wrapper } = await mountSettings(api);
+
+    await wrapper.get('.github-rule-list li button').trigger('click');
+    const repositorySelect = wrapper.get('.github-rule-form label select');
+    expect((repositorySelect.element as HTMLSelectElement).value).toBe(DEMO_WORKSPACE);
+    await repositorySelect.setValue('C:/demo/another-repository');
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const rules = await api.listGitHubTriggerRules();
+    expect(rules[0]?.repository).toBe('C:/demo/another-repository');
+  });
+
   it("lets the user set a rule's priority", async () => {
     const { wrapper, api } = await mountSettings();
     await wrapper.get('.github-card-header button').trigger('click');

@@ -40,10 +40,10 @@ func (s *Store) UpdateTriggerRule(ctx context.Context, rule protocol.GitHubTrigg
 		return fmt.Errorf("update github trigger rule: %w", err)
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE github_trigger_rules
-		SET name = ?, enabled = ?, event_kinds_json = ?, filters_json = ?, prompt_template = ?, include_body = ?,
+		SET repository = ?, name = ?, enabled = ?, event_kinds_json = ?, filters_json = ?, prompt_template = ?, include_body = ?,
 			provider = ?, model = ?, reasoning_effort = ?, concurrency_policy = ?, priority = ?, updated_at = ?
 		WHERE id = ?`,
-		rule.Name, boolToInt(rule.Enabled), eventKinds, filters, rule.PromptTemplate, boolToInt(rule.IncludeBody),
+		rule.Repository, rule.Name, boolToInt(rule.Enabled), eventKinds, filters, rule.PromptTemplate, boolToInt(rule.IncludeBody),
 		rule.Provider, nullableString(rule.Model), nullableString(rule.ReasoningEffort),
 		rule.ConcurrencyPolicy, rule.Priority, formatTime(rule.UpdatedAt), rule.ID)
 	return updateResult("update github trigger rule", result, err)
