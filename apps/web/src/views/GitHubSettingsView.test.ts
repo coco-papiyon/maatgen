@@ -107,6 +107,44 @@ describe('GitHubSettingsView', () => {
     expect(rule?.filters.reviewers).toEqual(['carol', 'dave']);
   });
 
+  it('offers only the installed providers, scopes the model dropdown to the selected provider, and offers a fixed reasoning-effort dropdown', async () => {
+    const { wrapper } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    const providerOptions = wrapper.findAll('select[aria-label="Provider"] option').map((option) => option.attributes('value'));
+    expect(providerOptions).toEqual(['codex', 'claude']);
+
+    const modelOptions = () => wrapper.findAll('select[aria-label="model"] option').map((option) => option.attributes('value'));
+    expect(modelOptions()).toEqual(['', 'gpt-5.6-sol']);
+
+    await wrapper.get('select[aria-label="Provider"]').setValue('claude');
+    expect(modelOptions()).toEqual(['', 'claude-opus-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5']);
+
+    const reasoningEffortOptions = wrapper.findAll('select[aria-label="reasoningEffort"] option').map((option) => option.attributes('value'));
+    expect(reasoningEffortOptions).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('clears the selected model when switching providers away from a model it does not offer, but keeps an out-of-list saved model until the provider changes', async () => {
+    const { wrapper, api } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+    await wrapper.get('.github-rule-form select').setValue(DEMO_WORKSPACE);
+    await wrapper.get('.github-rule-form input:not([disabled])').setValue('モデル指定ルール');
+    await wrapper.get('.github-rule-form textarea').setValue('Design {{.Title}}');
+    await wrapper.get('select[aria-label="model"]').setValue('gpt-5.6-sol');
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const created = (await api.listGitHubTriggerRules()).find((rule) => rule.name === 'モデル指定ルール');
+    expect(created?.provider).toBe('codex');
+    expect(created?.model).toBe('gpt-5.6-sol');
+
+    await wrapper.get('.github-rule-list li:last-child button').trigger('click');
+    expect((wrapper.get('select[aria-label="model"]').element as HTMLSelectElement).value).toBe('gpt-5.6-sol');
+
+    await wrapper.get('select[aria-label="Provider"]').setValue('claude');
+    expect((wrapper.get('select[aria-label="model"]').element as HTMLSelectElement).value).toBe('');
+  });
+
   it('deletes a repository monitor after confirmation', async () => {
     const originalConfirm = window.confirm;
     window.confirm = () => true;

@@ -1,19 +1,23 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type {
+  AgentName,
   GitHubConcurrencyPolicy,
   GitHubItemKind,
   GitHubRepositoryMonitor,
   GitHubRepositoryResolution,
   GitHubTriggerRule,
+  Provider,
 } from '@maatgen/protocol';
 import { AgentApiError } from '../api';
+import { reasoningEffortOptions } from '../constants';
 import { useAgentApi } from '../github/useAgentApi';
 import { refreshRepositories, repositories } from '../github/repositories';
 
 const api = useAgentApi();
 
 const rules = ref<GitHubTriggerRule[]>([]);
+const providers = ref<Provider[]>([]);
 const loading = ref(false);
 const error = ref('');
 
@@ -36,6 +40,7 @@ async function refresh() {
     }
     projectNameDrafts.value = Object.fromEntries(repositories.value.map((monitor) => [monitor.repository, monitor.projectName ?? '']));
     rules.value = await api.listGitHubTriggerRules();
+    providers.value = (await api.listProviders()).providers;
   } catch (cause) {
     error.value = describeError(cause);
   } finally {
@@ -204,7 +209,7 @@ interface RuleForm {
   eventKinds: GitHubItemKind[];
   promptTemplate: string;
   includeBody: boolean;
-  provider: 'codex' | 'claude' | 'copilot';
+  provider: AgentName;
   model: string;
   reasoningEffort: string;
   concurrencyPolicy: GitHubConcurrencyPolicy;
@@ -219,7 +224,7 @@ interface RuleForm {
 function blankRuleForm(): RuleForm {
   return {
     id: '', repository: repositories.value[0]?.repository ?? '', name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
-    provider: 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce',
+    provider: providers.value[0]?.id ?? 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce',
     labels: '', assignees: '', reviewers: '', projectTitle: '', projectField: '', projectValue: '',
   };
 }
@@ -229,6 +234,20 @@ const savingRule = ref(false);
 const ruleDialog = ref<HTMLElement>();
 const includesIssues = computed(() => editingRule.value?.eventKinds.includes('issue') ?? false);
 const includesPullRequests = computed(() => editingRule.value?.eventKinds.includes('pull_request') ?? false);
+const availableModels = computed(() => providers.value.find((provider) => provider.id === editingRule.value?.provider)?.models ?? []);
+
+// プロバイダーをユーザーが切り替えたときだけモデル選択をリセットする。ダイアログを開いた
+// 直後（undefined→初期値の遷移）はスキップし、保存済みモデルが選択肢に無くても保持する。
+watch(
+  () => editingRule.value?.provider,
+  (nextProvider, previousProvider) => {
+    if (previousProvider === undefined || nextProvider === undefined) return;
+    const form = editingRule.value;
+    if (form && form.model && !availableModels.value.includes(form.model)) {
+      form.model = '';
+    }
+  },
+);
 
 function focusRuleDialog() {
   void nextTick(() => ruleDialog.value?.querySelector<HTMLElement>('input, select')?.focus());
@@ -242,7 +261,7 @@ function startCreateRule() {
 function startEditRule(rule: GitHubTriggerRule) {
   editingRule.value = {
     id: rule.id, repository: rule.repository, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
-    promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider as RuleForm['provider'],
+    promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider,
     model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', concurrencyPolicy: rule.concurrencyPolicy,
     labels: (rule.filters.labels ?? []).join(', '),
     assignees: (rule.filters.assignees ?? []).join(', '),
@@ -477,14 +496,21 @@ onMounted(() => void refresh());
           <label class="github-checkbox"><input v-model="editingRule.includeBody" type="checkbox" /> Issue/PR本文をPromptに含める</label>
           <div class="github-form-row">
             <label>Provider
-              <select v-model="editingRule.provider">
-                <option value="codex">codex</option>
-                <option value="claude">claude</option>
-                <option value="copilot">copilot</option>
+              <select v-model="editingRule.provider" aria-label="Provider">
+                <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
               </select>
             </label>
-            <label>model（任意）<input v-model="editingRule.model" /></label>
-            <label>reasoningEffort（任意）<input v-model="editingRule.reasoningEffort" /></label>
+            <label>model（任意）
+              <select v-model="editingRule.model" aria-label="model">
+                <option value="">未指定</option>
+                <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
+              </select>
+            </label>
+            <label>reasoningEffort（任意）
+              <select v-model="editingRule.reasoningEffort" aria-label="reasoningEffort">
+                <option v-for="option in reasoningEffortOptions" :key="option.value || 'default-effort'" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
           </div>
           <label>同時実行時の扱い
             <select v-model="editingRule.concurrencyPolicy">
