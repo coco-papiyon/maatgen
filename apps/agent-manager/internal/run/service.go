@@ -84,7 +84,7 @@ type Service struct {
 	checkpoints        CheckpointManager
 	pricing            PricingReader
 	approval           agent.ApprovalHandler
-	terminalObserver   func(protocol.AgentRun)
+	terminalObserver   func(protocol.AgentRun, string)
 }
 
 type Option func(*Service)
@@ -109,11 +109,14 @@ func WithApprovalHandler(handler agent.ApprovalHandler) Option {
 
 // WithTerminalObserver registers a callback invoked once, after every Run
 // (manual or automated) finishes and its terminal state is fully
-// persisted — completed, failed, or cancelled. It exists so other
+// persisted — completed, failed, or cancelled. The second argument is the
+// Run's session workspace (the same normalized repository path
+// RepositoryValidator.ValidateRepository returns). It exists so other
 // subsystems (the GitHub monitoring Outbox dispatcher; see
-// internal/githuboutbox) can track a Run they started without run.Service
-// needing to know anything about them.
-func WithTerminalObserver(observer func(protocol.AgentRun)) Option {
+// internal/githuboutbox) can track a Run they started, and so callers can
+// trigger a GitHub monitor sync for the repository the Run just finished
+// against, without run.Service needing to know anything about them.
+func WithTerminalObserver(observer func(protocol.AgentRun, string)) Option {
 	return func(service *Service) { service.terminalObserver = observer }
 }
 
@@ -260,12 +263,12 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 
 	checkpointID := "checkpoint_" + run.ID
 	if s.checkpoints == nil {
-		s.finishPersistenceFailure(run, errors.New("checkpoint manager is not configured"))
+		s.finishPersistenceFailure(run, session.Workspace, errors.New("checkpoint manager is not configured"))
 		return
 	}
 	before, err := s.checkpoints.Capture(context.WithoutCancel(ctx), session.Workspace, session.ID, run.ID, "before")
 	if err != nil {
-		s.finishPersistenceFailure(run, err)
+		s.finishPersistenceFailure(run, session.Workspace, err)
 		return
 	}
 	checkpointRecord := protocol.Checkpoint{
@@ -273,7 +276,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		IndexTree: before.IndexTree, BeforeTree: before.Tree, BeforeRef: before.Ref, CreatedAt: s.now().UTC(),
 	}
 	if err := s.store.CreateCheckpoint(context.WithoutCancel(ctx), checkpointRecord); err != nil {
-		s.finishPersistenceFailure(run, err)
+		s.finishPersistenceFailure(run, session.Workspace, err)
 		return
 	}
 	_, _ = s.appendEvent(context.WithoutCancel(ctx), session.ID, run.ID, protocol.EventSourceManager, protocol.EventTypeCheckpointCreated, map[string]any{
@@ -284,11 +287,11 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	run.Status = protocol.RunRunning
 	run.StartedAt = &startedAt
 	if err := s.store.UpdateRun(context.WithoutCancel(ctx), run); err != nil {
-		s.finishPersistenceFailure(run, err)
+		s.finishPersistenceFailure(run, session.Workspace, err)
 		return
 	}
 	if _, err := s.appendEvent(context.WithoutCancel(ctx), session.ID, run.ID, protocol.EventSourceManager, protocol.EventTypeRunStarted, map[string]any{}); err != nil {
-		s.finishPersistenceFailure(run, err)
+		s.finishPersistenceFailure(run, session.Workspace, err)
 		return
 	}
 
@@ -296,7 +299,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	var accumulatedUsage protocol.TokenUsage
 	adapter, configured := s.adapters[session.Agent]
 	if !configured {
-		s.finishPersistenceFailure(run, fmt.Errorf("agent %q is not configured", session.Agent))
+		s.finishPersistenceFailure(run, session.Workspace, fmt.Errorf("agent %q is not configured", session.Agent))
 		return
 	}
 	model := ""
@@ -493,7 +496,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	}
 	_ = s.store.UpdateRun(persistCtx, run)
 	if s.terminalObserver != nil {
-		s.terminalObserver(run)
+		s.terminalObserver(run, session.Workspace)
 	}
 	// Release the per-session execution slot before publishing the terminal event.
 	// The Web UI enables the composer as soon as it receives that event, so keeping
@@ -503,7 +506,7 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	_, _ = s.appendRawEvent(persistCtx, session.ID, run.ID, terminalSource, terminalType, terminalData)
 }
 
-func (s *Service) finishPersistenceFailure(run protocol.AgentRun, err error) {
+func (s *Service) finishPersistenceFailure(run protocol.AgentRun, workspace string, err error) {
 	finishedAt := s.now().UTC()
 	run.Status = protocol.RunFailed
 	run.FinishedAt = &finishedAt
@@ -512,7 +515,7 @@ func (s *Service) finishPersistenceFailure(run protocol.AgentRun, err error) {
 	defer cancel()
 	_ = s.store.UpdateRun(ctx, run)
 	if s.terminalObserver != nil {
-		s.terminalObserver(run)
+		s.terminalObserver(run, workspace)
 	}
 }
 

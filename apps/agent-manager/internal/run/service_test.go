@@ -288,9 +288,11 @@ func TestRunServiceTerminalObserverFiresOnCompletionAndFailure(t *testing.T) {
 	store, session := createRunTestStore(t)
 	var mu sync.Mutex
 	var observed []protocol.AgentRun
-	observer := func(run protocol.AgentRun) {
+	var observedWorkspaces []string
+	observer := func(run protocol.AgentRun, workspace string) {
 		mu.Lock()
 		observed = append(observed, run)
+		observedWorkspaces = append(observedWorkspaces, workspace)
 		mu.Unlock()
 	}
 	service := New(store, &fakeAdapter{}, WithCheckpointManager(&fakeCheckpointManager{}), WithTerminalObserver(observer))
@@ -316,6 +318,9 @@ func TestRunServiceTerminalObserverFiresOnCompletionAndFailure(t *testing.T) {
 	defer mu.Unlock()
 	if len(observed) != 1 || observed[0].ID != run.ID || observed[0].Status != protocol.RunCompleted {
 		t.Fatalf("observed = %#v", observed)
+	}
+	if len(observedWorkspaces) != 1 || observedWorkspaces[0] != session.Workspace {
+		t.Fatalf("observedWorkspaces = %#v, want [%q]", observedWorkspaces, session.Workspace)
 	}
 }
 
