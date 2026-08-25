@@ -278,6 +278,26 @@ type SourceStats struct {
 	Total     SourceStatsLanguage   `json:"total"`
 }
 
+// WorkspaceFileNode is one entry in a workspace directory listing. Listings
+// are non-recursive: a directory's HasChildren hint tells the client whether
+// it's worth requesting that directory's contents on demand.
+type WorkspaceFileNode struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Type        string `json:"type"` // "dir" | "file"
+	HasChildren bool   `json:"hasChildren,omitempty"`
+}
+
+// WorkspaceFileContent is the text content of a single workspace file.
+// Binary files are reported with Binary=true and no Content, and files
+// beyond the read size limit are truncated with Truncated=true.
+type WorkspaceFileContent struct {
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	Binary    bool   `json:"binary"`
+	Truncated bool   `json:"truncated"`
+}
+
 type EventSource string
 
 const (

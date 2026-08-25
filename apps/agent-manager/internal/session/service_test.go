@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -87,6 +89,125 @@ func TestCloseSessionRejectsActiveRunAndCleansCheckpointRefs(t *testing.T) {
 	}
 	if closed.Status != protocol.SessionClosed || repositories.cleaned != "session-1" {
 		t.Fatalf("closed=%#v cleanup=%q", closed, repositories.cleaned)
+	}
+}
+
+func TestGetWorkspaceFileTreeListsTopLevelAndSkipsExcludedDirs(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "node_modules"))
+	mustWriteFile(t, filepath.Join(root, "node_modules", "ignored.js"), "ignored")
+	mustMkdir(t, filepath.Join(root, "src"))
+	mustWriteFile(t, filepath.Join(root, "src", "index.ts"), "export {};\n")
+	mustMkdir(t, filepath.Join(root, "empty"))
+	mustWriteFile(t, filepath.Join(root, "README.md"), "# hello\n")
+
+	store := &fakeStore{session: protocol.AgentSession{ID: "session-1", Workspace: root}}
+	service := New(store, &fakeRepositoryManager{root: root})
+	nodes, err := service.GetWorkspaceFileTree(context.Background(), "session-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 3 {
+		t.Fatalf("nodes = %#v", nodes)
+	}
+	// Directories sort before files, so "empty" and "src" come before "README.md".
+	if nodes[0].Name != "empty" || nodes[0].Type != "dir" || nodes[0].HasChildren {
+		t.Fatalf("nodes[0] = %#v", nodes[0])
+	}
+	if nodes[1].Name != "src" || nodes[1].Type != "dir" || !nodes[1].HasChildren {
+		t.Fatalf("nodes[1] = %#v", nodes[1])
+	}
+	if nodes[2].Name != "README.md" || nodes[2].Type != "file" {
+		t.Fatalf("nodes[2] = %#v", nodes[2])
+	}
+}
+
+func TestGetWorkspaceFileTreeListsSubdirectoryOnDemand(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "src"))
+	mustWriteFile(t, filepath.Join(root, "src", "index.ts"), "export {};\n")
+	mustMkdir(t, filepath.Join(root, "src", "nested"))
+	mustWriteFile(t, filepath.Join(root, "src", "nested", "deep.ts"), "export {};\n")
+
+	store := &fakeStore{session: protocol.AgentSession{ID: "session-1", Workspace: root}}
+	service := New(store, &fakeRepositoryManager{root: root})
+	nodes, err := service.GetWorkspaceFileTree(context.Background(), "session-1", "src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 2 || nodes[0].Path != "src/nested" || !nodes[0].HasChildren || nodes[1].Path != "src/index.ts" {
+		t.Fatalf("nodes = %#v", nodes)
+	}
+}
+
+func TestGetWorkspaceFileTreeRejectsPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "sub"))
+
+	store := &fakeStore{session: protocol.AgentSession{ID: "session-1", Workspace: root}}
+	service := New(store, &fakeRepositoryManager{root: root})
+	if _, err := service.GetWorkspaceFileTree(context.Background(), "session-1", "../../../../etc"); err == nil {
+		t.Fatal("expected an error for a path escaping the workspace")
+	}
+}
+
+func TestReadWorkspaceFileReturnsContent(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "docs"))
+	mustWriteFile(t, filepath.Join(root, "docs", "notes.md"), "# Notes\n")
+
+	store := &fakeStore{session: protocol.AgentSession{ID: "session-1", Workspace: root}}
+	service := New(store, &fakeRepositoryManager{root: root})
+	content, err := service.ReadWorkspaceFile(context.Background(), "session-1", "docs/notes.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content.Content != "# Notes\n" || content.Binary || content.Truncated {
+		t.Fatalf("content = %#v", content)
+	}
+}
+
+func TestReadWorkspaceFileRejectsPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	secretDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(secretDir, "secret.txt"), "top secret")
+	mustMkdir(t, filepath.Join(root, "sub"))
+
+	store := &fakeStore{session: protocol.AgentSession{ID: "session-1", Workspace: root}}
+	service := New(store, &fakeRepositoryManager{root: root})
+	// path.Clean anchors ".." against a synthetic root, so escaping segments
+	// collapse rather than reaching outside the workspace.
+	if _, err := service.ReadWorkspaceFile(context.Background(), "session-1", "../../../../etc/passwd"); err == nil {
+		t.Fatal("expected an error for a path escaping the workspace")
+	}
+}
+
+func TestReadWorkspaceFileDetectsBinary(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "binary.dat"), "\x00\x01\x02binary")
+
+	store := &fakeStore{session: protocol.AgentSession{ID: "session-1", Workspace: root}}
+	service := New(store, &fakeRepositoryManager{root: root})
+	content, err := service.ReadWorkspaceFile(context.Background(), "session-1", "binary.dat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !content.Binary || content.Content != "" {
+		t.Fatalf("content = %#v", content)
+	}
+}
+
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

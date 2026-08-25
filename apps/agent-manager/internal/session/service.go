@@ -6,13 +6,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
@@ -171,6 +174,157 @@ func (s *Service) SearchWorkspaceFiles(ctx context.Context, sessionID, query str
 		return nil, err
 	}
 	return searchFiles(session.Workspace, strings.ToLower(strings.TrimSpace(query)), 2000, 20), nil
+}
+
+// maxWorkspaceTreeNodes bounds how many entries GetWorkspaceFileTree will
+// return for a single directory, so an unusually large directory can't
+// produce an unbounded response.
+const maxWorkspaceTreeNodes = 5000
+
+// maxWorkspaceFileBytes bounds how much of a file ReadWorkspaceFile reads,
+// so opening an accidental multi-gigabyte file can't exhaust memory.
+const maxWorkspaceFileBytes = 1 << 20 // 1 MiB
+
+var excludedWorkspaceDirs = map[string]bool{
+	"node_modules": true, ".git": true, "dist": true, "out": true, "build": true,
+	".next": true, "coverage": true, ".venv": true, "__pycache__": true,
+}
+
+// GetWorkspaceFileTree lists the immediate contents of a directory within a
+// session's workspace (relPath == "" lists the workspace root). It does not
+// recurse: callers fetch a subdirectory's contents on demand, using the
+// HasChildren hint to avoid a request for directories known to be empty.
+func (s *Service) GetWorkspaceFileTree(ctx context.Context, sessionID, relPath string) ([]protocol.WorkspaceFileNode, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("%w: session ID is required", ErrInvalidRequest)
+	}
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	cleanPath := cleanWorkspaceRelPath(relPath)
+	dir := session.Workspace
+	if cleanPath != "" {
+		dir = filepath.Join(session.Workspace, filepath.FromSlash(cleanPath))
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir() != entries[j].IsDir() {
+			return entries[i].IsDir()
+		}
+		return strings.ToLower(entries[i].Name()) < strings.ToLower(entries[j].Name())
+	})
+	nodes := make([]protocol.WorkspaceFileNode, 0, len(entries))
+	for _, entry := range entries {
+		if len(nodes) >= maxWorkspaceTreeNodes {
+			break
+		}
+		if entry.IsDir() && excludedWorkspaceDirs[entry.Name()] {
+			continue
+		}
+		childPath := entry.Name()
+		if cleanPath != "" {
+			childPath = cleanPath + "/" + entry.Name()
+		}
+		if entry.IsDir() {
+			nodes = append(nodes, protocol.WorkspaceFileNode{
+				Name: entry.Name(), Path: childPath, Type: "dir",
+				HasChildren: directoryHasVisibleEntries(filepath.Join(dir, entry.Name())),
+			})
+			continue
+		}
+		nodes = append(nodes, protocol.WorkspaceFileNode{Name: entry.Name(), Path: childPath, Type: "file"})
+	}
+	return nodes, nil
+}
+
+func directoryHasVisibleEntries(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && excludedWorkspaceDirs[entry.Name()] {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// cleanWorkspaceRelPath cleans a client-supplied relative path against a
+// synthetic root, so "../" segments collapse instead of escaping the
+// workspace once joined with it. An empty/whitespace input maps to "".
+func cleanWorkspaceRelPath(relPath string) string {
+	trimmed := strings.TrimSpace(relPath)
+	if trimmed == "" {
+		return ""
+	}
+	cleaned := strings.TrimPrefix(path.Clean("/"+filepath.ToSlash(trimmed)), "/")
+	if cleaned == "." {
+		return ""
+	}
+	return cleaned
+}
+
+// ReadWorkspaceFile returns the text content of a file within a session's
+// workspace. relPath is cleaned against a synthetic root before joining it
+// with the workspace directory, so "../" segments can't escape it.
+func (s *Service) ReadWorkspaceFile(ctx context.Context, sessionID, relPath string) (protocol.WorkspaceFileContent, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return protocol.WorkspaceFileContent{}, fmt.Errorf("%w: session ID is required", ErrInvalidRequest)
+	}
+	cleanPath := cleanWorkspaceRelPath(relPath)
+	if cleanPath == "" {
+		return protocol.WorkspaceFileContent{}, fmt.Errorf("%w: file path is required", ErrInvalidRequest)
+	}
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return protocol.WorkspaceFileContent{}, err
+	}
+	absPath := filepath.Join(session.Workspace, filepath.FromSlash(cleanPath))
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return protocol.WorkspaceFileContent{}, err
+	}
+	if info.IsDir() {
+		return protocol.WorkspaceFileContent{}, fmt.Errorf("%w: path is a directory", ErrInvalidRequest)
+	}
+	file, err := os.Open(absPath)
+	if err != nil {
+		return protocol.WorkspaceFileContent{}, err
+	}
+	defer file.Close()
+	truncated := info.Size() > maxWorkspaceFileBytes
+	readSize := info.Size()
+	if truncated {
+		readSize = maxWorkspaceFileBytes
+	}
+	buffer := make([]byte, readSize)
+	n, err := io.ReadFull(file, buffer)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return protocol.WorkspaceFileContent{}, err
+	}
+	data := buffer[:n]
+	if isBinaryContent(data) {
+		return protocol.WorkspaceFileContent{Path: cleanPath, Binary: true}, nil
+	}
+	return protocol.WorkspaceFileContent{Path: cleanPath, Content: string(data), Truncated: truncated}, nil
+}
+
+func isBinaryContent(data []byte) bool {
+	if !utf8.Valid(data) {
+		return true
+	}
+	for _, b := range data {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func generateID() (string, error) {

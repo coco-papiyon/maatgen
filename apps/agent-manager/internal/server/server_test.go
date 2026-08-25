@@ -541,6 +541,62 @@ func TestGetSourceStatsAPI(t *testing.T) {
 	}
 }
 
+func TestGetWorkspaceTreeAPI(t *testing.T) {
+	session := protocol.AgentSession{ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repo", Status: protocol.SessionActive, CreatedAt: time.Now()}
+	sessions := &fakeSessionReader{sessions: []protocol.AgentSession{session}}
+	reader := &fakeWorkspaceReader{tree: []protocol.WorkspaceFileNode{
+		{Name: "src", Path: "src", Type: "dir", HasChildren: true},
+		{Name: "README.md", Path: "README.md", Type: "file"},
+	}}
+	config := testConfig()
+	config.WorkspaceReader = reader
+	recorder := httptest.NewRecorder()
+	New(config, sessions, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodGet, "/api/v1/sessions/session-1/workspace-tree?path=src"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response workspaceTreeResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Nodes) != 2 || response.Nodes[0].Name != "src" || !response.Nodes[0].HasChildren || reader.sessionID != "session-1" || reader.path != "src" {
+		t.Fatalf("response = %#v", response)
+	}
+
+	notFound := httptest.NewRecorder()
+	New(config, sessions, nil).Handler().ServeHTTP(notFound, apiRequest(http.MethodGet, "/api/v1/sessions/missing/workspace-tree"))
+	if notFound.Code != http.StatusNotFound {
+		t.Fatalf("not found status = %d", notFound.Code)
+	}
+}
+
+func TestGetWorkspaceFileAPI(t *testing.T) {
+	session := protocol.AgentSession{ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repo", Status: protocol.SessionActive, CreatedAt: time.Now()}
+	sessions := &fakeSessionReader{sessions: []protocol.AgentSession{session}}
+	reader := &fakeWorkspaceReader{content: protocol.WorkspaceFileContent{Path: "README.md", Content: "# hi\n"}}
+	config := testConfig()
+	config.WorkspaceReader = reader
+	recorder := httptest.NewRecorder()
+	New(config, sessions, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodGet, "/api/v1/sessions/session-1/workspace-file?path=README.md"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response protocol.WorkspaceFileContent
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Content != "# hi\n" || reader.path != "README.md" {
+		t.Fatalf("response = %#v", response)
+	}
+
+	reader.err = sessionservice.ErrInvalidRequest
+	badRequest := httptest.NewRecorder()
+	New(config, sessions, nil).Handler().ServeHTTP(badRequest, apiRequest(http.MethodGet, "/api/v1/sessions/session-1/workspace-file?path="))
+	if badRequest.Code != http.StatusBadRequest {
+		t.Fatalf("bad request status = %d", badRequest.Code)
+	}
+}
+
 func TestGetUsageSummaryAPI(t *testing.T) {
 	reader := &fakeUsageSummaryReader{
 		summary: protocol.UsageSummary{
@@ -799,6 +855,33 @@ func (f *fakeSourceStatsReader) GetSourceStats(_ context.Context, sessionID stri
 }
 
 var _ SourceStatsReader = (*fakeSourceStatsReader)(nil)
+
+type fakeWorkspaceReader struct {
+	sessionID string
+	query     string
+	path      string
+	files     []string
+	tree      []protocol.WorkspaceFileNode
+	content   protocol.WorkspaceFileContent
+	err       error
+}
+
+func (f *fakeWorkspaceReader) SearchWorkspaceFiles(_ context.Context, sessionID, query string) ([]string, error) {
+	f.sessionID, f.query = sessionID, query
+	return f.files, f.err
+}
+
+func (f *fakeWorkspaceReader) GetWorkspaceFileTree(_ context.Context, sessionID, path string) ([]protocol.WorkspaceFileNode, error) {
+	f.sessionID, f.path = sessionID, path
+	return f.tree, f.err
+}
+
+func (f *fakeWorkspaceReader) ReadWorkspaceFile(_ context.Context, sessionID, path string) (protocol.WorkspaceFileContent, error) {
+	f.sessionID, f.path = sessionID, path
+	return f.content, f.err
+}
+
+var _ WorkspaceReader = (*fakeWorkspaceReader)(nil)
 
 type fakeUsageSummaryReader struct {
 	granularity string

@@ -21,7 +21,7 @@ import type {
   UsageSummary,
   WsTicketResponse,
 } from '@maatgen/protocol';
-import { AgentApiError, type AgentApi, type GitHubItemQuery, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from '../api';
+import { AgentApiError, type AgentApi, type GitHubItemQuery, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from '../api';
 import type { EventStreamFactory } from '../event-stream';
 
 const GITHUB_DEMO_WORKSPACE = 'C:/demo/current-repository';
@@ -397,6 +397,18 @@ export class MockAgentApi implements AgentApi {
     return [];
   }
 
+  async getWorkspaceFileTree(id: string, path = ''): Promise<WorkspaceFileNode[]> {
+    this.requireSession(id);
+    return clone(mockWorkspaceDirectory(path));
+  }
+
+  async readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContent> {
+    this.requireSession(id);
+    const content = mockWorkspaceFileContents()[path];
+    if (content === undefined) throw new AgentApiError('file was not found', 404, 'not_found');
+    return clone({ path, content, binary: false, truncated: false });
+  }
+
   async resolveGitHubRepository(workspace: string): Promise<GitHubRepositoryResolution> {
     const selected = workspace === GITHUB_DEMO_WORKSPACE
       ? { host: 'github.com', owner: 'octo-demo', name: 'example-repo', remoteName: 'origin' }
@@ -634,6 +646,30 @@ function emptyChanges(sessionId: string): ChangeSet {
 
 function emptySourceStats(sessionId: string): SourceStats {
   return { sessionId, languages: [], total: { language: '', files: 0, blank: 0, comment: 0, code: 0 } };
+}
+
+function mockWorkspaceDirectory(path: string): WorkspaceFileNode[] {
+  const tree: Record<string, WorkspaceFileNode[]> = {
+    '': [
+      { name: 'src', path: 'src', type: 'dir', hasChildren: true },
+      { name: 'README.md', path: 'README.md', type: 'file' },
+      { name: 'package.json', path: 'package.json', type: 'file' },
+    ],
+    src: [
+      { name: 'auth.ts', path: 'src/auth.ts', type: 'file' },
+      { name: 'config.ts', path: 'src/config.ts', type: 'file' },
+    ],
+  };
+  return tree[path] ?? [];
+}
+
+function mockWorkspaceFileContents(): Record<string, string> {
+  return {
+    'src/auth.ts': 'export const enabled = true;\n',
+    'src/config.ts': 'export const timeout = 30;\nexport const retries = 2;\n',
+    'README.md': '# Mock Repository\n\nこれはWeb版のFileタブ用のモックデータです。\n\n- ツリー表示\n- Markdown変換表示\n',
+    'package.json': '{\n  "name": "mock-repo",\n  "version": "1.0.0"\n}\n',
+  };
 }
 
 function oneHunk(sessionId: string): ChangeSet {

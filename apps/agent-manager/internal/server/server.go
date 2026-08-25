@@ -85,6 +85,8 @@ type SessionReopener interface {
 
 type WorkspaceReader interface {
 	SearchWorkspaceFiles(ctx context.Context, sessionID string, query string) ([]string, error)
+	GetWorkspaceFileTree(ctx context.Context, sessionID string, path string) ([]protocol.WorkspaceFileNode, error)
+	ReadWorkspaceFile(ctx context.Context, sessionID string, path string) (protocol.WorkspaceFileContent, error)
 }
 
 type RunController interface {
@@ -148,6 +150,10 @@ type eventListResponse struct {
 
 type workspaceFilesResponse struct {
 	Files []string `json:"files"`
+}
+
+type workspaceTreeResponse struct {
+	Nodes []protocol.WorkspaceFileNode `json:"nodes"`
 }
 
 func New(config Config, sessions SessionReader, events EventReader) *Server {
@@ -378,6 +384,33 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			}
 			writeJSON(w, http.StatusOK, workspaceFilesResponse{Files: files})
 		}))
+		mux.Handle("GET /api/v1/sessions/{id}/workspace-tree", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			nodes, err := config.WorkspaceReader.GetWorkspaceFileTree(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"))
+			if err != nil {
+				writeWorkspaceFileError(w, err)
+				return
+			}
+			if nodes == nil {
+				nodes = []protocol.WorkspaceFileNode{}
+			}
+			writeJSON(w, http.StatusOK, workspaceTreeResponse{Nodes: nodes})
+		}))
+		mux.Handle("GET /api/v1/sessions/{id}/workspace-file", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			content, err := config.WorkspaceReader.ReadWorkspaceFile(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"))
+			if err != nil {
+				writeWorkspaceFileError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, content)
+		}))
 	}
 	if sessions != nil && config.UsageReader != nil {
 		mux.Handle("GET /api/v1/sessions/{id}/usage", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -605,6 +638,17 @@ func writeStorageError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeAPIError(w, http.StatusInternalServerError, "internal_error", "an internal error occurred", nil)
+}
+
+func writeWorkspaceFileError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, sessionservice.ErrInvalidRequest):
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
+	case errors.Is(err, fs.ErrNotExist):
+		writeAPIError(w, http.StatusNotFound, "not_found", "file was not found", nil)
+	default:
+		writeAPIError(w, http.StatusInternalServerError, "workspace_file_failed", "failed to read workspace file", nil)
+	}
 }
 
 func writeSessionCreateError(w http.ResponseWriter, err error) {

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, ProviderUsage, SessionEvent, TokenUsage, ApprovalDecision, UsageSummary } from '@maatgen/protocol';
-import { httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from './api';
+import { httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
 import { githubWorkspace } from './github/workspace';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import { renderMarkdown } from './markdown';
 import UsageBarChart, { type UsageSeriesDef, type UsageStackedPeriod } from './UsageBarChart.vue';
+import FileTree from './FileTree.vue';
 
 const USAGE_PROVIDER_ORDER = ['codex', 'claude', 'copilot'] as const;
 const USAGE_PROVIDER_COLORS: Record<(typeof USAGE_PROVIDER_ORDER)[number], string> = {
@@ -77,11 +78,19 @@ const streamState = ref<EventStreamState>('disconnected');
 const diagnostic = ref<{ kind: 'manager' | 'codex' | 'claude' | 'copilot'; title: string; message: string }>();
 const selectedChangeId = ref('');
 const selectedRunId = ref('');
-type SidePanel = 'usage' | 'changes' | 'sourceStats';
+type SidePanel = 'usage' | 'changes' | 'sourceStats' | 'files';
 const storedSidePanel = localStorage.getItem('maatgen.sidePanel');
 const activeSidePanel = ref<SidePanel>(
-  storedSidePanel === 'usage' || storedSidePanel === 'sourceStats' ? storedSidePanel : 'changes',
+  storedSidePanel === 'usage' || storedSidePanel === 'sourceStats' || storedSidePanel === 'files' ? storedSidePanel : 'changes',
 );
+const fileTree = ref<WorkspaceFileNode[]>([]);
+const fileTreeSessionId = ref('');
+const fileTreeLoading = ref(false);
+const fileTreeError = ref('');
+const viewingFilePath = ref('');
+const viewingFileContent = ref<WorkspaceFileContent>();
+const viewingFileLoading = ref(false);
+const viewingFileError = ref('');
 const showSystemMessages = ref(localStorage.getItem('maatgen.showSystemMessages') === 'true');
 const usageSummaryOpen = ref(false);
 const usageSummaryGranularity = ref<UsageGranularity>('day');
@@ -112,6 +121,8 @@ const isActive = computed(() => selected.value?.status === 'active');
 const isClosed = computed(() => selected.value?.status === 'closed');
 const selectedChange = computed(() => changes.value.files.find((file) => file.id === selectedChangeId.value));
 const selectedRunEntry = computed(() => usage.value.runs.find((entry) => entry.run.id === selectedRunId.value));
+const viewingFileIsMarkdown = computed(() => /\.mdx?$/i.test(viewingFilePath.value));
+const viewingFileHtml = computed(() => (viewingFileContent.value ? renderMarkdown(viewingFileContent.value.content) : ''));
 const usageSeries = computed<UsageSeriesDef[]>(() => {
   if (usageSummaryData.value.seriesBy === 'model') {
     const models = usageSummaryModels.value.slice(0, USAGE_MODEL_COLORS.length);
@@ -232,9 +243,53 @@ function toggleSystemMessages() {
   localStorage.setItem('maatgen.showSystemMessages', String(showSystemMessages.value));
 }
 
-function selectSidePanel(panel: SidePanel) {
+async function selectSidePanel(panel: SidePanel) {
   activeSidePanel.value = panel;
   localStorage.setItem('maatgen.sidePanel', panel);
+  if (panel === 'files') await loadFileTree();
+}
+
+async function loadFileTree() {
+  if (!selected.value) return;
+  if (fileTreeSessionId.value === selected.value.id) return;
+  const sessionId = selected.value.id;
+  fileTreeLoading.value = true;
+  fileTreeError.value = '';
+  try {
+    fileTree.value = await api.getWorkspaceFileTree(sessionId, '');
+    fileTreeSessionId.value = sessionId;
+  } catch (cause) {
+    fileTreeError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    fileTreeLoading.value = false;
+  }
+}
+
+function loadWorkspaceDirectory(path: string): Promise<WorkspaceFileNode[]> {
+  if (!selected.value) return Promise.resolve([]);
+  return api.getWorkspaceFileTree(selected.value.id, path);
+}
+
+async function openWorkspaceFile(path: string) {
+  if (!selected.value) return;
+  selectedRunId.value = '';
+  viewingFilePath.value = path;
+  viewingFileContent.value = undefined;
+  viewingFileError.value = '';
+  viewingFileLoading.value = true;
+  try {
+    viewingFileContent.value = await api.readWorkspaceFile(selected.value.id, path);
+  } catch (cause) {
+    viewingFileError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    viewingFileLoading.value = false;
+  }
+}
+
+function closeFileView() {
+  viewingFilePath.value = '';
+  viewingFileContent.value = undefined;
+  viewingFileError.value = '';
 }
 
 function selectRun(runId: string) {
@@ -517,6 +572,10 @@ async function selectSession(session: AgentSession) {
   activeRun.value = undefined;
   error.value = '';
   diagnostic.value = undefined;
+  fileTree.value = [];
+  fileTreeSessionId.value = '';
+  fileTreeError.value = '';
+  closeFileView();
   await refreshSelected(true);
   markSessionRead(session.id, events.value.at(-1)?.sequence ?? 0);
   // Counted once at session creation, so fetch it once here rather than on every poll.
@@ -529,6 +588,7 @@ async function selectSession(session: AgentSession) {
   if (selected.value?.id === session.id && selected.value.status === 'active') {
     startEventStream(session.id);
   }
+  if (activeSidePanel.value === 'files') await loadFileTree();
 }
 
 async function persistSelectedModel() {
@@ -1039,7 +1099,31 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
       </section>
       <div v-else-if="error" class="error-banner" role="alert">{{ error }}</div>
 
-       <section v-if="selected && !selectedRunId" ref="timelineElement" class="timeline" aria-live="polite">
+       <section v-if="selected && viewingFilePath" class="file-view" aria-live="polite">
+         <header class="file-view-header">
+           <div>
+             <p class="eyebrow">FILE</p>
+             <h2>{{ viewingFilePath }}</h2>
+           </div>
+           <button type="button" class="quiet-button" @click="closeFileView">チャットに戻る</button>
+         </header>
+         <div class="file-view-body">
+           <div v-if="viewingFileLoading" class="empty-state compact">
+             <span class="empty-symbol">⌁</span>
+             <p>読み込み中…</p>
+           </div>
+           <div v-else-if="viewingFileError" class="error-banner" role="alert">{{ viewingFileError }}</div>
+           <div v-else-if="viewingFileContent?.binary" class="empty-state compact">
+             <span class="empty-symbol">◇</span>
+             <p>バイナリファイルは表示できません</p>
+           </div>
+           <div v-else-if="viewingFileIsMarkdown" class="markdown-body file-view-markdown" v-html="viewingFileHtml" />
+           <pre v-else class="file-view-source">{{ viewingFileContent?.content }}</pre>
+           <p v-if="viewingFileContent?.truncated" class="file-view-truncated">ファイルサイズが大きいため、一部のみ表示しています。</p>
+         </div>
+       </section>
+
+       <section v-else-if="selected && !selectedRunId" ref="timelineElement" class="timeline" aria-live="polite">
         <div v-if="visibleEvents.length === 0" class="empty-state compact">
           <span class="empty-symbol">⌁</span>
           <h2>{{ providerLabel }}に最初の指示を送る</h2>
@@ -1149,6 +1233,9 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
         <button id="source-stats-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'sourceStats'" :class="{ selected: activeSidePanel === 'sourceStats' }" @click="selectSidePanel('sourceStats')">
           Source <span class="tab-count">{{ sourceStats.total.files }}</span>
         </button>
+        <button id="files-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'files'" :class="{ selected: activeSidePanel === 'files' }" @click="selectSidePanel('files')">
+          Files <span class="tab-count">{{ fileTree.length }}</span>
+        </button>
       </div>
       <div v-if="activeSidePanel === 'usage'" id="usage-panel" class="usage-section" role="tabpanel" aria-labelledby="usage-tab">
         <div class="section-heading">
@@ -1218,7 +1305,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
       </div>
       <div v-else class="no-changes"><span>◇</span><p>変更はまだありません</p><small>Run完了後にGit差分が表示されます。</small></div>
       </div>
-      <div v-else id="source-stats-panel" class="source-stats-section" role="tabpanel" aria-labelledby="source-stats-tab">
+      <div v-else-if="activeSidePanel === 'sourceStats'" id="source-stats-panel" class="source-stats-section" role="tabpanel" aria-labelledby="source-stats-tab">
         <div class="section-heading">
          <span>Source</span><span class="count accent">{{ sourceStats.total.files }}</span>
         </div>
@@ -1234,6 +1321,15 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           </div>
         </div>
         <div v-else class="no-changes"><span>◇</span><p>Source stats have not been measured yet</p><small>Files tracked by Git are not counted, or cloc is not installed, or measurement is still in progress.</small></div>
+      </div>
+      <div v-else id="files-panel" class="files-section" role="tabpanel" aria-labelledby="files-tab">
+        <div class="section-heading">
+          <span>Files</span><span class="count accent">{{ fileTree.length }}</span>
+        </div>
+        <div v-if="fileTreeLoading" class="no-changes"><span>◇</span><p>読み込み中…</p></div>
+        <div v-else-if="fileTreeError" class="error-banner" role="alert">{{ fileTreeError }}</div>
+        <FileTree v-else-if="fileTree.length" :nodes="fileTree" :selected-path="viewingFilePath" :load-children="loadWorkspaceDirectory" @select="openWorkspaceFile" />
+        <div v-else class="no-changes"><span>◇</span><p>ファイルがありません</p></div>
       </div>
     </aside>
 

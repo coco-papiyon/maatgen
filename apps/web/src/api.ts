@@ -54,6 +54,20 @@ export interface SourceStats {
   total: SourceStatsLanguage;
 }
 
+export interface WorkspaceFileNode {
+  name: string;
+  path: string;
+  type: 'dir' | 'file';
+  hasChildren?: boolean;
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  content: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
 export interface GitHubItemQuery {
   state?: 'open' | 'closed' | 'all';
   assignee?: string;
@@ -90,6 +104,8 @@ export interface AgentApi {
   restoreFile(sessionId: string, checkpointId: string, fileId: string): Promise<ChangeSet>;
   restoreAllChanges(sessionId: string, checkpointId: string): Promise<ChangeSet>;
   searchWorkspaceFiles(sessionId: string, query: string): Promise<string[]>;
+  getWorkspaceFileTree(sessionId: string, path?: string): Promise<WorkspaceFileNode[]>;
+  readWorkspaceFile(sessionId: string, path: string): Promise<WorkspaceFileContent>;
 
   // GitHub monitoring (ADR-007).
   resolveGitHubRepository(workspace: string): Promise<GitHubRepositoryResolution>;
@@ -252,6 +268,16 @@ export const httpAgentApi: AgentApi = {
       `/api/v1/sessions/${encodeURIComponent(sessionId)}/workspace-files?query=${encodeURIComponent(query)}`,
     );
     return response.files;
+  },
+  async getWorkspaceFileTree(sessionId, path = '') {
+    const query = path ? `?path=${encodeURIComponent(path)}` : '';
+    const response = await request<{ nodes: WorkspaceFileNode[] }>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/workspace-tree${query}`,
+    );
+    return response.nodes;
+  },
+  readWorkspaceFile(sessionId, path) {
+    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/workspace-file?path=${encodeURIComponent(path)}`);
   },
 
   resolveGitHubRepository(workspace) {

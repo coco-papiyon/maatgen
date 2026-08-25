@@ -234,6 +234,42 @@ describe('App with MockAgentApi', () => {
     expect(text).toContain('TypeScript');
   });
 
+  it('shows a file tree in the Files tab and renders markdown files in the center pane', async () => {
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#files-tab').trigger('click');
+    await flushPromises();
+    expect(mounted.wrapper.find('#files-panel').exists()).toBe(true);
+    expect(mounted.wrapper.find('#changes-panel').exists()).toBe(false);
+    expect(mounted.wrapper.find('#files-tab').attributes('aria-selected')).toBe('true');
+    expect(mounted.wrapper.find('.file-tree').text()).toContain('README.md');
+
+    const readmeButton = mounted.wrapper.findAll('.file-tree-file').find((item) => item.text() === 'README.md')!;
+    await readmeButton.trigger('click');
+    await flushPromises();
+
+    expect(mounted.wrapper.find('.file-view').exists()).toBe(true);
+    expect(mounted.wrapper.find('.timeline').exists()).toBe(false);
+    expect(mounted.wrapper.find('.file-view-markdown').html()).toContain('<h1');
+
+    await mounted.wrapper.find('.file-view .quiet-button').trigger('click');
+    expect(mounted.wrapper.find('.file-view').exists()).toBe(false);
+    expect(mounted.wrapper.find('.timeline').exists()).toBe(true);
+  });
+
+  it('renders non-markdown files as plain source text', async () => {
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#files-tab').trigger('click');
+    await flushPromises();
+    await mounted.wrapper.find('.file-tree-dir').trigger('click');
+    await flushPromises();
+    const authButton = mounted.wrapper.findAll('.file-tree-file').find((item) => item.text() === 'auth.ts')!;
+    await authButton.trigger('click');
+    await flushPromises();
+
+    expect(mounted.wrapper.find('.file-view-markdown').exists()).toBe(false);
+    expect(mounted.wrapper.find('.file-view-source').text()).toContain('export const enabled = true;');
+  });
+
   it('opens Run details in the central pane and returns to the chat', async () => {
     const mounted = await mountApp();
     await mounted.wrapper.find('#usage-tab').trigger('click');
