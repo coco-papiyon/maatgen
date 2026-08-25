@@ -84,7 +84,23 @@ describe('GitHubSettingsView', () => {
     await flushPromises();
 
     const rules = await api.listGitHubTriggerRules(DEMO_WORKSPACE);
-    expect(rules.some((rule) => rule.name === '新しいルール')).toBe(true);
+    const rule = rules.find((candidate) => candidate.name === '新しいルール');
+    expect(rule?.priority).toBe('medium');
+  });
+
+  it("lets the user set a rule's priority", async () => {
+    const { wrapper, api } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+    await wrapper.get('.github-rule-form select').setValue(DEMO_WORKSPACE);
+    await wrapper.get('.github-rule-form input:not([disabled])').setValue('優先度ルール');
+    await wrapper.get('.github-rule-form textarea').setValue('Design {{.Title}}');
+    const prioritySelect = wrapper.findAll('.github-rule-form select').find((select) => select.text().includes('高'));
+    await prioritySelect!.setValue('high');
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const rule = (await api.listGitHubTriggerRules(DEMO_WORKSPACE)).find((candidate) => candidate.name === '優先度ルール');
+    expect(rule?.priority).toBe('high');
   });
 
   it('opens rule creation in a dialog and saves assignee and PR reviewer filters', async () => {
@@ -124,7 +140,7 @@ describe('GitHubSettingsView', () => {
     expect(reasoningEffortOptions).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max']);
   });
 
-  it('clears the selected model when switching providers away from a model it does not offer, but keeps an out-of-list saved model until the provider changes', async () => {
+  it('clears the selected model when switching providers away from a model it does not offer', async () => {
     const { wrapper, api } = await mountSettings();
     await wrapper.get('.github-card-header button').trigger('click');
     await wrapper.get('.github-rule-form select').setValue(DEMO_WORKSPACE);
@@ -143,6 +159,42 @@ describe('GitHubSettingsView', () => {
 
     await wrapper.get('select[aria-label="Provider"]').setValue('claude');
     expect((wrapper.get('select[aria-label="model"]').element as HTMLSelectElement).value).toBe('');
+  });
+
+  it('shows an out-of-list saved model/reasoningEffort as a selected option and keeps it unchanged when saving', async () => {
+    const api = new MockAgentApi();
+    await api.createGitHubTriggerRule({
+      workspace: DEMO_WORKSPACE,
+      name: '旧モデルルール',
+      enabled: true,
+      eventKinds: ['issue'],
+      filters: {},
+      promptTemplate: 'Design {{.Title}}',
+      includeBody: false,
+      provider: 'codex',
+      model: 'gpt-4-legacy',
+      reasoningEffort: 'ultra-legacy',
+      concurrencyPolicy: 'coalesce',
+      priority: 'medium',
+    });
+    const { wrapper } = await mountSettings(api);
+
+    await wrapper.get('.github-rule-list li:last-child button').trigger('click');
+
+    const modelSelect = wrapper.get('select[aria-label="model"]');
+    expect((modelSelect.element as HTMLSelectElement).value).toBe('gpt-4-legacy');
+    expect(wrapper.findAll('select[aria-label="model"] option').map((option) => option.attributes('value'))).toContain('gpt-4-legacy');
+
+    const reasoningSelect = wrapper.get('select[aria-label="reasoningEffort"]');
+    expect((reasoningSelect.element as HTMLSelectElement).value).toBe('ultra-legacy');
+    expect(wrapper.findAll('select[aria-label="reasoningEffort"] option').map((option) => option.attributes('value'))).toContain('ultra-legacy');
+
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const saved = (await api.listGitHubTriggerRules()).find((rule) => rule.name === '旧モデルルール');
+    expect(saved?.model).toBe('gpt-4-legacy');
+    expect(saved?.reasoningEffort).toBe('ultra-legacy');
   });
 
   it('deletes a repository monitor after confirmation', async () => {

@@ -19,11 +19,11 @@ func (s *Store) CreateTriggerRule(ctx context.Context, rule protocol.GitHubTrigg
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO github_trigger_rules(
 		id, repository, name, enabled, event_kinds_json, filters_json, prompt_template, include_body,
-		provider, model, reasoning_effort, concurrency_policy, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		provider, model, reasoning_effort, concurrency_policy, priority, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rule.ID, rule.Repository, rule.Name, boolToInt(rule.Enabled), eventKinds, filters,
 		rule.PromptTemplate, boolToInt(rule.IncludeBody), rule.Provider, nullableString(rule.Model),
-		nullableString(rule.ReasoningEffort), rule.ConcurrencyPolicy, formatTime(rule.CreatedAt), formatTime(rule.UpdatedAt))
+		nullableString(rule.ReasoningEffort), rule.ConcurrencyPolicy, rule.Priority, formatTime(rule.CreatedAt), formatTime(rule.UpdatedAt))
 	if err != nil {
 		if isUniqueConstraintViolation(err) {
 			return storage.ErrConflict
@@ -41,11 +41,11 @@ func (s *Store) UpdateTriggerRule(ctx context.Context, rule protocol.GitHubTrigg
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE github_trigger_rules
 		SET name = ?, enabled = ?, event_kinds_json = ?, filters_json = ?, prompt_template = ?, include_body = ?,
-			provider = ?, model = ?, reasoning_effort = ?, concurrency_policy = ?, updated_at = ?
+			provider = ?, model = ?, reasoning_effort = ?, concurrency_policy = ?, priority = ?, updated_at = ?
 		WHERE id = ?`,
 		rule.Name, boolToInt(rule.Enabled), eventKinds, filters, rule.PromptTemplate, boolToInt(rule.IncludeBody),
 		rule.Provider, nullableString(rule.Model), nullableString(rule.ReasoningEffort),
-		rule.ConcurrencyPolicy, formatTime(rule.UpdatedAt), rule.ID)
+		rule.ConcurrencyPolicy, rule.Priority, formatTime(rule.UpdatedAt), rule.ID)
 	return updateResult("update github trigger rule", result, err)
 }
 
@@ -110,7 +110,7 @@ func (s *Store) DeleteTriggerRule(ctx context.Context, id string) error {
 }
 
 const triggerRuleSelect = `SELECT id, repository, name, enabled, event_kinds_json, filters_json,
-	prompt_template, include_body, provider, model, reasoning_effort, concurrency_policy, created_at, updated_at
+	prompt_template, include_body, provider, model, reasoning_effort, concurrency_policy, priority, created_at, updated_at
 	FROM github_trigger_rules`
 
 func encodeTriggerRuleJSON(rule protocol.GitHubTriggerRule) (eventKinds string, filters string, err error) {
@@ -133,7 +133,7 @@ func scanTriggerRule(row scanner) (protocol.GitHubTriggerRule, error) {
 	var createdAt, updatedAt string
 	if err := row.Scan(&rule.ID, &rule.Repository, &rule.Name, &enabled, &eventKinds, &filters,
 		&rule.PromptTemplate, &includeBody, &rule.Provider, &model, &reasoningEffort, &rule.ConcurrencyPolicy,
-		&createdAt, &updatedAt); err != nil {
+		&rule.Priority, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return protocol.GitHubTriggerRule{}, storage.ErrNotFound
 		}

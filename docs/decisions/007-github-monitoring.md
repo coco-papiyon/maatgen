@@ -91,6 +91,7 @@ interface GitHubTriggerRule {
   model?: string;
   reasoningEffort?: string;
   concurrencyPolicy: 'skip' | 'coalesce';
+  priority: 'high' | 'medium' | 'low';
   createdAt: string;
   updatedAt: string;
 }
@@ -141,6 +142,8 @@ Repository execution lockをAgent Managerに置き、Run開始前に取得する
 配信キーの作成は一意制約付きのトランザクションで行う。キーの登録に成功した監視評価だけがRunを起動し、既に存在するキーは無視する。Run起動の直前にManagerが停止しても、再起動時に未処理キーとRunの対応を復元できるよう、監視配信とRunの関連を永続化する。
 
 監視イベントとRunの作成はOutbox方式で扱う。監視イベントを保存するトランザクション内で、発火結果を`queued`として記録し、別のdispatcherが未処理イベントからSession／Runを作成する。作成後に`session_created`、`run_started`へ進めるため、Manager停止によって「重複排除キーだけが存在してRunがない」状態を作らない。
+
+`queued`イベントの実行順は、まずTrigger Ruleの`priority`（`high` > `medium` > `low`、既定値`medium`）で決まり、同一優先度内では検出順（FIFO）を維持する。優先度は`concurrencyPolicy`（ロック取得中の扱い）とは直交する概念であり、キューからの取り出し順だけに影響する。
 
 自動実行の状態はMaatgenのSQLiteデータベースを正とする。少なくとも、監視ルール、差分検出に必要な最小限の正規化観測状態、監視イベント、重複排除キー、発火結果、起動したRunとの関連、最後のエラーと時刻をMaatgen側に保存する。この観測状態は監視専用であり、Issue／PR一覧・詳細の表示モデルや永続キャッシュとして利用しない。監視イベントには`detected`、`matched`、`queued`、`session_created`、`run_started`、`skipped`、`completed`、`failed`、`cancelled`を使用し、Runの状態とは別に管理する。Manager再起動後も監視履歴と実行状態を復元できるようにする。
 

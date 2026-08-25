@@ -99,6 +99,7 @@ export type WsTicketResponse = GeneratedWsTicketResponse;
 export type GitHubItemKind = 'issue' | 'pull_request';
 export type GitHubItemState = 'open' | 'closed';
 export type GitHubConcurrencyPolicy = 'skip' | 'coalesce';
+export type GitHubJobPriority = 'high' | 'medium' | 'low';
 export type GitHubMonitorEventStatus =
   | 'detected'
   | 'matched'
@@ -215,6 +216,7 @@ export interface GitHubTriggerRule {
   model?: string;
   reasoningEffort?: string;
   concurrencyPolicy: GitHubConcurrencyPolicy;
+  priority: GitHubJobPriority;
   createdAt: string;
   updatedAt: string;
 }
@@ -289,6 +291,7 @@ export interface GitHubTriggerRuleRequest {
   model?: string;
   reasoningEffort?: string;
   concurrencyPolicy: GitHubConcurrencyPolicy;
+  priority: GitHubJobPriority;
 }
 
 export interface GitHubTriggerRuleListResponse {

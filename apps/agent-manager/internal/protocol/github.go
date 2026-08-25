@@ -137,6 +137,17 @@ const (
 	GitHubConcurrencyCoalesce GitHubConcurrencyPolicy = "coalesce"
 )
 
+// GitHubJobPriority orders queued jobs within the Outbox dispatcher (see
+// githuboutbox.Dispatcher.Tick): higher-priority jobs are dispatched before
+// lower-priority ones, with FIFO order preserved within the same priority.
+type GitHubJobPriority string
+
+const (
+	GitHubPriorityHigh   GitHubJobPriority = "high"
+	GitHubPriorityMedium GitHubJobPriority = "medium"
+	GitHubPriorityLow    GitHubJobPriority = "low"
+)
+
 // GitHubProjectFilterCondition matches a GitHubItem whose named Project
 // field currently holds value (e.g. project "Roadmap", field "Status",
 // value "Ready"). Items with no Project data yet fetched (see
@@ -194,6 +205,7 @@ type GitHubTriggerRule struct {
 	Model             *string                 `json:"model,omitempty"`
 	ReasoningEffort   *string                 `json:"reasoningEffort,omitempty"`
 	ConcurrencyPolicy GitHubConcurrencyPolicy `json:"concurrencyPolicy"`
+	Priority          GitHubJobPriority       `json:"priority"`
 	CreatedAt         time.Time               `json:"createdAt"`
 	UpdatedAt         time.Time               `json:"updatedAt"`
 }
@@ -332,6 +344,7 @@ type GitHubTriggerRuleRequest struct {
 	Model             *string                 `json:"model,omitempty"`
 	ReasoningEffort   *string                 `json:"reasoningEffort,omitempty"`
 	ConcurrencyPolicy GitHubConcurrencyPolicy `json:"concurrencyPolicy"`
+	Priority          GitHubJobPriority       `json:"priority"`
 }
 
 type GitHubTriggerRuleListResponse struct {

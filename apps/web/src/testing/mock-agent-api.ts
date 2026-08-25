@@ -481,6 +481,7 @@ export class MockAgentApi implements AgentApi {
       id, repository: request.workspace, name: request.name, enabled: request.enabled,
       eventKinds: request.eventKinds, filters: request.filters, promptTemplate: request.promptTemplate,
       includeBody: request.includeBody, provider: request.provider, concurrencyPolicy: request.concurrencyPolicy,
+      priority: request.priority,
       ...(request.model !== undefined ? { model: request.model } : {}),
       ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
       createdAt: now, updatedAt: now,
@@ -504,7 +505,7 @@ export class MockAgentApi implements AgentApi {
     const updated: GitHubTriggerRule = {
       ...existingRest, name: request.name, enabled: request.enabled, eventKinds: request.eventKinds,
       filters: request.filters, promptTemplate: request.promptTemplate, includeBody: request.includeBody,
-      provider: request.provider, concurrencyPolicy: request.concurrencyPolicy,
+      provider: request.provider, concurrencyPolicy: request.concurrencyPolicy, priority: request.priority,
       ...(request.model !== undefined ? { model: request.model } : {}),
       ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
       updatedAt: now,
@@ -741,12 +742,12 @@ function mockGitHubTriggerRules(): GitHubTriggerRule[] {
     id: 'mock-rule-1', repository: GITHUB_DEMO_WORKSPACE, name: 'Ready になったら設計する', enabled: true,
     eventKinds: ['issue'], filters: { project: { projectTitle: 'Roadmap', fieldName: 'Status', value: 'Ready' } },
     promptTemplate: 'Design {{.Title}} (#{{.Number}})\n\n{{.ExternalDataBlock}}', includeBody: false, provider: 'codex',
-    concurrencyPolicy: 'coalesce', createdAt: now, updatedAt: now,
+    concurrencyPolicy: 'coalesce', priority: 'medium', createdAt: now, updatedAt: now,
   }, {
     id: 'mock-rule-2', repository: GITHUB_DEMO_WORKSPACE, name: 'PRが作成されたらレビューする', enabled: true,
     eventKinds: ['pull_request'], filters: { actions: ['opened'] },
     promptTemplate: 'Review pull request #{{.Number}}: {{.Title}}', includeBody: false, provider: 'claude',
-    concurrencyPolicy: 'skip', createdAt: now, updatedAt: now,
+    concurrencyPolicy: 'skip', priority: 'high', createdAt: now, updatedAt: now,
   }];
 }
 
