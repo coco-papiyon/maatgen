@@ -1,8 +1,6 @@
 package runtimeinfo
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,18 +11,9 @@ import (
 type Metadata struct {
 	PID           int       `json:"pid"`
 	Address       string    `json:"address"`
-	AuthToken     string    `json:"authToken"`
 	Version       string    `json:"version"`
 	SchemaVersion int       `json:"schemaVersion"`
 	StartedAt     time.Time `json:"startedAt"`
-}
-
-func GenerateToken() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("generate auth token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
 }
 
 func Write(path string, metadata Metadata) error {

@@ -127,7 +127,7 @@ func TestGitHubResolveRepositoryAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/repository?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/repository?workspace=%2Frepo"))
 	if recorder.Code != 200 {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -153,7 +153,7 @@ func TestGitHubListMonitorsAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/monitors"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/monitors"))
 	if recorder.Code != 200 {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -176,7 +176,7 @@ func TestGitHubMonitorCRUDAndSyncAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedJSONRequest("POST", "/api/v1/github/monitor", `{"workspace":"/repo","pollIntervalSeconds":300}`))
+	handler.ServeHTTP(recorder, jsonRequest("POST", "/api/v1/github/monitor", `{"workspace":"/repo","pollIntervalSeconds":300}`))
 	if recorder.Code != 201 {
 		t.Fatalf("create status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -185,13 +185,13 @@ func TestGitHubMonitorCRUDAndSyncAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/monitor?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/monitor?workspace=%2Frepo"))
 	if recorder.Code != 200 {
 		t.Fatalf("get status = %d", recorder.Code)
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedJSONRequest("PUT", "/api/v1/github/monitor", `{"workspace":"/repo","enabled":false,"pollIntervalSeconds":600,"coalesceQueueLimit":5}`))
+	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/github/monitor", `{"workspace":"/repo","enabled":false,"pollIntervalSeconds":600,"coalesceQueueLimit":5}`))
 	if recorder.Code != 200 {
 		t.Fatalf("update status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -200,7 +200,7 @@ func TestGitHubMonitorCRUDAndSyncAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("POST", "/api/v1/github/monitor/sync?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("POST", "/api/v1/github/monitor/sync?workspace=%2Frepo"))
 	if recorder.Code != 200 {
 		t.Fatalf("sync status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -213,7 +213,7 @@ func TestGitHubMonitorCRUDAndSyncAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("DELETE", "/api/v1/github/monitor?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("DELETE", "/api/v1/github/monitor?workspace=%2Frepo"))
 	if recorder.Code != 204 {
 		t.Fatalf("delete status = %d", recorder.Code)
 	}
@@ -238,7 +238,7 @@ func TestGitHubMonitorErrorMapping(t *testing.T) {
 			handler := New(config, nil, nil).Handler()
 
 			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/monitor?workspace=%2Frepo"))
+			handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/monitor?workspace=%2Frepo"))
 			if recorder.Code != tc.want {
 				t.Fatalf("status = %d, want %d, body = %s", recorder.Code, tc.want, recorder.Body.String())
 			}
@@ -256,7 +256,7 @@ func TestGitHubTriggerRuleAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/rules?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/rules?workspace=%2Frepo"))
 	if recorder.Code != 200 {
 		t.Fatalf("list status = %d", recorder.Code)
 	}
@@ -266,7 +266,7 @@ func TestGitHubTriggerRuleAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedJSONRequest("POST", "/api/v1/github/rules", `{
+	handler.ServeHTTP(recorder, jsonRequest("POST", "/api/v1/github/rules", `{
 		"workspace":"/repo","name":"Design","enabled":true,"eventKinds":["issue"],
 		"promptTemplate":"Design {{.Title}}","provider":"codex","concurrencyPolicy":"coalesce"
 	}`))
@@ -275,13 +275,13 @@ func TestGitHubTriggerRuleAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/rules/rule-1"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/rules/rule-1"))
 	if recorder.Code != 200 || controller.lastRuleID != "rule-1" {
 		t.Fatalf("get status = %d, lastRuleID = %q", recorder.Code, controller.lastRuleID)
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedJSONRequest("PUT", "/api/v1/github/rules/rule-1", `{
+	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/github/rules/rule-1", `{
 		"workspace":"/repo","name":"Renamed","enabled":false,"eventKinds":["issue"],
 		"promptTemplate":"x","provider":"codex"
 	}`))
@@ -290,7 +290,7 @@ func TestGitHubTriggerRuleAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("DELETE", "/api/v1/github/rules/rule-1"))
+	handler.ServeHTTP(recorder, apiRequest("DELETE", "/api/v1/github/rules/rule-1"))
 	if recorder.Code != 204 {
 		t.Fatalf("delete status = %d", recorder.Code)
 	}
@@ -306,7 +306,7 @@ func TestGitHubEventHistoryAndReplayAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/events?workspace=%2Frepo&limit=50"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/events?workspace=%2Frepo&limit=50"))
 	if recorder.Code != 200 || controller.lastListEventsLimit != 50 {
 		t.Fatalf("status = %d, limit = %d", recorder.Code, controller.lastListEventsLimit)
 	}
@@ -316,13 +316,13 @@ func TestGitHubEventHistoryAndReplayAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("POST", "/api/v1/github/events/event-1/replay"))
+	handler.ServeHTTP(recorder, apiRequest("POST", "/api/v1/github/events/event-1/replay"))
 	if recorder.Code != 201 || controller.lastReplayEventID != "event-1" {
 		t.Fatalf("status = %d, lastReplayEventID = %q", recorder.Code, controller.lastReplayEventID)
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("POST", "/api/v1/github/events/event-1/skip"))
+	handler.ServeHTTP(recorder, apiRequest("POST", "/api/v1/github/events/event-1/skip"))
 	if recorder.Code != 200 || controller.lastSkipEventID != "event-1" {
 		t.Fatalf("skip status = %d, lastSkipEventID = %q", recorder.Code, controller.lastSkipEventID)
 	}
@@ -338,7 +338,7 @@ func TestGitHubItemsAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/issues?workspace=%2Frepo&state=open&label=bug&label=P1&assignee=alice"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/issues?workspace=%2Frepo&state=open&label=bug&label=P1&assignee=alice"))
 	if recorder.Code != 200 {
 		t.Fatalf("list issues status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -347,7 +347,7 @@ func TestGitHubItemsAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/issues/42?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/issues/42?workspace=%2Frepo"))
 	if recorder.Code != 200 || controller.lastItemNumber != 42 {
 		t.Fatalf("get issue status = %d, number = %d", recorder.Code, controller.lastItemNumber)
 	}
@@ -357,19 +357,19 @@ func TestGitHubItemsAPI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/issues/not-a-number?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/issues/not-a-number?workspace=%2Frepo"))
 	if recorder.Code != 400 {
 		t.Fatalf("invalid number status = %d", recorder.Code)
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/pulls?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/pulls?workspace=%2Frepo"))
 	if recorder.Code != 200 {
 		t.Fatalf("list pulls status = %d", recorder.Code)
 	}
 
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/pulls/42?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/pulls/42?workspace=%2Frepo"))
 	if recorder.Code != 200 || controller.lastItemNumber != 42 {
 		t.Fatalf("get pull status = %d", recorder.Code)
 	}
@@ -378,7 +378,7 @@ func TestGitHubItemsAPI(t *testing.T) {
 func TestGitHubMonitorRoutesDisabledWhenControllerNil(t *testing.T) {
 	handler := New(testConfig(), nil, nil).Handler()
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest("GET", "/api/v1/github/monitor?workspace=%2Frepo"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/monitor?workspace=%2Frepo"))
 	if recorder.Code != 404 {
 		t.Fatalf("status = %d, want 404 when GitHubMonitorController is nil", recorder.Code)
 	}

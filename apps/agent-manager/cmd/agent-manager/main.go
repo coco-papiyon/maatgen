@@ -69,7 +69,6 @@ func run() error {
 	}
 	dataDir := flag.String("data-dir", defaultDir, "directory for the database and runtime data")
 	runtimeFile := flag.String("runtime-file", "", "path for runtime metadata; defaults to <data-dir>/runtime.json")
-	authToken := flag.String("auth-token", "", "bearer token; generated when omitted")
 	allowedOrigins := flag.String("allowed-origins", "http://localhost:5173,http://127.0.0.1:5173", "comma-separated browser origins")
 	configFile := flag.String("config", toolconfig.DefaultRelativePath, "tool configuration path relative to the executable")
 	staticDir := flag.String("static-dir", "", "directory of built Web UI static assets to serve; auto-detected when omitted")
@@ -111,12 +110,6 @@ func run() error {
 	modelConfigMu := sync.Mutex{}
 	if *runtimeFile == "" {
 		*runtimeFile = filepath.Join(*dataDir, "runtime.json")
-	}
-	if *authToken == "" {
-		*authToken, err = runtimeinfo.GenerateToken()
-		if err != nil {
-			return err
-		}
 	}
 
 	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
@@ -328,7 +321,6 @@ func run() error {
 	if err := runtimeinfo.Write(*runtimeFile, runtimeinfo.Metadata{
 		PID:           os.Getpid(),
 		Address:       listener.Addr().String(),
-		AuthToken:     *authToken,
 		Version:       version,
 		SchemaVersion: protocol.SchemaVersion,
 		StartedAt:     time.Now().UTC(),
@@ -342,7 +334,6 @@ func run() error {
 			Version:           version,
 			SchemaVersion:     protocol.SchemaVersion,
 			DefaultWorkspace:  defaultWorkspace,
-			AuthToken:         *authToken,
 			AllowedOrigins:    splitNonEmpty(*allowedOrigins),
 			EventSubscriber:   broker,
 			SessionCreator:    sessions,

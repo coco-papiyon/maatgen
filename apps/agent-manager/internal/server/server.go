@@ -25,7 +25,6 @@ type Config struct {
 	Version                 string
 	SchemaVersion           int
 	DefaultWorkspace        string
-	AuthToken               string
 	AllowedOrigins          []string
 	TicketTTL               time.Duration
 	EventSubscriber         EventSubscriber
@@ -156,7 +155,6 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 		config.TicketTTL = 30 * time.Second
 	}
 	tickets := newTicketStore(config.TicketTTL)
-	authenticate := bearerAuth(config.AuthToken)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, HealthResponse{
@@ -166,18 +164,18 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			Time:          time.Now().UTC(),
 		})
 	})
-	mux.Handle("GET /api/v1/runtime-config", authenticate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	mux.Handle("GET /api/v1/runtime-config", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, RuntimeConfigResponse{DefaultWorkspace: config.DefaultWorkspace})
-	})))
-	mux.Handle("GET /api/v1/providers", authenticate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	}))
+	mux.Handle("GET /api/v1/providers", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		providers := config.Providers
 		if providers == nil {
 			providers = []protocol.Provider{}
 		}
 		writeJSON(w, http.StatusOK, protocol.ProviderListResponse{Providers: providers})
-	})))
+	}))
 	if config.ModelSetter != nil {
-		mux.Handle("PUT /api/v1/providers/{id}/model", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("PUT /api/v1/providers/{id}/model", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var request setModelRequest
 			if err := readJSON(w, r, &request); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
@@ -188,10 +186,10 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		})))
+		}))
 	}
 	if config.SessionCreator != nil {
-		mux.Handle("POST /api/v1/sessions", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("POST /api/v1/sessions", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var request protocol.CreateSessionRequest
 			if err := readJSON(w, r, &request); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
@@ -203,30 +201,30 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				return
 			}
 			writeJSON(w, http.StatusCreated, created)
-		})))
+		}))
 	}
 	if config.SessionCloser != nil {
-		mux.Handle("POST /api/v1/sessions/{id}/close", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("POST /api/v1/sessions/{id}/close", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			closed, err := config.SessionCloser.CloseSession(r.Context(), r.PathValue("id"))
 			if err != nil {
 				writeSessionCloseError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, closed)
-		})))
+		}))
 	}
 	if config.SessionReopener != nil {
-		mux.Handle("POST /api/v1/sessions/{id}/reopen", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("POST /api/v1/sessions/{id}/reopen", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reopened, err := config.SessionReopener.ReopenSession(r.Context(), r.PathValue("id"))
 			if err != nil {
 				writeSessionCloseError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, reopened)
-		})))
+		}))
 	}
 	if config.RunController != nil {
-		mux.Handle("POST /api/v1/sessions/{id}/messages", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("POST /api/v1/sessions/{id}/messages", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var request protocol.SendMessageRequest
 			if err := readJSON(w, r, &request); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
@@ -238,17 +236,17 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				return
 			}
 			writeJSON(w, http.StatusAccepted, run)
-		})))
-		mux.Handle("POST /api/v1/runs/{id}/cancel", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		}))
+		mux.Handle("POST /api/v1/runs/{id}/cancel", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if err := config.RunController.CancelRun(r.Context(), r.PathValue("id")); err != nil {
 				writeRunError(w, err)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		})))
+		}))
 	}
 	if config.ApprovalController != nil {
-		mux.Handle("GET /api/v1/sessions/{id}/approvals", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions/{id}/approvals", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			pendingOnly := r.URL.Query().Get("status") == "pending"
 			response, err := config.ApprovalController.List(r.Context(), r.PathValue("id"), pendingOnly)
 			if err != nil {
@@ -256,8 +254,8 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				return
 			}
 			writeJSON(w, http.StatusOK, response)
-		})))
-		mux.Handle("POST /api/v1/sessions/{id}/approvals/{approvalId}/decision", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		}))
+		mux.Handle("POST /api/v1/sessions/{id}/approvals/{approvalId}/decision", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var request protocol.ApprovalDecisionRequest
 			if err := readJSON(w, r, &request); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
@@ -277,11 +275,11 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				return
 			}
 			writeJSON(w, http.StatusOK, approval)
-		})))
+		}))
 	}
 
 	if sessions != nil {
-		mux.Handle("GET /api/v1/sessions", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			limit, ok := parseBoundedInt(w, r, "limit", 100, 1, 500)
 			if !ok {
 				return
@@ -313,20 +311,20 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				items = []protocol.AgentSession{}
 			}
 			writeJSON(w, http.StatusOK, sessionListResponse{Sessions: items, NextCursor: nextCursor})
-		})))
+		}))
 
-		mux.Handle("GET /api/v1/sessions/{id}", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := sessions.GetSession(r.Context(), r.PathValue("id"))
 			if err != nil {
 				writeStorageError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, session)
-		})))
+		}))
 	}
 
 	if sessions != nil && events != nil {
-		mux.Handle("GET /api/v1/sessions/{id}/events", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions/{id}/events", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
 				writeStorageError(w, err)
 				return
@@ -348,23 +346,23 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				items = []protocol.SessionEvent{}
 			}
 			writeJSON(w, http.StatusOK, eventListResponse{Events: items})
-		})))
+		}))
 
-		mux.Handle("POST /api/v1/ws-tickets", authenticate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mux.Handle("POST /api/v1/ws-tickets", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			ticket, expiresAt, err := tickets.issue()
 			if err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "internal_error", "an internal error occurred", nil)
 				return
 			}
 			writeJSON(w, http.StatusCreated, wsTicketResponse{Ticket: ticket, ExpiresAt: expiresAt})
-		})))
+		}))
 
 		mux.HandleFunc("GET /ws", func(w http.ResponseWriter, r *http.Request) {
 			serveEventWebSocket(w, r, config, tickets, sessions, events, config.EventSubscriber)
 		})
 	}
 	if sessions != nil && config.WorkspaceReader != nil {
-		mux.Handle("GET /api/v1/sessions/{id}/workspace-files", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions/{id}/workspace-files", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
 				writeStorageError(w, err)
 				return
@@ -379,10 +377,10 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				files = []string{}
 			}
 			writeJSON(w, http.StatusOK, workspaceFilesResponse{Files: files})
-		})))
+		}))
 	}
 	if sessions != nil && config.UsageReader != nil {
-		mux.Handle("GET /api/v1/sessions/{id}/usage", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions/{id}/usage", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
 				writeStorageError(w, err)
 				return
@@ -396,10 +394,10 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				usage.Runs = []protocol.RunUsageEntry{}
 			}
 			writeJSON(w, http.StatusOK, usage)
-		})))
+		}))
 	}
 	if sessions != nil && config.ProviderUsageReader != nil {
-		mux.Handle("GET /api/v1/sessions/{id}/provider-usage", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions/{id}/provider-usage", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := sessions.GetSession(r.Context(), r.PathValue("id"))
 			if err != nil {
 				writeStorageError(w, err)
@@ -412,10 +410,10 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				return
 			}
 			writeJSON(w, http.StatusOK, usage)
-		})))
+		}))
 	}
 	if config.UsageSummaryReader != nil {
-		mux.Handle("GET /api/v1/usage/summary", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/usage/summary", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			granularity := r.URL.Query().Get("granularity")
 			if granularity == "" {
 				granularity = "day"
@@ -433,8 +431,8 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				summary.Periods = []protocol.UsagePeriod{}
 			}
 			writeJSON(w, http.StatusOK, summary)
-		})))
-		mux.Handle("GET /api/v1/usage/providers", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		}))
+		mux.Handle("GET /api/v1/usage/providers", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			providers, err := config.UsageSummaryReader.ListUsageProviders(r.Context())
 			if err != nil {
 				writeStorageError(w, err)
@@ -444,8 +442,8 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				providers = []string{}
 			}
 			writeJSON(w, http.StatusOK, protocol.UsageProviderListResponse{Providers: providers})
-		})))
-		mux.Handle("GET /api/v1/usage/models", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		}))
+		mux.Handle("GET /api/v1/usage/models", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			models, err := config.UsageSummaryReader.ListUsageModels(r.Context(), r.URL.Query().Get("provider"))
 			if err != nil {
 				writeStorageError(w, err)
@@ -455,10 +453,10 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				models = []string{}
 			}
 			writeJSON(w, http.StatusOK, protocol.UsageModelListResponse{Models: models})
-		})))
+		}))
 	}
 	if sessions != nil && config.SourceStatsReader != nil {
-		mux.Handle("GET /api/v1/sessions/{id}/source-stats", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions/{id}/source-stats", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
 				writeStorageError(w, err)
 				return
@@ -472,10 +470,10 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				stats.Languages = []protocol.SourceStatsLanguage{}
 			}
 			writeJSON(w, http.StatusOK, stats)
-		})))
+		}))
 	}
 	if config.ChangeReader != nil {
-		mux.Handle("GET /api/v1/sessions/{id}/changes", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("GET /api/v1/sessions/{id}/changes", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			changeSet, err := config.ChangeReader.GetChangeSet(r.Context(), r.PathValue("id"))
 			if err != nil {
 				writeStorageError(w, err)
@@ -485,36 +483,36 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 				changeSet.Files = []protocol.FileChange{}
 			}
 			writeJSON(w, http.StatusOK, changeSet)
-		})))
+		}))
 	}
 	if config.RestoreController != nil {
-		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/restore", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/restore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			changeSet, err := config.RestoreController.RestoreAll(r.Context(), r.PathValue("id"), r.PathValue("checkpointId"))
 			if err != nil {
 				writeRestoreError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, changeSet)
-		})))
-		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/files/{fileId}/restore", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		}))
+		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/files/{fileId}/restore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			changeSet, err := config.RestoreController.RestoreFile(r.Context(), r.PathValue("id"), r.PathValue("checkpointId"), r.PathValue("fileId"))
 			if err != nil {
 				writeRestoreError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, changeSet)
-		})))
-		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/hunks/{hunkId}/restore", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		}))
+		mux.Handle("POST /api/v1/sessions/{id}/checkpoints/{checkpointId}/hunks/{hunkId}/restore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			changeSet, err := config.RestoreController.RestoreHunk(r.Context(), r.PathValue("id"), r.PathValue("checkpointId"), r.PathValue("hunkId"))
 			if err != nil {
 				writeRestoreError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, changeSet)
-		})))
+		}))
 	}
 
-	registerGitHubMonitorRoutes(mux, authenticate, config.GitHubMonitorController)
+	registerGitHubMonitorRoutes(mux, config.GitHubMonitorController)
 
 	static := staticHandler(config.StaticFS)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

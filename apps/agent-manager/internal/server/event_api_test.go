@@ -47,7 +47,6 @@ func TestEventAPIAndWebSocketStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create event request: %v", err)
 	}
-	eventRequest.Header.Set("Authorization", "Bearer test-token")
 	eventResponse, err := http.DefaultClient.Do(eventRequest)
 	if err != nil {
 		t.Fatalf("get events: %v", err)
@@ -119,7 +118,6 @@ func issueTicket(t *testing.T, baseURL string) string {
 	if err != nil {
 		t.Fatalf("create ticket request: %v", err)
 	}
-	request.Header.Set("Authorization", "Bearer test-token")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("issue ticket: %v", err)

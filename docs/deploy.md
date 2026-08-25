@@ -103,7 +103,6 @@ agent-manager [OPTIONS]
 - `--host <host>`: バインドするホスト（既定：127.0.0.1）
 - `--port <port>`: バインドするポート（既定：3100）
 - `--data-dir <dir>`: データベースとランタイムデータの保存先（既定：OS設定ディレクトリ配下の`maatgen`）
-- `--auth-token <token>`: 認証トークン（指定なしで自動生成）
 - `--allowed-origins <origins>`: CORS許可オリジン（既定：`http://localhost:5173,http://127.0.0.1:5173`）
 - `--config <path>`: ツール設定ファイルの相対パス（既定：`config/providers.json`）
 - `--static-dir <dir>`: Web UI静的ファイルのディレクトリ
@@ -171,7 +170,6 @@ Agent Manager起動時、以下の情報がランタイムメタデータファ�
 
 - PID（プロセスID）
 - バインドアドレスとポート
-- 認証トークン
 - バージョン
 - スキーマバージョン
 - 起動日時
@@ -181,8 +179,6 @@ Agent Manager起動時、以下の情報がランタイムメタデータファ�
 ```bash
 ./agent-manager --runtime-file /var/lib/maatgen/runtime.json
 ```
-
-このファイルは外部から読み取り可能な状態で保存されるため、認証トークンを含みます。ディレクトリのアクセス権を適切に制限してください。
 
 ## トラブルシューティング
 
@@ -202,13 +198,6 @@ Agent Manager起動時、以下の情報がランタイムメタデータファ�
 ./agent-manager --port 3101
 ```
 
-### 認証エラー
-
-認証トークンが一致していません。以下を確認してください：
-
-1. HTTPリクエストに`Authorization: Bearer <token>`ヘッダーが含まれているか
-2. トークンが`runtime.json`と一致しているか
-
 ## VS Code拡張機能
 
 VS Code拡張機能（maatgen-0.1.0.vsix）をインストールするには：
@@ -217,11 +206,10 @@ VS Code拡張機能（maatgen-0.1.0.vsix）をインストールするには：
 code --install-extension maatgen-0.1.0.vsix --force
 ```
 
-拡張機能は起動時にAgent ManagerのURLと認証トークンを求めます。
+拡張機能は起動時にAgent ManagerのURLを求めます。
 
 ## セキュリティに関する注意
 
 - Agent Managerはリポジトリ内で任意のコマンドを実行可能です。信頼できる環境でのみ使用してください
-- 認証トークンを安全に保管してください
-- リモートアクセスを有効にする場合は、ファイアウォールやVPNで適切に保護してください
+- HTTP APIに認証はありません。ローカルホスト（既定の`127.0.0.1`）でのみ使用し、`--host 0.0.0.0`等でリモートアクセスを有効にする場合は、リバースプロキシ等で別途認証を追加してください
 - `config/providers.json`にはプロバイダー情報が含まれます。本番環境では適切なアクセス制御を実施してください

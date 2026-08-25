@@ -58,7 +58,7 @@ interface SessionListResponse { sessions: AgentSession[]; nextCursor?: string; }
 interface ProviderListResponse { providers: AgentProvider[]; }
 
 export class AgentManagerClient {
-  constructor(private readonly baseUrl: string, private readonly authToken: string) {}
+  constructor(private readonly baseUrl: string) {}
 
   listProviders(): Promise<AgentProvider[]> {
     return this.request<ProviderListResponse>('/api/v1/providers').then((response) => response.providers);
@@ -144,7 +144,7 @@ export class AgentManagerClient {
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
-      headers: { Authorization: `Bearer ${this.authToken}`, ...(init.headers ?? {}), ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { ...(init.headers ?? {}), ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
     });
     if (!response.ok) {
       let message = `${response.status} ${response.statusText}`;

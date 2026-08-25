@@ -46,7 +46,7 @@ func TestRuntimeConfig(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/runtime-config"))
+	handler.ServeHTTP(recorder, apiRequest(http.MethodGet, "/api/v1/runtime-config"))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
@@ -57,19 +57,13 @@ func TestRuntimeConfig(t *testing.T) {
 	if response.DefaultWorkspace != "C:/projects/example" {
 		t.Fatalf("default workspace = %q, want C:/projects/example", response.DefaultWorkspace)
 	}
-
-	unauthorized := httptest.NewRecorder()
-	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/runtime-config", nil))
-	if unauthorized.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthorized status = %d, want %d", unauthorized.Code, http.StatusUnauthorized)
-	}
 }
 
 func TestProviderCatalog(t *testing.T) {
 	config := testConfig()
 	config.Providers = []protocol.Provider{{ID: protocol.AgentCodex, Label: "Codex", Models: []string{"model-a"}}}
 	recorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/providers"))
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodGet, "/api/v1/providers"))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -185,7 +179,7 @@ func TestSessionListAndDetail(t *testing.T) {
 	handler := New(testConfig(), reader, nil).Handler()
 
 	listRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(listRecorder, authorizedRequest(http.MethodGet, "/api/v1/sessions?limit=10"))
+	handler.ServeHTTP(listRecorder, apiRequest(http.MethodGet, "/api/v1/sessions?limit=10"))
 	if listRecorder.Code != http.StatusOK {
 		t.Fatalf("list status = %d", listRecorder.Code)
 	}
@@ -201,7 +195,7 @@ func TestSessionListAndDetail(t *testing.T) {
 	}
 
 	detailRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(detailRecorder, authorizedRequest(http.MethodGet, "/api/v1/sessions/session-1"))
+	handler.ServeHTTP(detailRecorder, apiRequest(http.MethodGet, "/api/v1/sessions/session-1"))
 	if detailRecorder.Code != http.StatusOK {
 		t.Fatalf("detail status = %d", detailRecorder.Code)
 	}
@@ -229,7 +223,7 @@ func TestSessionListStatusFilter(t *testing.T) {
 	}
 	for _, tc := range cases {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/sessions"+tc.query))
+		handler.ServeHTTP(recorder, apiRequest(http.MethodGet, "/api/v1/sessions"+tc.query))
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("query %q status = %d", tc.query, recorder.Code)
 		}
@@ -239,7 +233,7 @@ func TestSessionListStatusFilter(t *testing.T) {
 	}
 
 	invalidRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(invalidRecorder, authorizedRequest(http.MethodGet, "/api/v1/sessions?status=bogus"))
+	handler.ServeHTTP(invalidRecorder, apiRequest(http.MethodGet, "/api/v1/sessions?status=bogus"))
 	if invalidRecorder.Code != http.StatusBadRequest {
 		t.Fatalf("invalid status = %d", invalidRecorder.Code)
 	}
@@ -250,13 +244,13 @@ func TestSessionAPIValidationAndNotFound(t *testing.T) {
 	handler := New(testConfig(), reader, nil).Handler()
 
 	invalidRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(invalidRecorder, authorizedRequest(http.MethodGet, "/api/v1/sessions?limit=invalid"))
+	handler.ServeHTTP(invalidRecorder, apiRequest(http.MethodGet, "/api/v1/sessions?limit=invalid"))
 	if invalidRecorder.Code != http.StatusBadRequest {
 		t.Fatalf("invalid limit status = %d", invalidRecorder.Code)
 	}
 
 	notFoundRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(notFoundRecorder, authorizedRequest(http.MethodGet, "/api/v1/sessions/missing"))
+	handler.ServeHTTP(notFoundRecorder, apiRequest(http.MethodGet, "/api/v1/sessions/missing"))
 	if notFoundRecorder.Code != http.StatusNotFound {
 		t.Fatalf("not found status = %d", notFoundRecorder.Code)
 	}
@@ -271,7 +265,7 @@ func TestSessionListCursor(t *testing.T) {
 	handler := New(testConfig(), reader, nil).Handler()
 
 	first := httptest.NewRecorder()
-	handler.ServeHTTP(first, authorizedRequest(http.MethodGet, "/api/v1/sessions?limit=1"))
+	handler.ServeHTTP(first, apiRequest(http.MethodGet, "/api/v1/sessions?limit=1"))
 	var page sessionListResponse
 	if first.Code != http.StatusOK {
 		t.Fatalf("first page status = %d", first.Code)
@@ -284,24 +278,15 @@ func TestSessionListCursor(t *testing.T) {
 	}
 
 	second := httptest.NewRecorder()
-	handler.ServeHTTP(second, authorizedRequest(http.MethodGet, "/api/v1/sessions?limit=1&cursor="+page.NextCursor))
+	handler.ServeHTTP(second, apiRequest(http.MethodGet, "/api/v1/sessions?limit=1&cursor="+page.NextCursor))
 	if second.Code != http.StatusOK || reader.cursor == nil || reader.cursor.ID != "session-2" || !reader.cursor.CreatedAt.Equal(createdAt) {
 		t.Fatalf("second page status = %d, cursor = %#v", second.Code, reader.cursor)
 	}
 
 	invalid := httptest.NewRecorder()
-	handler.ServeHTTP(invalid, authorizedRequest(http.MethodGet, "/api/v1/sessions?cursor=not-a-cursor"))
+	handler.ServeHTTP(invalid, apiRequest(http.MethodGet, "/api/v1/sessions?cursor=not-a-cursor"))
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid cursor status = %d", invalid.Code)
-	}
-}
-
-func TestSessionAPIRequiresBearerToken(t *testing.T) {
-	handler := New(testConfig(), &fakeSessionReader{}, nil).Handler()
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil))
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -316,7 +301,7 @@ func TestCreateSessionAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, authorizedJSONRequest(http.MethodPost, "/api/v1/sessions", `{
+	handler.ServeHTTP(recorder, jsonRequest(http.MethodPost, "/api/v1/sessions", `{
 		"agent":"codex","workspace":"C:/repository"
 	}`))
 	if recorder.Code != http.StatusCreated {
@@ -351,7 +336,7 @@ func TestCreateSessionAPIValidationAndDomainErrors(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			New(config, nil, nil).Handler().ServeHTTP(
 				recorder,
-				authorizedJSONRequest(http.MethodPost, "/api/v1/sessions", test.body),
+				jsonRequest(http.MethodPost, "/api/v1/sessions", test.body),
 			)
 			if recorder.Code != test.status {
 				t.Fatalf("status = %d, want %d, body = %s", recorder.Code, test.status, recorder.Body.String())
@@ -376,7 +361,7 @@ func TestCloseSessionAPI(t *testing.T) {
 	config := testConfig()
 	config.SessionCloser = closer
 	recorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/close"))
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodPost, "/api/v1/sessions/session-1/close"))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -405,7 +390,7 @@ func TestCloseSessionAPIErrors(t *testing.T) {
 			config := testConfig()
 			config.SessionCloser = &fakeSessionCloser{err: test.err}
 			recorder := httptest.NewRecorder()
-			New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/close"))
+			New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodPost, "/api/v1/sessions/session-1/close"))
 			if recorder.Code != test.status {
 				t.Fatalf("status = %d, want %d", recorder.Code, test.status)
 			}
@@ -430,7 +415,7 @@ func TestStartRunAndCancelAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	startRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(startRecorder, authorizedJSONRequest(http.MethodPost, "/api/v1/sessions/session-1/messages", `{
+	handler.ServeHTTP(startRecorder, jsonRequest(http.MethodPost, "/api/v1/sessions/session-1/messages", `{
 		"message":"fix the tests","model":"gpt-5","timeoutSeconds":120
 	}`))
 	if startRecorder.Code != http.StatusAccepted {
@@ -448,7 +433,7 @@ func TestStartRunAndCancelAPI(t *testing.T) {
 	}
 
 	cancelRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(cancelRecorder, authorizedRequest(http.MethodPost, "/api/v1/runs/run-1/cancel"))
+	handler.ServeHTTP(cancelRecorder, apiRequest(http.MethodPost, "/api/v1/runs/run-1/cancel"))
 	if cancelRecorder.Code != http.StatusNoContent {
 		t.Fatalf("cancel status = %d, body = %s", cancelRecorder.Code, cancelRecorder.Body.String())
 	}
@@ -477,7 +462,7 @@ func TestRunAPIValidationAndDomainErrors(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			New(config, nil, nil).Handler().ServeHTTP(
 				recorder,
-				authorizedJSONRequest(http.MethodPost, "/api/v1/sessions/session-1/messages", test.body),
+				jsonRequest(http.MethodPost, "/api/v1/sessions/session-1/messages", test.body),
 			)
 			if recorder.Code != test.status {
 				t.Fatalf("status = %d, want %d, body = %s", recorder.Code, test.status, recorder.Body.String())
@@ -489,7 +474,7 @@ func TestRunAPIValidationAndDomainErrors(t *testing.T) {
 	config := testConfig()
 	config.RunController = controller
 	recorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodPost, "/api/v1/runs/run-1/cancel"))
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodPost, "/api/v1/runs/run-1/cancel"))
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("cancel status = %d, want %d", recorder.Code, http.StatusConflict)
 	}
@@ -506,7 +491,7 @@ func TestGetChangeSetAPI(t *testing.T) {
 	config := testConfig()
 	config.ChangeReader = reader
 	recorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/sessions/session-1/changes"))
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodGet, "/api/v1/sessions/session-1/changes"))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -520,7 +505,7 @@ func TestGetChangeSetAPI(t *testing.T) {
 
 	reader.err = storage.ErrNotFound
 	notFound := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(notFound, authorizedRequest(http.MethodGet, "/api/v1/sessions/missing/changes"))
+	New(config, nil, nil).Handler().ServeHTTP(notFound, apiRequest(http.MethodGet, "/api/v1/sessions/missing/changes"))
 	if notFound.Code != http.StatusNotFound {
 		t.Fatalf("not found status = %d", notFound.Code)
 	}
@@ -537,7 +522,7 @@ func TestGetSourceStatsAPI(t *testing.T) {
 	config := testConfig()
 	config.SourceStatsReader = reader
 	recorder := httptest.NewRecorder()
-	New(config, sessions, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/sessions/session-1/source-stats"))
+	New(config, sessions, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodGet, "/api/v1/sessions/session-1/source-stats"))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -550,7 +535,7 @@ func TestGetSourceStatsAPI(t *testing.T) {
 	}
 
 	notFound := httptest.NewRecorder()
-	New(config, sessions, nil).Handler().ServeHTTP(notFound, authorizedRequest(http.MethodGet, "/api/v1/sessions/missing/source-stats"))
+	New(config, sessions, nil).Handler().ServeHTTP(notFound, apiRequest(http.MethodGet, "/api/v1/sessions/missing/source-stats"))
 	if notFound.Code != http.StatusNotFound {
 		t.Fatalf("not found status = %d", notFound.Code)
 	}
@@ -572,7 +557,7 @@ func TestGetUsageSummaryAPI(t *testing.T) {
 	config := testConfig()
 	config.UsageSummaryReader = reader
 	recorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodGet, "/api/v1/usage/summary?granularity=week&provider=claude&model=claude-opus"))
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodGet, "/api/v1/usage/summary?granularity=week&provider=claude&model=claude-opus"))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -587,13 +572,13 @@ func TestGetUsageSummaryAPI(t *testing.T) {
 	}
 
 	invalid := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(invalid, authorizedRequest(http.MethodGet, "/api/v1/usage/summary?granularity=year"))
+	New(config, nil, nil).Handler().ServeHTTP(invalid, apiRequest(http.MethodGet, "/api/v1/usage/summary?granularity=year"))
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid granularity status = %d", invalid.Code)
 	}
 
 	providersRecorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(providersRecorder, authorizedRequest(http.MethodGet, "/api/v1/usage/providers"))
+	New(config, nil, nil).Handler().ServeHTTP(providersRecorder, apiRequest(http.MethodGet, "/api/v1/usage/providers"))
 	if providersRecorder.Code != http.StatusOK {
 		t.Fatalf("providers status = %d, body = %s", providersRecorder.Code, providersRecorder.Body.String())
 	}
@@ -606,7 +591,7 @@ func TestGetUsageSummaryAPI(t *testing.T) {
 	}
 
 	modelsRecorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(modelsRecorder, authorizedRequest(http.MethodGet, "/api/v1/usage/models?provider=claude"))
+	New(config, nil, nil).Handler().ServeHTTP(modelsRecorder, apiRequest(http.MethodGet, "/api/v1/usage/models?provider=claude"))
 	if modelsRecorder.Code != http.StatusOK {
 		t.Fatalf("models status = %d, body = %s", modelsRecorder.Code, modelsRecorder.Body.String())
 	}
@@ -626,17 +611,17 @@ func TestRestoreAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	hunk := httptest.NewRecorder()
-	handler.ServeHTTP(hunk, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/hunks/hunk-1/restore"))
+	handler.ServeHTTP(hunk, apiRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/hunks/hunk-1/restore"))
 	if hunk.Code != http.StatusOK || controller.operation != "hunk" || controller.sessionID != "session-1" || controller.changeID != "hunk-1" {
 		t.Fatalf("hunk status = %d, controller = %#v", hunk.Code, controller)
 	}
 	file := httptest.NewRecorder()
-	handler.ServeHTTP(file, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/files/file-1/restore"))
+	handler.ServeHTTP(file, apiRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/files/file-1/restore"))
 	if file.Code != http.StatusOK || controller.operation != "file" || controller.changeID != "file-1" {
 		t.Fatalf("file status = %d, controller = %#v", file.Code, controller)
 	}
 	all := httptest.NewRecorder()
-	handler.ServeHTTP(all, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/restore"))
+	handler.ServeHTTP(all, apiRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/restore"))
 	if all.Code != http.StatusOK || controller.operation != "all" || controller.checkpointID != "checkpoint-1" {
 		t.Fatalf("all status = %d, controller = %#v", all.Code, controller)
 	}
@@ -658,7 +643,7 @@ func TestRestoreAPIErrors(t *testing.T) {
 		config := testConfig()
 		config.RestoreController = controller
 		recorder := httptest.NewRecorder()
-		New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/hunks/hunk-1/restore"))
+		New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodPost, "/api/v1/sessions/session-1/checkpoints/checkpoint-1/hunks/hunk-1/restore"))
 		if recorder.Code != test.status {
 			t.Fatalf("status = %d, want %d", recorder.Code, test.status)
 		}
@@ -680,13 +665,13 @@ func TestCommandApprovalAPI(t *testing.T) {
 	handler := New(config, nil, nil).Handler()
 
 	list := httptest.NewRecorder()
-	handler.ServeHTTP(list, authorizedRequest(http.MethodGet, "/api/v1/sessions/session-1/approvals?status=pending"))
+	handler.ServeHTTP(list, apiRequest(http.MethodGet, "/api/v1/sessions/session-1/approvals?status=pending"))
 	if list.Code != http.StatusOK || controller.sessionID != "session-1" || !controller.pendingOnly {
 		t.Fatalf("list status = %d, controller = %#v", list.Code, controller)
 	}
 
 	decision := httptest.NewRecorder()
-	handler.ServeHTTP(decision, authorizedJSONRequest(http.MethodPost, "/api/v1/sessions/session-1/approvals/approval-1/decision", `{"decision":"allow_session","ruleArgv":["go","test","*"]}`))
+	handler.ServeHTTP(decision, jsonRequest(http.MethodPost, "/api/v1/sessions/session-1/approvals/approval-1/decision", `{"decision":"allow_session","ruleArgv":["go","test","*"]}`))
 	if decision.Code != http.StatusOK || controller.approvalID != "approval-1" || controller.request.Decision != protocol.ApprovalAllowSession {
 		t.Fatalf("decision status = %d, controller = %#v, body = %s", decision.Code, controller, decision.Body.String())
 	}
@@ -697,25 +682,22 @@ func TestCommandApprovalDecisionConflict(t *testing.T) {
 	config := testConfig()
 	config.ApprovalController = controller
 	recorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(recorder, authorizedJSONRequest(http.MethodPost, "/api/v1/sessions/session-1/approvals/approval-1/decision", `{"decision":"deny"}`))
+	New(config, nil, nil).Handler().ServeHTTP(recorder, jsonRequest(http.MethodPost, "/api/v1/sessions/session-1/approvals/approval-1/decision", `{"decision":"deny"}`))
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
 
 func testConfig() Config {
-	return Config{Version: "test", SchemaVersion: 1, AuthToken: "test-token"}
+	return Config{Version: "test", SchemaVersion: 1}
 }
 
-func authorizedRequest(method, target string) *http.Request {
-	request := httptest.NewRequest(method, target, nil)
-	request.Header.Set("Authorization", "Bearer test-token")
-	return request
+func apiRequest(method, target string) *http.Request {
+	return httptest.NewRequest(method, target, nil)
 }
 
-func authorizedJSONRequest(method, target, body string) *http.Request {
+func jsonRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
-	request.Header.Set("Authorization", "Bearer test-token")
 	request.Header.Set("Content-Type", "application/json")
 	return request
 }

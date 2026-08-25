@@ -41,21 +41,21 @@ type GitHubMonitorController interface {
 	GetPullRequest(ctx context.Context, workspace string, number int) (protocol.GitHubItem, error)
 }
 
-func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Handler) http.Handler, controller GitHubMonitorController) {
+func registerGitHubMonitorRoutes(mux *http.ServeMux, controller GitHubMonitorController) {
 	if controller == nil {
 		return
 	}
 
-	mux.Handle("GET /api/v1/github/repository", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/github/repository", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resolution, err := controller.ResolveRepository(r.Context(), r.URL.Query().Get("workspace"))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, resolution)
-	})))
+	}))
 
-	mux.Handle("GET /api/v1/github/monitors", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/github/monitors", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		monitors, err := controller.ListMonitors(r.Context())
 		if err != nil {
 			writeGitHubMonitorError(w, err)
@@ -65,16 +65,16 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			monitors = []protocol.GitHubRepositoryMonitor{}
 		}
 		writeJSON(w, http.StatusOK, protocol.GitHubRepositoryMonitorListResponse{Monitors: monitors})
-	})))
-	mux.Handle("GET /api/v1/github/monitor", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("GET /api/v1/github/monitor", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		monitor, err := controller.GetMonitor(r.Context(), r.URL.Query().Get("workspace"))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, monitor)
-	})))
-	mux.Handle("POST /api/v1/github/monitor", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("POST /api/v1/github/monitor", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request protocol.CreateGitHubMonitorRequest
 		if err := readJSON(w, r, &request); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
@@ -86,8 +86,8 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			return
 		}
 		writeJSON(w, http.StatusCreated, monitor)
-	})))
-	mux.Handle("PUT /api/v1/github/monitor", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("PUT /api/v1/github/monitor", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request protocol.UpdateGitHubMonitorRequest
 		if err := readJSON(w, r, &request); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
@@ -99,24 +99,24 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			return
 		}
 		writeJSON(w, http.StatusOK, monitor)
-	})))
-	mux.Handle("DELETE /api/v1/github/monitor", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("DELETE /api/v1/github/monitor", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := controller.DeleteMonitor(r.Context(), r.URL.Query().Get("workspace")); err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-	})))
-	mux.Handle("POST /api/v1/github/monitor/sync", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("POST /api/v1/github/monitor/sync", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		result, err := controller.SyncNow(r.Context(), r.URL.Query().Get("workspace"))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
-	})))
+	}))
 
-	mux.Handle("GET /api/v1/github/rules", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/github/rules", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rules, err := controller.ListRules(r.Context(), r.URL.Query().Get("workspace"))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
@@ -126,8 +126,8 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			rules = []protocol.GitHubTriggerRule{}
 		}
 		writeJSON(w, http.StatusOK, protocol.GitHubTriggerRuleListResponse{Rules: rules})
-	})))
-	mux.Handle("POST /api/v1/github/rules", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("POST /api/v1/github/rules", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request protocol.GitHubTriggerRuleRequest
 		if err := readJSON(w, r, &request); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
@@ -139,16 +139,16 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			return
 		}
 		writeJSON(w, http.StatusCreated, rule)
-	})))
-	mux.Handle("GET /api/v1/github/rules/{id}", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("GET /api/v1/github/rules/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rule, err := controller.GetRule(r.Context(), r.PathValue("id"))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, rule)
-	})))
-	mux.Handle("PUT /api/v1/github/rules/{id}", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("PUT /api/v1/github/rules/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request protocol.GitHubTriggerRuleRequest
 		if err := readJSON(w, r, &request); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
@@ -160,16 +160,16 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			return
 		}
 		writeJSON(w, http.StatusOK, rule)
-	})))
-	mux.Handle("DELETE /api/v1/github/rules/{id}", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("DELETE /api/v1/github/rules/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := controller.DeleteRule(r.Context(), r.PathValue("id")); err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-	})))
+	}))
 
-	mux.Handle("GET /api/v1/github/events", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/github/events", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := parseBoundedInt(w, r, "limit", 100, 1, 500)
 		if !ok {
 			return
@@ -183,33 +183,33 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			events = []protocol.GitHubMonitorEvent{}
 		}
 		writeJSON(w, http.StatusOK, protocol.GitHubMonitorEventListResponse{Events: events})
-	})))
-	mux.Handle("POST /api/v1/github/events/{id}/skip", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("POST /api/v1/github/events/{id}/skip", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		event, err := controller.SkipEvent(r.Context(), r.PathValue("id"))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, event)
-	})))
-	mux.Handle("POST /api/v1/github/events/{id}/replay", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("POST /api/v1/github/events/{id}/replay", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		replay, err := controller.ReplayEvent(r.Context(), r.PathValue("id"))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, replay)
-	})))
+	}))
 
-	mux.Handle("GET /api/v1/github/issues", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/github/issues", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response, err := controller.ListIssues(r.Context(), r.URL.Query().Get("workspace"), parseItemQuery(r))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		writeItemListResponse(w, response)
-	})))
-	mux.Handle("GET /api/v1/github/issues/{number}", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("GET /api/v1/github/issues/{number}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		number, ok := parsePathInt(w, r.PathValue("number"))
 		if !ok {
 			return
@@ -220,16 +220,16 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			return
 		}
 		writeJSON(w, http.StatusOK, item)
-	})))
-	mux.Handle("GET /api/v1/github/pulls", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("GET /api/v1/github/pulls", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response, err := controller.ListPullRequests(r.Context(), r.URL.Query().Get("workspace"), parseItemQuery(r))
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
 		}
 		writeItemListResponse(w, response)
-	})))
-	mux.Handle("GET /api/v1/github/pulls/{number}", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.Handle("GET /api/v1/github/pulls/{number}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		number, ok := parsePathInt(w, r.PathValue("number"))
 		if !ok {
 			return
@@ -240,7 +240,7 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, authenticate func(http.Hand
 			return
 		}
 		writeJSON(w, http.StatusOK, item)
-	})))
+	}))
 }
 
 func parseItemQuery(r *http.Request) githubcontroller.ItemQuery {

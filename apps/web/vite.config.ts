@@ -2,7 +2,6 @@ import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 
 const managerTarget = 'http://127.0.0.1:3100';
-const authorization = 'Bearer maatgen-local-development-token';
 
 export default defineConfig({
   plugins: [vue()],
@@ -21,7 +20,6 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: managerTarget,
-        headers: { Authorization: authorization },
       },
       '/ws': {
         target: managerTarget,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, ProviderUsage, SessionEvent, TokenUsage, ApprovalDecision, UsageSummary } from '@maatgen/protocol';
-import { AgentApiError, httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from './api';
+import { httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity } from './api';
 import { githubWorkspace } from './github/workspace';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import { renderMarkdown } from './markdown';
@@ -71,7 +71,7 @@ const busy = ref(false);
 const error = ref('');
 const streamError = ref('');
 const streamState = ref<EventStreamState>('disconnected');
-const diagnostic = ref<{ kind: 'manager' | 'auth' | 'codex' | 'claude' | 'copilot'; title: string; message: string }>();
+const diagnostic = ref<{ kind: 'manager' | 'codex' | 'claude' | 'copilot'; title: string; message: string }>();
 const selectedChangeId = ref('');
 const selectedRunId = ref('');
 type SidePanel = 'usage' | 'changes' | 'sourceStats';
@@ -832,13 +832,7 @@ async function act(action: () => Promise<void>) {
 
 function handleFailure(cause: unknown) {
   error.value = cause instanceof Error ? cause.message : String(cause);
-  if (cause instanceof AgentApiError && cause.status === 401) {
-    diagnostic.value = {
-      kind: 'auth',
-      title: 'Agent Managerの認証に失敗しました',
-      message: 'Managerを再起動し、runtime metadataのtokenとWeb UIの接続設定を一致させてください。',
-    };
-  } else if (cause instanceof TypeError) {
+  if (cause instanceof TypeError) {
     diagnostic.value = {
       kind: 'manager',
       title: 'Agent Managerに接続できません',

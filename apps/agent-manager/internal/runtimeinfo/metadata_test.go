@@ -8,20 +8,11 @@ import (
 	"time"
 )
 
-func TestGenerateTokenAndWriteMetadata(t *testing.T) {
-	token, err := GenerateToken()
-	if err != nil {
-		t.Fatalf("generate token: %v", err)
-	}
-	if len(token) < 40 {
-		t.Fatalf("token is unexpectedly short: %d", len(token))
-	}
-
+func TestWriteMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime", "manager.json")
 	want := Metadata{
 		PID:           123,
 		Address:       "127.0.0.1:3100",
-		AuthToken:     token,
 		Version:       "test",
 		SchemaVersion: 1,
 		StartedAt:     time.Date(2026, 8, 15, 4, 0, 0, 0, time.UTC),
@@ -37,7 +28,7 @@ func TestGenerateTokenAndWriteMetadata(t *testing.T) {
 	if err := json.Unmarshal(content, &got); err != nil {
 		t.Fatalf("decode metadata: %v", err)
 	}
-	if got.AuthToken != want.AuthToken || got.Address != want.Address {
+	if got.Address != want.Address || got.PID != want.PID {
 		t.Fatalf("metadata = %#v, want %#v", got, want)
 	}
 }

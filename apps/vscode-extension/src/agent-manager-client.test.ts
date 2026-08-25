@@ -10,12 +10,10 @@ describe('AgentManagerClient session integration', () => {
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetch);
 
-    await expect(new AgentManagerClient('http://127.0.0.1:3100', 'shared-token').listProviders()).resolves.toEqual([
+    await expect(new AgentManagerClient('http://127.0.0.1:3100').listProviders()).resolves.toEqual([
       { id: 'codex', label: 'Codex', models: ['gpt-5.6-sol'], defaultModel: 'gpt-5.6-sol' },
     ]);
-    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:3100/api/v1/providers', expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer shared-token' }),
-    }));
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:3100/api/v1/providers', expect.any(Object));
   });
 
   it('reads every shared Manager session page used by the Web app', async () => {
@@ -29,12 +27,10 @@ describe('AgentManagerClient session integration', () => {
       }), { status: 200 }));
     vi.stubGlobal('fetch', fetch);
 
-    const sessions = await new AgentManagerClient('http://127.0.0.1:3100', 'shared-token').listSessions();
+    const sessions = await new AgentManagerClient('http://127.0.0.1:3100').listSessions();
 
     expect(sessions.map((session) => session.id)).toEqual(['vscode-session', 'older-session']);
-    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:3100/api/v1/sessions?limit=100&status=all', expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer shared-token' }),
-    }));
+    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:3100/api/v1/sessions?limit=100&status=all', expect.any(Object));
     expect(String(fetch.mock.calls[1]?.[0])).toContain('cursor=next');
   });
 
@@ -44,7 +40,7 @@ describe('AgentManagerClient session integration', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ approvals: [approval] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ...approval, status: 'approved' }), { status: 200 }));
     vi.stubGlobal('fetch', fetch);
-    const client = new AgentManagerClient('http://127.0.0.1:3100', 'shared-token');
+    const client = new AgentManagerClient('http://127.0.0.1:3100');
 
     await expect(client.listApprovals('session-1')).resolves.toEqual([approval]);
     await client.decideApproval('session-1', 'approval-1', { decision: 'allow_session', ruleArgv: ['go', 'test', '*'] });
@@ -59,7 +55,7 @@ describe('AgentManagerClient session integration', () => {
     const changeSet = { sessionId: 'session-1', checkpointId: 'checkpoint-1', files: [] };
     const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify(changeSet), { status: 200 }));
     vi.stubGlobal('fetch', fetch);
-    const client = new AgentManagerClient('http://127.0.0.1:3100', 'shared-token');
+    const client = new AgentManagerClient('http://127.0.0.1:3100');
 
     await client.restoreHunk('session-1', 'checkpoint-1', 'hunk-1');
     await client.restoreFile('session-1', 'checkpoint-1', 'file-1');
@@ -75,7 +71,7 @@ describe('AgentManagerClient session integration', () => {
       error: { code: 'checkpoint_conflict', message: 'current content changed' },
     }), { status: 409 })));
 
-    const error = await new AgentManagerClient('http://127.0.0.1:3100', 'shared-token')
+    const error = await new AgentManagerClient('http://127.0.0.1:3100')
       .restoreFile('session-1', 'checkpoint-1', 'file-1')
       .catch((cause: unknown) => cause);
 

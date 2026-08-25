@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "concurrently -k -n manager,web -c blue,green \"npm:dev:manager\" \"npm:dev:web\"",
-    "dev:manager": "go -C apps/agent-manager run ./cmd/agent-manager --auth-token maatgen-local-development-token",
+    "dev:manager": "go -C apps/agent-manager run ./cmd/agent-manager",
     "dev:web": "node scripts/wait-for-manager.mjs && corepack pnpm --filter @maatgen/web dev",
     "dev:mock": "corepack pnpm --filter @maatgen/web dev:mock",
     "generate:protocol": "corepack pnpm --filter @maatgen/protocol generate",

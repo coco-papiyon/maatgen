@@ -436,7 +436,7 @@ describe('App with MockAgentApi', () => {
     expect(wrapper.find('.load-more').exists()).toBe(false);
   });
 
-  it('shows actionable Manager and authentication diagnostics', async () => {
+  it('shows an actionable Manager diagnostic when the Manager is unreachable', async () => {
     class OfflineApi extends MockAgentApi {
       override async listSessions(): Promise<never> {
         throw new TypeError('Failed to fetch');
@@ -445,16 +445,6 @@ describe('App with MockAgentApi', () => {
     wrapper = mount(App, { props: { agentApi: new OfflineApi(), eventStreamFactory: passiveEventStream } });
     await flushPromises();
     expect(wrapper.find('.diagnostic-card.manager').text()).toContain('Agent Managerに接続できません');
-    wrapper.unmount();
-
-    class UnauthorizedApi extends MockAgentApi {
-      override async listSessions(): Promise<never> {
-        throw new AgentApiError('unauthorized', 401, 'unauthorized');
-      }
-    }
-    wrapper = mount(App, { props: { agentApi: new UnauthorizedApi(), eventStreamFactory: passiveEventStream } });
-    await flushPromises();
-    expect(wrapper.find('.diagnostic-card.auth').text()).toContain('認証に失敗しました');
   });
 
   it('shows the Codex installation diagnostic from a failed run event', async () => {

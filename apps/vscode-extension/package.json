@@ -37,12 +37,6 @@
           "type": "string",
           "default": "http://127.0.0.1:3100",
           "description": "Agent Manager base URL"
-        },
-        "maatgen.managerAuthToken": {
-          "type": "string",
-          "default": "maatgen-local-development-token",
-          "description": "Agent Manager bearer token",
-          "scope": "machine-overridable"
         }
       }
     },

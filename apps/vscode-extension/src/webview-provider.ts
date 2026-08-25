@@ -73,7 +73,6 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
     const config = vscode.workspace.getConfiguration('maatgen');
     this.manager = new AgentManagerClient(
       config.get('managerUrl', 'http://127.0.0.1:3100').replace(/\/$/, ''),
-      config.get('managerAuthToken', 'maatgen-local-development-token'),
     );
   }
 

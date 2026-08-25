@@ -203,7 +203,7 @@ Runが終端状態になるとRun前後のcheckpointからChangeSetが更新さ�
 
 Run完了後もSessionと会話履歴は維持され、同じCodex thread／Claude Code session／Copilot sessionへ続けて指示を送れます。Sessionを閉じるとprivate checkpoint refをcleanupします。実行中のRunがある場合は`409 Conflict`となります。
 
-health以外のHTTP APIには`Authorization: Bearer <token>`が必要です。起動時に生成されるtokenと実際のlisten addressは、データディレクトリ内の`runtime.json`へ保存されます。tokenはログへ出力されません。
+ローカルアクセスのみを想定しているため、HTTP APIに認証は必要ありません。
 
 WebSocket接続では、最初に`POST /api/v1/ws-tickets`で30秒間有効な一回限りのticketを取得します。接続時は次のsubprotocolを指定します。
 
@@ -218,7 +218,7 @@ WS /ws?sessionId={sessionId}&afterSequence={sequence}
 
 Web UIはSession選択後にWebSocketでEventを受信します。切断時は0.5秒から最大10秒の指数backoffで再接続し、最後に受信したsequence以降を再取得します。再送されたEventはsequenceで重複排除されます。接続状態は画面右上に表示されます。
 
-Session履歴は作成日時とSession IDによるkeyset paginationで25件ずつ読み込みます。レスポンスに`nextCursor`がある場合、同じ値を次のリクエストの`cursor`へ指定します。Web UIはManager接続失敗、認証失敗、Codex／Claude Code／Copilot CLI未導入を区別して対処方法を表示します。
+Session履歴は作成日時とSession IDによるkeyset paginationで25件ずつ読み込みます。レスポンスに`nextCursor`がある場合、同じ値を次のリクエストの`cursor`へ指定します。Web UIはManager接続失敗、Codex／Claude Code／Copilot CLI未導入を区別して対処方法を表示します。
 
 空きportをOSに選択させる場合は次のように起動します。
 
