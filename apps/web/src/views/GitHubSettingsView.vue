@@ -224,11 +224,16 @@ interface RuleForm {
   projectValue: string;
 }
 
+function repositoryProjectName(repository: string): string {
+  return repositories.value.find((monitor) => monitor.repository === repository)?.projectName ?? '';
+}
+
 function blankRuleForm(): RuleForm {
+  const repository = repositories.value[0]?.repository ?? '';
   return {
-    id: '', repository: repositories.value[0]?.repository ?? '', name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
+    id: '', repository, name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
     provider: providers.value[0]?.id ?? 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce', priority: 'medium',
-    labels: '', assignees: '', reviewers: '', projectTitle: '', projectField: '', projectValue: '',
+    labels: '', assignees: '', reviewers: '', projectTitle: repositoryProjectName(repository), projectField: '', projectValue: '',
   };
 }
 
@@ -263,6 +268,19 @@ watch(
     const form = editingRule.value;
     if (form && form.model && !availableModels.value.includes(form.model)) {
       form.model = '';
+    }
+  },
+);
+
+// 新規作成中（form.idが未設定）にリポジトリ選択を変更した場合、Project名のデフォルト値を
+// 選択中リポジトリのプロジェクト名に追従させる。編集中の既存ルールでは上書きしない。
+watch(
+  () => editingRule.value?.repository,
+  (nextRepository, previousRepository) => {
+    if (previousRepository === undefined || nextRepository === undefined) return;
+    const form = editingRule.value;
+    if (form && !form.id) {
+      form.projectTitle = repositoryProjectName(nextRepository);
     }
   },
 );
@@ -505,7 +523,7 @@ onMounted(() => void refresh());
           </div>
           <label>label条件（カンマ区切り、任意）<input v-model="editingRule.labels" placeholder="bug, needs-design" /></label>
           <div class="github-form-row">
-            <label>Project名（任意）<input v-model="editingRule.projectTitle" placeholder="Roadmap" /></label>
+            <label>プロジェクト名（任意）<input v-model="editingRule.projectTitle" placeholder="Roadmap" /></label>
             <label>フィールド名<input v-model="editingRule.projectField" placeholder="Status" /></label>
             <label>値<input v-model="editingRule.projectValue" placeholder="Ready" /></label>
           </div>
