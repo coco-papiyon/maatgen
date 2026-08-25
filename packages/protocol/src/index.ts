@@ -215,6 +215,7 @@ export interface GitHubTriggerRule {
   provider: AgentName;
   model?: string;
   reasoningEffort?: string;
+  autoApprove: boolean;
   concurrencyPolicy: GitHubConcurrencyPolicy;
   priority: GitHubJobPriority;
   createdAt: string;
@@ -290,6 +291,7 @@ export interface GitHubTriggerRuleRequest {
   provider: AgentName;
   model?: string;
   reasoningEffort?: string;
+  autoApprove: boolean;
   concurrencyPolicy: GitHubConcurrencyPolicy;
   priority: GitHubJobPriority;
 }

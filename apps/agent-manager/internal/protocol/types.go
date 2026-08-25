@@ -110,6 +110,10 @@ type SendMessageRequest struct {
 	Model           *string `json:"model,omitempty"`
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
 	TimeoutSeconds  *int    `json:"timeoutSeconds,omitempty"`
+	// AutoApprove requests that Codex's command execution approvals be
+	// granted automatically for this run, bypassing the AI/human approval
+	// flow (see agent.RunRequest.AutoApprove). Ignored by other providers.
+	AutoApprove bool `json:"autoApprove,omitempty"`
 }
 
 type AgentRun struct {

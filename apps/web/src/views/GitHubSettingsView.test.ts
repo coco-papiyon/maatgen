@@ -100,6 +100,7 @@ describe('GitHubSettingsView', () => {
       promptTemplate: 'Design {{.Title}}',
       includeBody: false,
       provider: 'codex',
+      autoApprove: false,
       concurrencyPolicy: 'coalesce',
       priority: 'medium',
     });
@@ -202,6 +203,7 @@ describe('GitHubSettingsView', () => {
       provider: 'codex',
       model: 'gpt-4-legacy',
       reasoningEffort: 'ultra-legacy',
+      autoApprove: false,
       concurrencyPolicy: 'coalesce',
       priority: 'medium',
     });
@@ -223,6 +225,24 @@ describe('GitHubSettingsView', () => {
     const saved = (await api.listGitHubTriggerRules()).find((rule) => rule.name === '旧モデルルール');
     expect(saved?.model).toBe('gpt-4-legacy');
     expect(saved?.reasoningEffort).toBe('ultra-legacy');
+  });
+
+  it('offers a Codex auto-approve checkbox next to reasoningEffort, defaulting to disabled', async () => {
+    const { wrapper, api } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    const autoApproveCheckbox = wrapper.get('input[aria-label="自動承認"]');
+    expect((autoApproveCheckbox.element as HTMLInputElement).checked).toBe(false);
+
+    await wrapper.get('.github-rule-form select').setValue(DEMO_WORKSPACE);
+    await wrapper.get('.github-rule-form input:not([disabled])').setValue('自動承認ルール');
+    await wrapper.get('.github-rule-form textarea').setValue('Design {{.Title}}');
+    await autoApproveCheckbox.setValue(true);
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const rule = (await api.listGitHubTriggerRules(DEMO_WORKSPACE)).find((candidate) => candidate.name === '自動承認ルール');
+    expect(rule?.autoApprove).toBe(true);
   });
 
   it('deletes a repository monitor after confirmation', async () => {

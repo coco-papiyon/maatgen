@@ -25,6 +25,11 @@ type RunRequest struct {
 	ReasoningEffort string
 	Timeout         time.Duration
 	Approval        ApprovalHandler
+	// AutoApprove, when true, skips the Approval handler for command
+	// execution requests and accepts them immediately. Only Codex has an
+	// approval flow to bypass (see codex/appserver.go); other providers
+	// ignore this field.
+	AutoApprove bool
 }
 
 type ApprovalRequest struct {

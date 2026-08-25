@@ -329,6 +329,8 @@ func (c *appServerConnection) handleRequest(message appServerMessage) {
 		// Working Tree edits are immediately visible by product design and are
 		// reverted through checkpoints, not an Accept/Reject workflow.
 		result = map[string]string{"decision": "accept"}
+	} else if message.Method == "item/commandExecution/requestApproval" && c.request.AutoApprove {
+		result = map[string]string{"decision": "accept"}
 	} else if message.Method != "item/commandExecution/requestApproval" || c.approval == nil {
 		requestErr = fmt.Errorf("unsupported Codex request %s", message.Method)
 	} else {

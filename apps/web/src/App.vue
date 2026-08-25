@@ -47,6 +47,7 @@ const storedProvider = localStorage.getItem(providerStorageKey) as AgentSession[
 const newSessionProvider = ref<AgentSession['agent']>(storedProvider || 'codex');
 const selectedModel = ref('');
 const reasoningEffort = ref<ReasoningEffort | ''>('');
+const autoApprove = ref(false);
 const nextSessionCursor = ref('');
 const loadingMoreSessions = ref(false);
 const sessionStatusFilterKey = 'maatgen.sessionStatusFilter';
@@ -592,6 +593,7 @@ async function selectSession(session: AgentSession) {
     ? provider.defaultModel
     : '';
   reasoningEffort.value = '';
+  autoApprove.value = false;
   events.value = [];
   changes.value = emptyChangeSet(session.id);
   usage.value = emptySessionUsage(session.id);
@@ -748,6 +750,7 @@ async function sendPrompt() {
       message,
       ...(selectedModel.value ? { model: selectedModel.value } : {}),
       ...(reasoningEffort.value ? { reasoningEffort: reasoningEffort.value } : {}),
+      ...(autoApprove.value ? { autoApprove: true } : {}),
     });
     await refreshSelected();
     scrollTimelineToBottom();
@@ -1250,6 +1253,10 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
             <select v-model="reasoningEffort" :disabled="busy || !!activeRun" aria-label="Reasoning effort">
               <option v-for="option in reasoningEffortOptions" :key="option.value || 'default-effort'" :value="option.value">Effort: {{ option.label }}</option>
             </select>
+            <label class="github-checkbox">
+              <input v-model="autoApprove" type="checkbox" :disabled="busy || !!activeRun" aria-label="自動承認" />
+              自動承認
+            </label>
             <span v-if="selectedModelPricing" class="model-pricing">${{ selectedModelPricing.inputPerMillion % 1 === 0 ? selectedModelPricing.inputPerMillion.toFixed(0) : selectedModelPricing.inputPerMillion.toFixed(2) }}/${{ selectedModelPricing.outputPerMillion % 1 === 0 ? selectedModelPricing.outputPerMillion.toFixed(0) : selectedModelPricing.outputPerMillion.toFixed(2) }}/MTok</span>
           </div>
           <button v-if="activeRun" type="button" class="stop-button" :disabled="busy" aria-label="処理を停止" @click="cancelRun">停止</button>

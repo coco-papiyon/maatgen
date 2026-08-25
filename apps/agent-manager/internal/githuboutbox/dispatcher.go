@@ -448,7 +448,7 @@ func (d *Dispatcher) startRun(ctx context.Context, event protocol.GitHubMonitorE
 	}
 
 	startedRun, err := d.runs.StartRun(ctx, sessionID, protocol.SendMessageRequest{
-		Message: prompt, Model: rule.Model, ReasoningEffort: rule.ReasoningEffort,
+		Message: prompt, Model: rule.Model, ReasoningEffort: rule.ReasoningEffort, AutoApprove: rule.AutoApprove,
 	})
 	if err != nil {
 		if errors.Is(err, runservice.ErrRepositoryBusy) {
