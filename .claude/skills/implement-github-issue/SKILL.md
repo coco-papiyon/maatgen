@@ -1,6 +1,6 @@
 ---
 name: implement-github-issue
-description: Issue番号を引数に取り、mainを最新化してissue_<番号>ブランチを作成し、GitHub Issueを取得・実装する。実装計画と実装結果をPR本文へ投稿し、PR発行後にIssueのProject StatusをIn reviewへ変更するIssue実装に使用する。コード変更を伴わないトリアージには使用しない。
+description: Issue番号を引数に取り、mainを最新化してissue_<番号>ブランチを作成し、GitHub Issueを取得・実装する。実装計画と実装結果、Close #<Issue番号>をPR本文へ投稿し、PR発行後にIssueのProject StatusをIn reviewへ変更するIssue実装に使用する。コード変更を伴わないトリアージには使用しない。
 ---
 
 # GitHub Issueを実装する
@@ -40,19 +40,19 @@ description: Issue番号を引数に取り、mainを最新化してissue_<番号
     - 実行したテスト・チェックと結果
     - 未解決の制約、既存失敗、残存リスク
     
-    計画ファイルのローカルパスだけを本文に書いて済ませず、計画の内容を本文へ転記する。Issue本文やコメントに含まれる秘密情報や不要な個人情報は転記しない。
+    計画ファイルのローカルパスだけを本文に書いて済ませず、計画の内容を本文へ転記する。Issue本文やコメントに含まれる秘密情報や不要な個人情報は転記しない。PR本文の末尾には、GitHubの自動クローズキーワードとして`Close #<Issue番号>`を単独行で追加する。既存PR本文を更新する場合も、この行を末尾に保持し、重複させない。
 12. 現在の`issue_<Issue番号>`ブランチに対応するオープンPRを確認する。実装変更（`result/plan`の計画ファイルを除く）を対象ファイルだけ明示してcommitし、`git push -u origin issue_<Issue番号>`でブランチをpushする。`git add -A`で計画ファイルや無関係な変更を一括ステージしない。既存PRがあればpush後にそのPR本文を作成した本文で更新し、既存PRがなければpush後にbaseを`main`としてPRを作成する。利用可能なGitHub連携を優先し、なければ認証済みのGitHub CLI/APIを使う。
-13. PR本文の更新または作成結果を確認し、PR番号、URL、本文に`## 実装計画`と`## 実装結果`の両方が含まれることを確認する。push、commit、PR作成または更新に失敗した場合は、実装済みの変更と失敗した外部操作を分けて報告する。PRが発行・更新されたことを確認できるまで、Issueのステータスは変更しない。
+13. PR本文の更新または作成結果を確認し、PR番号、URL、本文に`## 実装計画`、`## 実装結果`、末尾の`Close #<Issue番号>`が含まれることを確認する。`Close #<Issue番号>`がない、別のIssue番号になっている、または末尾以外にある場合はPR本文を修正してから完了とする。push、commit、PR作成または更新に失敗した場合は、実装済みの変更と失敗した外部操作を分けて報告する。PRが発行・更新されたことを確認できるまで、Issueのステータスは変更しない。
 14. PRの発行または既存PR本文の更新が成功した後、対応するIssueが所属するGitHub Projectの`Status`フィールドを`In review`へ変更する。利用可能なGitHub連携を優先し、なければ認証済みのGitHub APIまたは`gh project item-edit`相当の操作を使う。対象Projectが複数ある場合はIssueが現在所属するProjectを特定し、`In review`という既存の選択肢を使用する。Project、Statusフィールド、または`In review`選択肢を特定できない場合は、PR発行済みだがステータス未変更として報告し、推測でラベル追加や別Projectの変更を行わない。更新後にIssueとProjectを再取得し、Statusが正確に`In review`であることを確認する。
 
 ## 境界
 
 - このスキルでは、上記の`main`切り替え、fast-forward限定のpull、新規ブランチ作成、Issue取得、計画ファイル作成が明示された作業フローである。
-- このスキルでは、実装計画と実装結果をPR本文へ投稿するために必要なcommit、ブランチpush、既存PR本文の更新、PR作成、およびPR発行後の対応IssueのProject Statusを`In review`へ変更する。PRのマージ、Issueのクローズ、ラベル変更、Issueへのコメント投稿は行わない。
+- このスキルでは、実装計画と実装結果、GitHubの自動クローズ用`Close #<Issue番号>`をPR本文へ投稿するために必要なcommit、ブランチpush、既存PR本文の更新、PR作成、およびPR発行後の対応IssueのProject Statusを`In review`へ変更する。PRのマージ、Issueの手動クローズ、ラベル変更、Issueへのコメント投稿は行わない。IssueはPRが後でマージされたときにGitHubのキーワード機能でクローズされる。
 - `main`のpull、Issue取得、ブランチ作成のいずれかが失敗した場合は、部分的な実装を進めず停止する。
 - 関連するリファクタリングや整理へ、暗黙に作業範囲を広げない。
 - すでにIssueが満たされている場合は根拠を計画または報告に示し、不要な編集を避ける。
 
 ## 完了報告
 
-Issue番号、Issueタイトル、作成したブランチ名、計画ファイルのパス、PR番号とURL、PR本文を作成または更新した結果、対応IssueのProject Statusを`In review`へ変更した結果、変更内容、満たした受け入れ条件、実行した検証を具体的に報告する。計画ファイル自体をpushしていないこと、ステータス変更を含む外部操作の失敗、残る制約、実行できなかった確認があれば明記する。
+Issue番号、Issueタイトル、作成したブランチ名、計画ファイルのパス、PR番号とURL、PR本文を作成または更新した結果、末尾に`Close #<Issue番号>`を追加したこと、対応IssueのProject Statusを`In review`へ変更した結果、変更内容、満たした受け入れ条件、実行した検証を具体的に報告する。計画ファイル自体をpushしていないこと、ステータス変更を含む外部操作の失敗、残る制約、実行できなかった確認があれば明記する。
