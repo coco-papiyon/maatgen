@@ -204,6 +204,6 @@
   },
   "github": {
     "token": "",
-    "allowedEnterpriseHosts": []
+    "allowedEnterpriseHosts": ["*.ghe.com"]
   }
 }
