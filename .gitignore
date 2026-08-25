@@ -15,7 +15,7 @@ bin/
 # Runtime data
 .maatgen/
 result/
-/apps/agent-manager/config/providers.json
+apps/agent-manager/config/providers.json
 
 # Editors and OS files
 .vscode-test/
