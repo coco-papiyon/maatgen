@@ -43,7 +43,6 @@ func TestTriggerRuleCreateGetList(t *testing.T) {
 	if err := store.CreateRepositoryMonitor(ctx, monitor); err != nil {
 		t.Fatalf("create monitor: %v", err)
 	}
-
 	rule := testTriggerRule("rule-1", monitor.Repository, createdAt)
 	if err := store.CreateTriggerRule(ctx, rule); err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -134,11 +133,16 @@ func TestTriggerRuleUpdate(t *testing.T) {
 	if err := store.CreateRepositoryMonitor(ctx, monitor); err != nil {
 		t.Fatalf("create monitor: %v", err)
 	}
+	otherMonitor := testMonitor("C:/workspace/other", createdAt)
+	if err := store.CreateRepositoryMonitor(ctx, otherMonitor); err != nil {
+		t.Fatalf("create other monitor: %v", err)
+	}
 	rule := testTriggerRule("rule-1", monitor.Repository, createdAt)
 	if err := store.CreateTriggerRule(ctx, rule); err != nil {
 		t.Fatalf("create rule: %v", err)
 	}
 
+	rule.Repository = otherMonitor.Repository
 	rule.Name = "Renamed"
 	rule.Enabled = false
 	rule.EventKinds = []protocol.GitHubItemKind{protocol.GitHubItemIssue, protocol.GitHubItemPullRequest}
@@ -156,7 +160,7 @@ func TestTriggerRuleUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Name != "Renamed" || got.Enabled || got.ConcurrencyPolicy != protocol.GitHubConcurrencySkip {
+	if got.Repository != otherMonitor.Repository || got.Name != "Renamed" || got.Enabled || got.ConcurrencyPolicy != protocol.GitHubConcurrencySkip {
 		t.Fatalf("got = %#v", got)
 	}
 	if !got.IncludeBody {

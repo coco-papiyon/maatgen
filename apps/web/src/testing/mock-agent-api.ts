@@ -503,7 +503,7 @@ export class MockAgentApi implements AgentApi {
     void existingModel;
     void existingReasoningEffort;
     const updated: GitHubTriggerRule = {
-      ...existingRest, name: request.name, enabled: request.enabled, eventKinds: request.eventKinds,
+      ...existingRest, repository: request.workspace, name: request.name, enabled: request.enabled, eventKinds: request.eventKinds,
       filters: request.filters, promptTemplate: request.promptTemplate, includeBody: request.includeBody,
       provider: request.provider, concurrencyPolicy: request.concurrencyPolicy, priority: request.priority,
       ...(request.model !== undefined ? { model: request.model } : {}),

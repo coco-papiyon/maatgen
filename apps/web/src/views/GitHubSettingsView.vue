@@ -483,12 +483,11 @@ onMounted(() => void refresh());
             <button type="button" aria-label="閉じる" @click="cancelEditRule">×</button>
           </div>
           <label>ローカルパス
-            <select v-if="!editingRule.id" v-model="editingRule.repository" required>
+            <select v-model="editingRule.repository" required>
               <option v-for="monitor in repositories" :key="monitor.repository" :value="monitor.repository">
                 {{ monitor.repository }} ({{ repositoryLabel(monitor) }})
               </option>
             </select>
-            <input v-else :value="editingRule.repository" disabled />
           </label>
           <label>ルール名<input v-model="editingRule.name" required /></label>
           <fieldset class="github-checkbox-group">
