@@ -405,6 +405,29 @@ describe('App with MockAgentApi', () => {
     expect(JSON.parse(localStorage.getItem('maatgen.workspaceHistory') ?? '[]')).toEqual(['C:/repo/older', 'C:/repo/newer']);
   });
 
+  it("shows the session's first instruction in the sidebar, falling back to the workspace path until one is sent", async () => {
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#workspace').setValue('C:/repo/new-project');
+    await mounted.wrapper.find('form.new-session').trigger('submit');
+    await flushPromises();
+
+    const item = () => mounted.wrapper.findAll('.session-item').find((entry) => entry.text().includes('new-project'))!;
+    expect(item().find('.session-title').text()).toBe('repo/new-project');
+
+    await mounted.wrapper.find('.composer textarea').setValue('最初の指示');
+    await mounted.wrapper.find('.composer').trigger('submit');
+    await flushPromises();
+    // Force a session-list refetch (mirrors the periodic poll that normally
+    // picks up the change) rather than asserting on timer internals.
+    await mounted.wrapper.find('.session-filter select').setValue('all');
+    await flushPromises();
+    await mounted.wrapper.find('.session-filter select').setValue('active');
+    await flushPromises();
+
+    expect(item().find('.session-title').text()).toBe('最初の指示');
+    expect(item().find('.session-meta').text()).toContain('new-project');
+  });
+
   it('keeps the composer available and continues the same session after a run completes', async () => {
     const api = new MockAgentApi();
     let pushEvent: ((event: SessionEvent) => void) | undefined;

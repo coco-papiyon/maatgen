@@ -17,6 +17,7 @@
     "githubItemKind": { "enum": ["issue", "pull_request"] },
     "githubItemNumber": { "type": "integer" },
     "createdAt": { "type": "string", "format": "date-time" },
-    "closedAt": { "type": "string", "format": "date-time" }
+    "closedAt": { "type": "string", "format": "date-time" },
+    "firstPrompt": { "type": "string", "minLength": 1 }
   }
 }

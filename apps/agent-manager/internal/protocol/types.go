@@ -86,6 +86,7 @@ type AgentSession struct {
 	GitHubItemNumber   *int            `json:"githubItemNumber,omitempty"`
 	CreatedAt          time.Time       `json:"createdAt"`
 	ClosedAt           *time.Time      `json:"closedAt,omitempty"`
+	FirstPrompt        *string         `json:"firstPrompt,omitempty"`
 }
 
 // SessionCursor is the decoded keyset position used for session pagination.
