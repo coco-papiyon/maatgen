@@ -244,7 +244,7 @@ func run() error {
 	// monitor events into ordinary Sessions/Runs through the same sessions
 	// and runs services constructed above, so an automated Run is
 	// indistinguishable from a manual one downstream.
-	dispatcher = githuboutbox.NewDispatcher(store, sessions, runs)
+	dispatcher = githuboutbox.NewDispatcher(store, sessions, runs, githuboutbox.WithProviderUsage(providerUsage))
 	if reconcileErr := dispatcher.Reconcile(context.Background()); reconcileErr != nil {
 		slog.Warn("github monitor outbox reconciliation failed", "error", reconcileErr)
 	}

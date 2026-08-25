@@ -243,7 +243,8 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('#files-tab').attributes('aria-selected')).toBe('true');
     expect(mounted.wrapper.find('.file-tree').text()).toContain('README.md');
 
-    const readmeButton = mounted.wrapper.findAll('.file-tree-file').find((item) => item.text() === 'README.md')!;
+    const readmeButton = mounted.wrapper.findAll('.file-tree-file').find((item) => item.text().includes('README.md'))!;
+    expect(readmeButton.find('.file-tree-caret').exists()).toBe(true);
     await readmeButton.trigger('click');
     await flushPromises();
 
@@ -262,7 +263,7 @@ describe('App with MockAgentApi', () => {
     await flushPromises();
     await mounted.wrapper.find('.file-tree-dir').trigger('click');
     await flushPromises();
-    const authButton = mounted.wrapper.findAll('.file-tree-file').find((item) => item.text() === 'auth.ts')!;
+    const authButton = mounted.wrapper.findAll('.file-tree-file').find((item) => item.text().includes('auth.ts'))!;
     await authButton.trigger('click');
     await flushPromises();
 

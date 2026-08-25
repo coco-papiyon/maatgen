@@ -7,6 +7,7 @@ import type { AgentSession, ChangeFile, ChangeSet, CommandApproval, SessionEvent
 import { CheckpointDocumentProvider } from './checkpoint-document-provider.js';
 import { AgentResponseDocumentProvider } from './agent-response-document-provider.js';
 import { selectAssistantResponse } from './assistant-response.js';
+import { renderMarkdown } from '@maatgen/markdown';
 
 interface WorkspaceState {
   name: string;
@@ -37,7 +38,8 @@ type WebviewMessage =
   | { type: 'change.restoreAll' }
   | { type: 'response.open'; eventId: string }
   | { type: 'response.save'; eventId: string }
-  | { type: 'workspace.searchFiles'; query: string; requestId: string };
+  | { type: 'workspace.searchFiles'; query: string; requestId: string }
+  | { type: 'provider-usage.requestAll' };
 
 const FILE_SEARCH_EXCLUDE = '**/{node_modules,.git,dist,out,build,.next,coverage,.venv,__pycache__}/**';
 const FILE_SEARCH_MAX_CANDIDATES = 2000;
@@ -127,6 +129,8 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
           void this.searchWorkspaceFiles(message.query).then((files) => {
             void this.view?.webview.postMessage({ type: 'workspace.files', requestId: message.requestId, files });
           });
+        } else if (message.type === 'provider-usage.requestAll') {
+          void this.requestAllProviderUsage();
         } else if (message.type === 'session.close' && this.session) {
           void this.manager.closeSession(this.session.id).then(async () => {
             this.stopPolling();
@@ -264,6 +268,22 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
       await this.view?.webview.postMessage({ type: 'provider-usage.state', usage });
     } catch {
       // Provider usage is optional and must not block the session UI.
+    }
+  }
+
+  private async requestAllProviderUsage(): Promise<void> {
+    const sessionId = this.session?.id;
+    if (!sessionId) {
+      await this.view?.webview.postMessage({ type: 'provider-usage.allState', usages: [] });
+      return;
+    }
+    try {
+      const usages = await this.manager.getAllProviderUsage(sessionId);
+      if (this.session?.id !== sessionId) return;
+      await this.view?.webview.postMessage({ type: 'provider-usage.allState', usages });
+    } catch {
+      // Provider usage is optional and must not block the session UI.
+      await this.view?.webview.postMessage({ type: 'provider-usage.allState', usages: [] });
     }
   }
 
@@ -471,8 +491,11 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async postState(session: AgentSession | undefined, events: SessionEvent[], usage: SessionUsage | undefined, changes: ChangeSet | undefined): Promise<void> {
+    const renderedEvents = events.map((event) => event.type === 'assistant_message'
+      ? { ...event, renderedHtml: renderMarkdown(typeof event.data?.text === 'string' ? event.data.text : '') }
+      : event);
     await this.view?.webview.postMessage({
-      type: 'session.state', workspace: this.getWorkspaceState(), sessions: this.sessions, session, events, usage, changes, activeRunId: this.activeRunId,
+      type: 'session.state', workspace: this.getWorkspaceState(), sessions: this.sessions, session, events: renderedEvents, usage, changes, activeRunId: this.activeRunId,
       providerUsage: this.providerUsage, approvals: this.approvals, providers: this.providers, selectedProvider: this.selectedProvider, selectedModel: this.selectedModel, selectedReasoningEffort: this.selectedReasoningEffort,
     });
   }

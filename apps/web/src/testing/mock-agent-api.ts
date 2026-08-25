@@ -214,6 +214,10 @@ export class MockAgentApi implements AgentApi {
     return undefined;
   }
 
+  async getAllProviderUsage(_id: string): Promise<ProviderUsage[]> {
+    return [];
+  }
+
   async getUsageSummary(granularity: UsageGranularity, provider?: string, model?: string): Promise<UsageSummary> {
     const seriesBy: 'provider' | 'model' = provider ? 'model' : 'provider';
     type Bucket = {

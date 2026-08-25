@@ -94,6 +94,7 @@ export interface AgentApi {
   getChanges(id: string): Promise<ChangeSet>;
   getUsage(id: string): Promise<SessionUsage>;
   getProviderUsage(id: string): Promise<ProviderUsage | undefined>;
+  getAllProviderUsage(id: string): Promise<ProviderUsage[]>;
   getUsageSummary(granularity: UsageGranularity, provider?: string, model?: string): Promise<UsageSummary>;
   getUsageProviders(): Promise<string[]>;
   getUsageModels(provider?: string): Promise<string[]>;
@@ -225,6 +226,12 @@ export const httpAgentApi: AgentApi = {
   },
   getProviderUsage(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}/provider-usage`);
+  },
+  async getAllProviderUsage(id) {
+    const response = await request<{ providers: ProviderUsage[] }>(
+      `/api/v1/sessions/${encodeURIComponent(id)}/provider-usage/all`,
+    );
+    return response.providers;
   },
   getUsageSummary(granularity, provider, model) {
     const query = new URLSearchParams({ granularity });

@@ -34,7 +34,8 @@ async function toggle(node: WorkspaceFileNode) {
     <li v-for="node in nodes" :key="node.path">
       <template v-if="node.type === 'dir'">
         <button type="button" class="file-tree-dir" :class="{ open: expanded.has(node.path) }" @click="toggle(node)">
-          <span class="file-tree-caret">{{ node.hasChildren ? (expanded.has(node.path) ? '▾' : '▸') : '·' }}</span>{{ node.name }}
+          <span class="file-tree-caret">{{ node.hasChildren ? (expanded.has(node.path) ? '▾' : '▸') : '·' }}</span>
+          <span class="file-tree-icon">📁</span>{{ node.name }}
         </button>
         <p v-if="expanded.has(node.path) && loading.has(node.path)" class="file-tree-loading">読み込み中…</p>
         <FileTree
@@ -46,7 +47,8 @@ async function toggle(node: WorkspaceFileNode) {
         />
       </template>
       <button v-else type="button" class="file-tree-file" :class="{ selected: node.path === props.selectedPath }" @click="emit('select', node.path)">
-        {{ node.name }}
+        <span class="file-tree-caret" aria-hidden="true"></span>
+        <span class="file-tree-icon">📄</span>{{ node.name }}
       </button>
     </li>
   </ul>

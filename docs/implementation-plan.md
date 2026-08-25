@@ -858,7 +858,7 @@ docs/decisions/
 - [x] Extension workspaceとExtension Development Host起動設定
 - [x] Explorer内の`WebviewViewProvider`
 - [x] `default-src 'none'`とnonceによるWebview CSP
-- [x] AgentのMarkdown結果をWeb UI／VS Code Webviewの表示密度に応じてレンダリング
+- [x] AgentのMarkdown結果を共通の`@maatgen/markdown`でWeb UI／VS Code Webviewへ安全にレンダリング（表・打ち消し線・タスクリスト・自動リンクを含む）
 - [x] Agent回答を中央EditorのMarkdown Previewで表示し、通常の`.md`ファイルへ保存
 - [x] Workspace名／pathのExtension-Webviewメッセージ連携
 - [x] VS Codeテーマ変数に対応した初期UI

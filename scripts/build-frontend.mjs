@@ -35,6 +35,9 @@ function runNode(args, cwd = root) {
 console.log('Building the protocol package...');
 run(['run', 'build', '--prefix', 'packages/protocol']);
 
+console.log('Building the Markdown package...');
+run(['run', 'build', '--prefix', 'packages/markdown']);
+
 console.log('Building the Web version...');
 run(['run', 'build', '--prefix', 'apps/web']);
 

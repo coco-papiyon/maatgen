@@ -14,6 +14,7 @@
     "test": "vitest run --configLoader runner --passWithNoTests"
   },
   "dependencies": {
+    "@maatgen/markdown": "workspace:*",
     "@maatgen/protocol": "workspace:*",
     "vue": "^3.5.13",
     "vue-router": "^4.6.4"

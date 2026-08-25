@@ -1,10 +1,12 @@
-// Package githuboutbox turns GitHub monitor events with status "queued" or
-// "session_created" into ordinary Agent Sessions and Runs (ADR-007 sections
+// Package githuboutbox turns GitHub monitor jobs (events with status "queued" or
+// "session_created") into ordinary Agent Sessions and Runs (ADR-007 sections
 // 4 and 6): it is the "separate dispatcher" the ADR requires to read the
-// Outbox events internal/githubmonitor's Evaluator writes and advance them
+// Outbox jobs (called events in the protocol, but treated as jobs to be
+// executed) that internal/githubmonitor's Evaluator writes and advance them
 // through session_created -> run_started -> a terminal status, while
-// respecting each repository's execution lock and each rule's concurrency
-// policy.
+// respecting each repository's execution lock, each rule's concurrency
+// policy, and provider quota availability (prioritizing jobs for providers
+// with available quota).
 package githuboutbox
 
 import (
@@ -58,15 +60,22 @@ type RunStarter interface {
 	IsRepositoryBusy(repository string) bool
 }
 
+// ProviderUsageReader is satisfied by *providerusage.Service. It is optional;
+// if nil, provider usage checks are skipped.
+type ProviderUsageReader interface {
+	GetProviderUsage(ctx context.Context, provider protocol.AgentName, directory string) (protocol.ProviderUsage, error)
+}
+
 // Dispatcher is the Outbox dispatcher. Register ObserveRunTerminal with the
 // run.Service the RunStarter wraps (run.WithTerminalObserver) so it learns
 // when a Run it started finishes.
 type Dispatcher struct {
-	store        Store
-	sessions     SessionCreator
-	runs         RunStarter
-	now          func() time.Time
-	pollInterval time.Duration
+	store         Store
+	sessions      SessionCreator
+	runs          RunStarter
+	providerUsage ProviderUsageReader // optional; if nil, usage checks are skipped
+	now           func() time.Time
+	pollInterval  time.Duration
 
 	mu      sync.Mutex
 	tracked map[string]string // runID -> monitor event ID
@@ -81,6 +90,11 @@ type Option func(*Dispatcher)
 // WithPollInterval overrides how often Start's background loop calls Tick.
 func WithPollInterval(interval time.Duration) Option {
 	return func(d *Dispatcher) { d.pollInterval = interval }
+}
+
+// WithProviderUsage sets the provider usage reader for checking quota before runs.
+func WithProviderUsage(reader ProviderUsageReader) Option {
+	return func(d *Dispatcher) { d.providerUsage = reader }
 }
 
 func NewDispatcher(store Store, sessions SessionCreator, runs RunStarter, options ...Option) *Dispatcher {
@@ -134,24 +148,76 @@ func (d *Dispatcher) Close(ctx context.Context) error {
 	}
 }
 
-// Tick processes one batch of pending Outbox events: it advances "queued"
-// events (create Session, start Run) and "session_created" events (a
+// sortJobsByProviderAvailability reorders jobs so that jobs for providers
+// with available quota are processed before jobs whose provider quota is exhausted.
+// Jobs for the same exhausted provider remain queued for when quota recovers.
+func (d *Dispatcher) sortJobsByProviderAvailability(ctx context.Context, jobs []protocol.GitHubMonitorEvent) []protocol.GitHubMonitorEvent {
+	if d.providerUsage == nil {
+		return jobs // No sorting if usage reader unavailable
+	}
+	// Collect provider availability: provider name -> hasQuota
+	providerQuota := make(map[protocol.AgentName]bool)
+
+	type jobWithProvider struct {
+		event    protocol.GitHubMonitorEvent
+		provider protocol.AgentName
+		hasQuota bool
+	}
+	var jobsWithProviders []jobWithProvider
+
+	for _, job := range jobs {
+		rule, err := d.store.GetTriggerRule(ctx, *job.RuleID)
+		if err != nil {
+			// On error, keep job in original position
+			jobsWithProviders = append(jobsWithProviders, jobWithProvider{event: job, provider: "", hasQuota: true})
+			continue
+		}
+		provider := rule.Provider
+
+		// Check quota for this provider (cache results)
+		quota, ok := providerQuota[provider]
+		if !ok {
+			canProceed, _, _ := d.checkProviderUsageReady(ctx, provider, job.Repository)
+			quota = canProceed
+			providerQuota[provider] = quota
+		}
+		jobsWithProviders = append(jobsWithProviders, jobWithProvider{event: job, provider: provider, hasQuota: quota})
+	}
+
+	// Sort: jobs with quota first, then jobs without
+	sort.SliceStable(jobsWithProviders, func(i, j int) bool {
+		return jobsWithProviders[i].hasQuota && !jobsWithProviders[j].hasQuota
+	})
+
+	sorted := make([]protocol.GitHubMonitorEvent, len(jobsWithProviders))
+	for i, j := range jobsWithProviders {
+		sorted[i] = j.event
+	}
+	return sorted
+}
+
+// Tick processes one batch of pending Outbox jobs: it advances "queued"
+// jobs (create Session, start Run) and "session_created" jobs (a
 // Session exists from a previous, interrupted attempt; start its Run), in
 // each case honoring the matched rule's concurrency policy when the
 // repository's execution lock is held by another Run.
+// Jobs are processed in order of provider availability: if a provider's quota
+// is exhausted, jobs for other providers in the queue are processed first.
 func (d *Dispatcher) Tick(ctx context.Context) error {
 	queued, err := d.store.ListMonitorEventsByStatus(ctx, protocol.GitHubMonitorEventQueued, batchSize)
 	if err != nil {
-		return fmt.Errorf("list queued github monitor events: %w", err)
+		return fmt.Errorf("list queued github monitor jobs: %w", err)
 	}
 	queued = d.reconcileCoalesceQueue(ctx, queued)
+	// Sort jobs by provider availability: prioritize jobs for providers with quota remaining.
+	queued = d.sortJobsByProviderAvailability(ctx, queued)
 	for _, event := range queued {
 		d.dispatchQueued(ctx, event)
 	}
 
 	sessionCreated, err := d.store.ListMonitorEventsByStatus(ctx, protocol.GitHubMonitorEventSessionCreated, batchSize)
 	if err != nil {
-		return fmt.Errorf("list session_created github monitor events: %w", err)
+		return fmt.Errorf("list session_created github monitor jobs: %w", err)
 	}
 	for _, event := range sessionCreated {
 		d.dispatchSessionCreated(ctx, event)
@@ -160,8 +226,8 @@ func (d *Dispatcher) Tick(ctx context.Context) error {
 }
 
 // Reconcile recovers from a Manager restart (ADR-007 section 6): a "queued"
-// or "session_created" event is safely retried by Tick's normal flow (it
-// never got far enough to start a Run), but a "run_started" event's Run may
+// or "session_created" job is safely retried by Tick's normal flow (it
+// never got far enough to start a Run), but a "run_started" job's Run may
 // have already reached a terminal state before the process exited, with no
 // ObserveRunTerminal call ever delivered for it. Reconcile catches those up
 // by reading the Run's current status directly. Call it once at startup,
@@ -169,11 +235,11 @@ func (d *Dispatcher) Tick(ctx context.Context) error {
 func (d *Dispatcher) Reconcile(ctx context.Context) error {
 	events, err := d.store.ListMonitorEventsByStatus(ctx, protocol.GitHubMonitorEventRunStarted, batchSize)
 	if err != nil {
-		return fmt.Errorf("list run_started github monitor events: %w", err)
+		return fmt.Errorf("list run_started github monitor jobs: %w", err)
 	}
 	for _, event := range events {
 		if event.RunID == nil {
-			d.failEvent(ctx, event.ID, "run_started event is missing its run id")
+			d.failEvent(ctx, event.ID, "run_started job is missing its run id")
 			continue
 		}
 		runRecord, err := d.store.GetRun(ctx, *event.RunID)
@@ -270,7 +336,36 @@ func (d *Dispatcher) dispatchQueued(ctx context.Context, event protocol.GitHubMo
 	}
 	event.SessionID = &session.ID
 
-	d.startRun(ctx, event, rule, session.ID, prompt)
+	d.startRun(ctx, event, rule, session.ID, session.Workspace, session.Agent, prompt)
+}
+
+// checkProviderUsageReady checks if the provider has available quota.
+// Returns (canProceed, waitDuration, error).
+// If providerUsage reader is nil, assumes quota is available.
+func (d *Dispatcher) checkProviderUsageReady(ctx context.Context, provider protocol.AgentName, directory string) (bool, time.Duration, error) {
+	if d.providerUsage == nil {
+		return true, 0, nil
+	}
+	usage, err := d.providerUsage.GetProviderUsage(ctx, provider, directory)
+	if err != nil {
+		// Fetch failure does not block execution (provider usage monitoring is optional).
+		return true, 0, nil
+	}
+	for _, window := range usage.Windows {
+		if window.RemainingPercent <= 0 {
+			// Remaining quota is exhausted. Estimate wait time from reset label if available.
+			waitDuration := 5 * time.Minute // default fallback
+			if window.ResetLabel != "" {
+				if resetTime, err := time.Parse(time.RFC3339, window.ResetLabel); err == nil {
+					if until := time.Until(resetTime); until > 0 {
+						waitDuration = until + 30*time.Second // small buffer after reset
+					}
+				}
+			}
+			return false, waitDuration, nil
+		}
+	}
+	return true, 0, nil
 }
 
 func (d *Dispatcher) dispatchSessionCreated(ctx context.Context, event protocol.GitHubMonitorEvent) {
@@ -292,10 +387,20 @@ func (d *Dispatcher) dispatchSessionCreated(ctx context.Context, event protocol.
 		d.failEvent(ctx, event.ID, err.Error())
 		return
 	}
-	d.startRun(ctx, event, rule, *event.SessionID, prompt)
+	d.startRun(ctx, event, rule, *event.SessionID, event.Repository, rule.Provider, prompt)
 }
 
-func (d *Dispatcher) startRun(ctx context.Context, event protocol.GitHubMonitorEvent, rule protocol.GitHubTriggerRule, sessionID, prompt string) {
+func (d *Dispatcher) startRun(ctx context.Context, event protocol.GitHubMonitorEvent, rule protocol.GitHubTriggerRule, sessionID, workspace string, provider protocol.AgentName, prompt string) {
+	// Check provider usage quota before starting the run.
+	canProceed, waitDuration, _ := d.checkProviderUsageReady(ctx, provider, workspace)
+	if !canProceed {
+		if rule.ConcurrencyPolicy == protocol.GitHubConcurrencySkip {
+			d.skipEvent(ctx, event.ID, fmt.Sprintf("provider quota exhausted, will retry after %v", waitDuration))
+		}
+		// coalesce: leave the event queued for the next Tick so it retries when quota recovers.
+		return
+	}
+
 	startedRun, err := d.runs.StartRun(ctx, sessionID, protocol.SendMessageRequest{
 		Message: prompt, Model: rule.Model, ReasoningEffort: rule.ReasoningEffort,
 	})

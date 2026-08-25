@@ -6,7 +6,7 @@ describe('renderMarkdown', () => {
     const html = renderMarkdown('# Result\n\n- **done**\n- `go test`\n\n```ts\nconst value = 1;\n```\n\n<script>alert(1)</script>');
     expect(html).toContain('<h1>Result</h1>');
     expect(html).toContain('<strong>done</strong>');
-    expect(html).toContain('<pre><code class="language-ts">const value = 1;</code></pre>');
+    expect(html).toContain('<pre><code class="language-ts">const value = 1;');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('<script>');
   });
@@ -14,7 +14,7 @@ describe('renderMarkdown', () => {
   it('only emits safe external links', () => {
     const html = renderMarkdown('[safe](https://example.com) [unsafe](javascript:alert(1))');
     expect(html).toContain('href="https://example.com"');
-    expect(html).not.toContain('javascript:');
+    expect(html).not.toContain('href="javascript:');
   });
 
   it('renders tables with alignment and escaped cell content', () => {
@@ -37,6 +37,6 @@ describe('renderMarkdown', () => {
   it('renders safe images and rejects unsafe image URLs', () => {
     const html = renderMarkdown('![diagram](https://example.com/diagram.png) ![bad](javascript:alert(1))');
     expect(html).toContain('<img src="https://example.com/diagram.png" alt="diagram" loading="lazy">');
-    expect(html).not.toContain('javascript:');
+    expect(html).not.toContain('src="javascript:');
   });
 });

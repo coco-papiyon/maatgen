@@ -92,6 +92,12 @@ describe('renderWebviewHtml', () => {
     expect(() => new Function(script!)).not.toThrow();
   });
 
+  it('uses HTML rendered by the shared Markdown renderer', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain("body.innerHTML = event.renderedHtml || ''");
+    expect(html).not.toContain('const renderMarkdown =');
+  });
+
   it('wires up an @-mention file picker for the prompt textarea', () => {
     const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
     expect(html).toContain('id="mention-list"');

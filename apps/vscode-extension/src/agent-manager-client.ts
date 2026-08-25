@@ -115,6 +115,12 @@ export class AgentManagerClient {
     return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/provider-usage`);
   }
 
+  getAllProviderUsage(id: string): Promise<ProviderUsage[]> {
+    return this.request<{ providers: ProviderUsage[] }>(
+      `/api/v1/sessions/${encodeURIComponent(id)}/provider-usage/all`,
+    ).then((response) => response.providers);
+  }
+
   listApprovals(id: string): Promise<CommandApproval[]> {
     return this.request<{ approvals: CommandApproval[] }>(
       `/api/v1/sessions/${encodeURIComponent(id)}/approvals?status=pending`,

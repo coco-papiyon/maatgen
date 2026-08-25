@@ -31,7 +31,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           <h1>Maatgen</h1>
           <p>Coding Agent Manager</p>
         </div>
-        <span id="provider-usage" class="provider-usage" aria-live="polite"></span>
+        <button type="button" id="provider-usage" class="provider-usage" aria-live="polite"></button>
       </header>
       <div class="top-panels">
         <details class="session-history">
@@ -105,6 +105,15 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           <span class="workspace-path" id="workspace-path"></span>
         </div>
       </section>
+      <div id="provider-usage-modal" class="provider-usage-modal-overlay" hidden>
+        <div class="provider-usage-modal" role="dialog" aria-modal="true" aria-label="Provider Usage">
+          <header class="provider-usage-modal-header">
+            <span class="eyebrow">PROVIDER USAGE</span>
+            <button type="button" id="provider-usage-modal-close" class="icon-button" aria-label="閉じる">×</button>
+          </header>
+          <div id="provider-usage-modal-body" class="provider-usage-modal-body"></div>
+        </div>
+      </div>
     </main>
     <script nonce="${nonce}">
       const vscode = acquireVsCodeApi();
@@ -116,6 +125,9 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       const historyList = document.getElementById('session-history-list');
       const sessionStatus = document.getElementById('session-status');
       const providerUsageElement = document.getElementById('provider-usage');
+      const providerUsageModal = document.getElementById('provider-usage-modal');
+      const providerUsageModalBody = document.getElementById('provider-usage-modal-body');
+      const providerUsageModalClose = document.getElementById('provider-usage-modal-close');
       const eventList = document.getElementById('event-list');
       const promptForm = document.getElementById('prompt-form');
       const promptInput = document.getElementById('prompt-input');
@@ -172,6 +184,60 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         providerUsageElement.textContent = (usage?.windows || []).map((window) => window.name + ' ' + window.remainingPercent + '%').join(' · ');
         providerUsageElement.title = usage?.fetchedAt ? 'Fetched ' + usage.fetchedAt : '';
       };
+      const formatResetLabel = (resetLabel) => {
+        if (!resetLabel) return '';
+        const parsed = new Date(resetLabel);
+        if (Number.isNaN(parsed.getTime())) return resetLabel;
+        const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const formatted = new Intl.DateTimeFormat(undefined, {
+          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+        }).format(parsed);
+        return formatted + ' (' + zone + ')';
+      };
+      const renderProviderUsageModal = (usages) => {
+        providerUsageModalBody.replaceChildren();
+        if (!usages || !usages.length) {
+          const empty = document.createElement('p');
+          empty.className = 'provider-usage-modal-empty';
+          empty.textContent = '使用量を取得できませんでした。';
+          providerUsageModalBody.appendChild(empty);
+          return;
+        }
+        usages.forEach((usage) => {
+          const card = document.createElement('article');
+          card.className = 'provider-usage-card';
+          const heading = document.createElement('h3');
+          heading.textContent = usage.provider;
+          card.appendChild(heading);
+          const list = document.createElement('ul');
+          (usage.windows || []).forEach((window) => {
+            const item = document.createElement('li');
+            const name = document.createElement('span'); name.className = 'provider-usage-card-name'; name.textContent = window.name;
+            const percent = document.createElement('span'); percent.className = 'provider-usage-card-percent'; percent.textContent = window.remainingPercent + '% remaining';
+            item.append(name, percent);
+            if (window.resetLabel) {
+              const reset = document.createElement('span'); reset.className = 'provider-usage-card-reset'; reset.textContent = 'resets ' + formatResetLabel(window.resetLabel);
+              item.appendChild(reset);
+            }
+            list.appendChild(item);
+          });
+          card.appendChild(list);
+          providerUsageModalBody.appendChild(card);
+        });
+      };
+      const openProviderUsageModal = () => {
+        providerUsageModal.hidden = false;
+        const loading = document.createElement('p');
+        loading.className = 'provider-usage-modal-empty';
+        loading.textContent = '読み込み中…';
+        providerUsageModalBody.replaceChildren(loading);
+        vscode.postMessage({ type: 'provider-usage.requestAll' });
+      };
+      const closeProviderUsageModal = () => { providerUsageModal.hidden = true; };
+      providerUsageElement.addEventListener('click', openProviderUsageModal);
+      providerUsageModalClose.addEventListener('click', closeProviderUsageModal);
+      providerUsageModal.addEventListener('click', (event) => { if (event.target === providerUsageModal) closeProviderUsageModal(); });
+      document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !providerUsageModal.hidden) closeProviderUsageModal(); });
       const eventText = (event) => {
         const data = event.data || {};
         if (typeof data.text === 'string') return data.text;
@@ -207,7 +273,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           const label = document.createElement('span'); label.className = 'event-label'; label.textContent = event.type === 'user_prompt' ? 'U' : event.type === 'assistant_message' ? 'A' : event.type.startsWith('run_') ? 'R' : 'E';
           const body = document.createElement('div'); body.className = 'event-content';
           if (event.type === 'assistant_message') {
-            body.innerHTML = renderMarkdown(eventText(event));
+            body.innerHTML = event.renderedHtml || '';
             const actions = document.createElement('div'); actions.className = 'response-actions';
             const openButton = document.createElement('button'); openButton.type = 'button'; openButton.textContent = 'Open in Editor';
             openButton.addEventListener('click', () => vscode.postMessage({ type: 'response.open', eventId: event.id }));
@@ -333,65 +399,6 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         approvalSummary.textContent = approval.summary || '';
         approvalSummary.hidden = !approval.summary;
         approvalRule.value = formatApprovalRule(approval.segments?.[0]?.argv);
-      };
-
-      const escapeHtml = (value) => value.replace(/[&<>\"']/g, (character) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;'
-      }[character] || character));
-      const safeUrl = (value) => /^(https?:|mailto:)/i.test(value.trim()) ? value.trim() : undefined;
-      const inlineMarkdown = (value) => {
-        let html = escapeHtml(value);
-        html = html.replace(/^\\[([ xX])\\]\\s+/, (match, checked) => '<input type="checkbox" disabled' + (checked.toLowerCase() === 'x' ? ' checked' : '') + '> ');
-        html = html.replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>');
-        html = html.replace(/\\*([^*\\n]+)\\*/g, '<em>$1</em>');
-        html = html.replace(/~~([^~\\n]+)~~/g, '<del>$1</del>');
-        html = html.replace(/!\\[([^\\]\\n]*)\\]\\(([^)\\n]+)\\)/g, (match, alt, url) => { const safe = safeUrl(url); return safe ? '<img src="' + escapeHtml(safe) + '" alt="' + alt + '" loading="lazy">' : alt; });
-        return html.replace(/\\[([^\\]\\n]+)\\]\\(([^)\\n]+)\\)/g, (match, label, url) => {
-          const safe = safeUrl(url);
-          return safe ? '<a href="' + escapeHtml(safe) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>' : label;
-        });
-      };
-      const splitTableCells = (line) => line.trim().replace(/^\\|/, '').replace(/\\|$/, '').split(/(?<!\\\\)\\|/).map((cell) => cell.replace(/\\\\\\|/g, '|').trim());
-      const tableAlignment = (cell) => {
-        const value = cell.trim();
-        if (!/^:?-{3,}:?$/.test(value)) return '';
-        if (value[0] === ':' && value[value.length - 1] === ':') return 'center';
-        if (value[0] === ':') return 'left';
-        if (value[value.length - 1] === ':') return 'right';
-        return '';
-      };
-      const renderMarkdown = (markdown) => {
-        const lines = markdown.replace(/\\r\\n/g, '\\n').split('\\n');
-        let html = '';
-        for (let index = 0; index < lines.length; index += 1) {
-          const line = lines[index];
-          const next = lines[index + 1];
-          if (line && line.indexOf('|') >= 0 && next && splitTableCells(next).every((cell) => tableAlignment(cell))) {
-            const headers = splitTableCells(line);
-            const alignments = splitTableCells(next).map(tableAlignment);
-            html += '<div class="markdown-table-wrap"><table><thead><tr>';
-            headers.forEach((header, column) => { const align = alignments[column]; html += '<th' + (align ? ' style="text-align:' + align + '"' : '') + '>' + inlineMarkdown(header) + '</th>'; });
-            html += '</tr></thead><tbody>';
-            index += 2;
-            while (index < lines.length && lines[index] && lines[index].indexOf('|') >= 0) {
-              const cells = splitTableCells(lines[index]);
-              html += '<tr>';
-              headers.forEach((_header, column) => { const align = alignments[column]; html += '<td' + (align ? ' style="text-align:' + align + '"' : '') + '>' + inlineMarkdown(cells[column] || '') + '</td>'; });
-              html += '</tr>';
-              index += 1;
-            }
-            html += '</tbody></table></div>';
-            index -= 1;
-            continue;
-          }
-          const heading = line.match(/^(#{1,6})\\s+(.+)$/);
-          if (heading) { html += '<h' + heading[1].length + '>' + inlineMarkdown(heading[2]) + '</h' + heading[1].length + '>'; continue; }
-          if (line.slice(0, 3) === String.fromCharCode(96, 96, 96)) { html += '<pre><code>'; continue; }
-          if (/^\\s*[-*+]\\s+/.test(line)) { html += '<li>' + inlineMarkdown(line.replace(/^\\s*[-*+]\\s+/, '')) + '</li>'; continue; }
-          if (/^\\s*([-*_])(?:\\s*\\1){2,}\\s*$/.test(line)) { html += '<hr>'; continue; }
-          if (line) html += '<p>' + inlineMarkdown(line) + '</p>';
-        }
-        return html;
       };
 
       let mentionRange = null;
@@ -547,6 +554,10 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         }
         if (event.data?.type === 'provider-usage.state') {
           renderProviderUsage(event.data.usage);
+          return;
+        }
+        if (event.data?.type === 'provider-usage.allState') {
+          renderProviderUsageModal(event.data.usages || []);
           return;
         }
         if (event.data?.type === 'usage.summary') {

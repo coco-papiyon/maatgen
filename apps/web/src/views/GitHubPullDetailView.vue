@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { toRef } from 'vue';
+import { computed, toRef } from 'vue';
 import { useGitHubItemDetail } from '../github/useGitHubItemDetail';
 import { selectedRepository } from '../github/repositories';
+import { renderMarkdown } from '../markdown';
 
 const props = defineProps<{ number: number }>();
 const numberRef = toRef(props, 'number');
 const { item, relatedEvents, loading, error } = useGitHubItemDetail('pull_request', () => numberRef.value);
+const bodyHtml = computed(() => renderMarkdown(item.value?.body ?? ''));
 </script>
 
 <template>
@@ -25,7 +27,7 @@ const { item, relatedEvents, loading, error } = useGitHubItemDetail('pull_reques
         <dt>labels</dt><dd>{{ item.labels.map((l) => l.name).join(', ') || '—' }}</dd>
         <dt>更新</dt><dd>{{ item.updatedAt }}</dd>
       </dl>
-      <div class="markdown-body">{{ item.body }}</div>
+      <div class="markdown-body" v-html="bodyHtml" />
 
       <section class="github-card">
         <h2>関連する監視イベント</h2>

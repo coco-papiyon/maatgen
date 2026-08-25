@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { toRef } from 'vue';
+import { computed, toRef } from 'vue';
 import { useGitHubItemDetail } from '../github/useGitHubItemDetail';
 import { selectedRepository } from '../github/repositories';
+import { renderMarkdown } from '../markdown';
 
 const props = defineProps<{ number: number }>();
 const numberRef = toRef(props, 'number');
 const { item, relatedEvents, loading, error } = useGitHubItemDetail('issue', () => numberRef.value);
+const bodyHtml = computed(() => renderMarkdown(item.value?.body ?? ''));
 </script>
 
 <template>
@@ -32,7 +34,7 @@ const { item, relatedEvents, loading, error } = useGitHubItemDetail('issue', () 
           {{ field.projectTitle }} / {{ field.fieldName }}: {{ field.value }}
         </li>
       </ul>
-      <div class="markdown-body">{{ item.body }}</div>
+      <div class="markdown-body" v-html="bodyHtml" />
 
       <section class="github-card">
         <h2>関連する監視イベント</h2>

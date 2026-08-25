@@ -15,6 +15,7 @@ bin/
 
 # Runtime data
 .maatgen/
+result/
 
 # Editors and OS files
 .vscode-test/

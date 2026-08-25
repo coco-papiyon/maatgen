@@ -62,6 +62,10 @@ const events = ref<SessionEvent[]>([]);
 const changes = ref<ChangeSet>(emptyChangeSet(''));
 const usage = ref<SessionUsage>(emptySessionUsage(''));
 const providerUsage = ref<ProviderUsage>();
+const providerUsageDetailOpen = ref(false);
+const providerUsageDetailLoading = ref(false);
+const providerUsageDetailError = ref('');
+const allProviderUsage = ref<ProviderUsage[]>([]);
 const sourceStats = ref<SourceStats>(emptySourceStats(''));
 const approvals = ref<CommandApproval[]>([]);
 const approvalRule = ref('');
@@ -452,6 +456,35 @@ function usageValue(usageData: TokenUsage | undefined, key: TokenUsageKey): stri
 
 function providerUsageText(value: ProviderUsage | undefined): string {
   return value?.windows.map((window) => `${window.name} ${window.remainingPercent}%`).join(' · ') ?? '';
+}
+
+function formatResetLabel(resetLabel: string | undefined): string {
+  if (!resetLabel) return '';
+  const parsed = new Date(resetLabel);
+  if (Number.isNaN(parsed.getTime())) return resetLabel;
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const formatted = new Intl.DateTimeFormat(undefined, {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(parsed);
+  return `${formatted} (${zone})`;
+}
+
+async function openProviderUsageDetail() {
+  if (!selected.value) return;
+  providerUsageDetailOpen.value = true;
+  providerUsageDetailLoading.value = true;
+  providerUsageDetailError.value = '';
+  try {
+    allProviderUsage.value = await api.getAllProviderUsage(selected.value.id);
+  } catch {
+    providerUsageDetailError.value = 'Provider usage is unavailable.';
+  } finally {
+    providerUsageDetailLoading.value = false;
+  }
+}
+
+function closeProviderUsageDetail() {
+  providerUsageDetailOpen.value = false;
 }
 
 function formatApprovalRule(segment?: { command: string; argv: string[] }): string {
@@ -1019,7 +1052,13 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
       <div class="brand"><img src="/maat.png" class="brand-mark" alt="Maat"><span>maatgen</span></div>
       <div class="topbar-status">
         <button type="button" class="quiet-button usage-summary-button" @click="openUsageSummary">Usage Summary</button>
-        <span class="provider-usage-summary" :title="providerUsage?.fetchedAt">{{ providerUsageText(providerUsage) }}</span>
+        <button
+          type="button"
+          class="provider-usage-summary"
+          :disabled="!selected"
+          :title="providerUsage?.fetchedAt"
+          @click="openProviderUsageDetail"
+        >{{ providerUsageText(providerUsage) }}</button>
         <label class="system-message-setting" title="コマンド実行やファイル編集のシステムメッセージを表示">
           <input v-model="showSystemMessages" type="checkbox" @change="toggleSystemMessages" />
           <span>System messages</span>
@@ -1464,6 +1503,30 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           </div>
           <UsageBarChart compact title="Tokens" :periods="activeTokenPeriods" :series="activeTokenSeries" :format-value="formatTokens" />
         </template>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="providerUsageDetailOpen" class="usage-summary-overlay" @click.self="closeProviderUsageDetail">
+    <div class="usage-summary-modal provider-usage-detail-modal" role="dialog" aria-modal="true" aria-label="Provider Usage">
+      <header class="usage-summary-modal-header">
+        <h2>Provider Usage</h2>
+        <button type="button" class="icon-button" aria-label="閉じる" @click="closeProviderUsageDetail">×</button>
+      </header>
+      <div v-if="providerUsageDetailError" class="error-banner" role="alert">{{ providerUsageDetailError }}</div>
+      <div v-else-if="providerUsageDetailLoading" class="usage-summary-loading">読み込み中…</div>
+      <div v-else-if="!allProviderUsage.length" class="usage-summary-loading">使用量を取得できませんでした。</div>
+      <div v-else class="provider-usage-detail-list">
+        <article v-for="entry in allProviderUsage" :key="entry.provider" class="provider-usage-detail-card">
+          <h3>{{ entry.provider }}</h3>
+          <ul>
+            <li v-for="window in entry.windows" :key="window.name">
+              <span class="provider-usage-detail-name">{{ window.name }}</span>
+              <span class="provider-usage-detail-percent">{{ window.remainingPercent }}% remaining</span>
+              <span v-if="window.resetLabel" class="provider-usage-detail-reset">resets {{ formatResetLabel(window.resetLabel) }}</span>
+            </li>
+          </ul>
+        </article>
       </div>
     </div>
   </div>

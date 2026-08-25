@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
@@ -108,6 +107,7 @@ type UsageReader interface {
 
 type ProviderUsageReader interface {
 	GetProviderUsage(ctx context.Context, provider protocol.AgentName, directory string) (protocol.ProviderUsage, error)
+	GetAllProviderUsage(ctx context.Context, directory string) []protocol.ProviderUsage
 }
 
 type UsageSummaryReader interface {
@@ -154,6 +154,10 @@ type workspaceFilesResponse struct {
 
 type workspaceTreeResponse struct {
 	Nodes []protocol.WorkspaceFileNode `json:"nodes"`
+}
+
+type providerUsageListResponse struct {
+	Providers []protocol.ProviderUsage `json:"providers"`
 }
 
 func New(config Config, sessions SessionReader, events EventReader) *Server {
@@ -438,11 +442,19 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			}
 			usage, err := config.ProviderUsageReader.GetProviderUsage(r.Context(), session.Agent, session.Workspace)
 			if err != nil {
-				slog.Warn("failed to fetch provider usage", "provider", session.Agent, "session", session.ID, "error", err)
 				writeAPIError(w, http.StatusServiceUnavailable, "provider_usage_unavailable", "provider usage is unavailable", nil)
 				return
 			}
 			writeJSON(w, http.StatusOK, usage)
+		}))
+		mux.Handle("GET /api/v1/sessions/{id}/provider-usage/all", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			session, err := sessions.GetSession(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeStorageError(w, err)
+				return
+			}
+			usages := config.ProviderUsageReader.GetAllProviderUsage(r.Context(), session.Workspace)
+			writeJSON(w, http.StatusOK, providerUsageListResponse{Providers: usages})
 		}))
 	}
 	if config.UsageSummaryReader != nil {
