@@ -87,6 +87,7 @@ type AgentSession struct {
 	CreatedAt          time.Time       `json:"createdAt"`
 	ClosedAt           *time.Time      `json:"closedAt,omitempty"`
 	FirstPrompt        *string         `json:"firstPrompt,omitempty"`
+	ActiveRunStatus    *RunStatus      `json:"activeRunStatus,omitempty"`
 }
 
 // SessionCursor is the decoded keyset position used for session pagination.

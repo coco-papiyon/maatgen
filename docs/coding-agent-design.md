@@ -399,31 +399,24 @@ export interface AgentSession {
 
   agentThreadId?: string;
 
-  model?: string;
-
-  actualModel?: string;
-
   workspace: string;
 
-  repository?: string;
+  status: 'active' | 'closed';
 
-  branch?: string;
-
-  status:
+  // 一覧取得時、そのSessionに非終端Runがある場合だけ設定する。
+  activeRunStatus?:
+    | 'queued'
     | 'starting'
     | 'running'
-    | 'waiting'
-    | 'completed'
-    | 'failed'
-    | 'cancelled';
+    | 'waiting_for_approval';
 
-  startedAt: string;
+  createdAt: string;
 
-  finishedAt?: string;
-
-  usage?: TokenUsage;
+  closedAt?: string;
 }
 ```
+
+Sessionの`status`は会話のライフサイクルだけを表す。実行状態はRunに属し、Session一覧では現在の非終端Runを`activeRunStatus`として参照する。Web版とVS Code版はこの値を定期更新し、`running`のときだけ一覧に実行中マークを表示する。
 
 ---
 

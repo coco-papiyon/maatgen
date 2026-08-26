@@ -1,4 +1,4 @@
-export interface AgentSession { id: string; agent: string; workspace: string; status: string; createdAt: string; closedAt?: string; }
+export interface AgentSession { id: string; agent: string; workspace: string; status: string; activeRunStatus?: string; createdAt: string; closedAt?: string; }
 export interface AgentProvider { id: string; label: string; models: string[]; defaultModel?: string; }
 export interface AgentRun { id: string; sessionId: string; status: string; prompt: string; startedAt?: string; finishedAt?: string; exitCode?: number; }
 export interface SessionEvent { id: string; sessionId: string; runId?: string; sequence: number; timestamp: string; source: string; type: string; data: Record<string, unknown>; }

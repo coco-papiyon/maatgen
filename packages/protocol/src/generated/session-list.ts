@@ -22,4 +22,5 @@ export interface AgentSession {
   createdAt: string;
   closedAt?: string;
   firstPrompt?: string;
+  activeRunStatus?: 'queued' | 'starting' | 'running' | 'waiting_for_approval';
 }

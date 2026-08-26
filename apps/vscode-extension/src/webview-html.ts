@@ -294,9 +294,15 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           button.disabled = session.id === selectedId;
           const title = document.createElement('strong');
           title.textContent = session.workspace.split(/[\\/]/).pop() || session.workspace;
+          const runningMark = document.createElement('span');
+          runningMark.className = 'running-mark';
+          runningMark.textContent = '実行中';
+          runningMark.title = '実行中';
           const meta = document.createElement('span');
           meta.textContent = session.agent + ' · ' + session.status + ' · ' + new Date(session.createdAt).toLocaleString();
-          button.append(title, meta);
+          button.append(title);
+          if (session.activeRunStatus === 'running') button.append(runningMark);
+          button.append(meta);
           button.addEventListener('click', () => vscode.postMessage({ type: 'session.select', sessionId: session.id }));
           historyList.append(button);
         });

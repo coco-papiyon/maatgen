@@ -235,7 +235,10 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
 			created_at, closed_at,
 			(SELECT prompt FROM runs WHERE runs.session_id = sessions.id
-				ORDER BY julianday(runs.created_at) ASC, runs.id ASC LIMIT 1) AS first_prompt
+				ORDER BY julianday(runs.created_at) ASC, runs.id ASC LIMIT 1) AS first_prompt,
+			(SELECT status FROM runs WHERE runs.session_id = sessions.id
+				AND status IN ('queued', 'starting', 'running', 'waiting_for_approval')
+				ORDER BY julianday(runs.created_at) DESC, runs.id DESC LIMIT 1) AS active_run_status
 		FROM sessions`
 	conditions := []string{}
 	args := []any{}
@@ -262,8 +265,8 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 
 	var sessions []protocol.AgentSession
 	for rows.Next() {
-		var firstPrompt sql.NullString
-		session, err := scanSessionRow(rows, &firstPrompt)
+		var firstPrompt, activeRunStatus sql.NullString
+		session, err := scanSessionRow(rows, &firstPrompt, &activeRunStatus)
 		if err != nil {
 			return nil, err
 		}
@@ -446,12 +449,13 @@ type execer interface {
 // scanSession scans a session row that has no first_prompt column (e.g.
 // GetSession, which doesn't need the runs join that ListSessions uses).
 func scanSession(row scanner) (protocol.AgentSession, error) {
-	return scanSessionRow(row, nil)
+	return scanSessionRow(row, nil, nil)
 }
 
 // scanSessionRow scans a session row, optionally including a trailing
-// first_prompt column when firstPrompt is non-nil (used by ListSessions).
-func scanSessionRow(row scanner, firstPrompt *sql.NullString) (protocol.AgentSession, error) {
+// first_prompt and active_run_status columns when their destinations are non-nil
+// (used by ListSessions).
+func scanSessionRow(row scanner, firstPrompt, activeRunStatus *sql.NullString) (protocol.AgentSession, error) {
 	var session protocol.AgentSession
 	var threadID, closedAt, triggerSource, itemKind sql.NullString
 	var createdAt string
@@ -472,6 +476,9 @@ func scanSessionRow(row scanner, firstPrompt *sql.NullString) (protocol.AgentSes
 	if firstPrompt != nil {
 		dest = append(dest, firstPrompt)
 	}
+	if activeRunStatus != nil {
+		dest = append(dest, activeRunStatus)
+	}
 	if err := row.Scan(dest...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return protocol.AgentSession{}, storage.ErrNotFound
@@ -480,6 +487,10 @@ func scanSessionRow(row scanner, firstPrompt *sql.NullString) (protocol.AgentSes
 	}
 	if firstPrompt != nil && firstPrompt.Valid {
 		session.FirstPrompt = &firstPrompt.String
+	}
+	if activeRunStatus != nil && activeRunStatus.Valid {
+		status := protocol.RunStatus(activeRunStatus.String)
+		session.ActiveRunStatus = &status
 	}
 	if triggerSource.Valid {
 		session.TriggerSource = protocol.TriggerSource(triggerSource.String)
