@@ -233,7 +233,9 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 	query := `
 		SELECT id, agent, workspace, agent_thread_id, status, trigger_source,
 			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
-			created_at, closed_at
+			created_at, closed_at,
+			(SELECT prompt FROM runs WHERE runs.session_id = sessions.id
+				ORDER BY julianday(runs.created_at) ASC, runs.id ASC LIMIT 1) AS first_prompt
 		FROM sessions`
 	conditions := []string{}
 	args := []any{}
@@ -260,7 +262,8 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 
 	var sessions []protocol.AgentSession
 	for rows.Next() {
-		session, err := scanSession(rows)
+		var firstPrompt sql.NullString
+		session, err := scanSessionRow(rows, &firstPrompt)
 		if err != nil {
 			return nil, err
 		}
@@ -409,11 +412,19 @@ type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+// scanSession scans a session row that has no first_prompt column (e.g.
+// GetSession, which doesn't need the runs join that ListSessions uses).
 func scanSession(row scanner) (protocol.AgentSession, error) {
+	return scanSessionRow(row, nil)
+}
+
+// scanSessionRow scans a session row, optionally including a trailing
+// first_prompt column when firstPrompt is non-nil (used by ListSessions).
+func scanSessionRow(row scanner, firstPrompt *sql.NullString) (protocol.AgentSession, error) {
 	var session protocol.AgentSession
 	var threadID, closedAt, triggerSource, itemKind sql.NullString
 	var createdAt string
-	if err := row.Scan(
+	dest := []any{
 		&session.ID,
 		&session.Agent,
 		&session.Workspace,
@@ -426,11 +437,18 @@ func scanSession(row scanner) (protocol.AgentSession, error) {
 		&session.GitHubItemNumber,
 		&createdAt,
 		&closedAt,
-	); err != nil {
+	}
+	if firstPrompt != nil {
+		dest = append(dest, firstPrompt)
+	}
+	if err := row.Scan(dest...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return protocol.AgentSession{}, storage.ErrNotFound
 		}
 		return protocol.AgentSession{}, fmt.Errorf("scan session: %w", err)
+	}
+	if firstPrompt != nil && firstPrompt.Valid {
+		session.FirstPrompt = &firstPrompt.String
 	}
 	if triggerSource.Valid {
 		session.TriggerSource = protocol.TriggerSource(triggerSource.String)

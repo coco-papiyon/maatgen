@@ -245,6 +245,25 @@ describe('GitHubSettingsView', () => {
     expect(rule?.autoApprove).toBe(true);
   });
 
+  it("defaults a new trigger rule's project name to the selected repository's project name", async () => {
+    const { wrapper } = await mountSettings();
+    await wrapper.get('.github-table .github-inline-field input').setValue('Roadmap');
+    await wrapper.get('.github-table .github-inline-field button').trigger('click');
+    await flushPromises();
+
+    await wrapper.get('.github-card-header button').trigger('click');
+    const projectTitleInput = wrapper.get('.github-rule-form input[placeholder="Roadmap"]');
+    expect((projectTitleInput.element as HTMLInputElement).value).toBe('Roadmap');
+  });
+
+  it('labels the trigger rule project field consistently with the repository settings label', async () => {
+    const { wrapper } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    const label = wrapper.findAll('.github-rule-form label').find((candidate) => candidate.text().includes('プロジェクト名'));
+    expect(label).toBeTruthy();
+  });
+
   it('deletes a repository monitor after confirmation', async () => {
     const originalConfirm = window.confirm;
     window.confirm = () => true;

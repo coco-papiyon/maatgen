@@ -205,6 +205,51 @@ func TestListSessionsFiltersByStatus(t *testing.T) {
 	}
 }
 
+func TestListSessionsIncludesFirstPrompt(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	base := time.Date(2026, 8, 15, 1, 0, 0, 0, time.UTC)
+	withRuns := protocol.AgentSession{ID: "session-with-runs", Agent: protocol.AgentCodex, Workspace: "C:/workspace", Status: protocol.SessionActive, CreatedAt: base}
+	withoutRuns := protocol.AgentSession{ID: "session-without-runs", Agent: protocol.AgentCodex, Workspace: "C:/workspace", Status: protocol.SessionActive, CreatedAt: base.Add(time.Minute)}
+	if err := store.CreateSession(ctx, withRuns); err != nil {
+		t.Fatalf("create session with runs: %v", err)
+	}
+	if err := store.CreateSession(ctx, withoutRuns); err != nil {
+		t.Fatalf("create session without runs: %v", err)
+	}
+	if err := store.CreateRun(ctx, protocol.AgentRun{ID: "run-1", SessionID: withRuns.ID, Status: protocol.RunCompleted, Prompt: "first instruction"}); err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	if err := store.CreateRun(ctx, protocol.AgentRun{ID: "run-2", SessionID: withRuns.ID, Status: protocol.RunCompleted, Prompt: "second instruction"}); err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+
+	sessions, err := store.ListSessions(ctx, 10, nil, "")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	var gotWithRuns, gotWithoutRuns *protocol.AgentSession
+	for i := range sessions {
+		switch sessions[i].ID {
+		case withRuns.ID:
+			gotWithRuns = &sessions[i]
+		case withoutRuns.ID:
+			gotWithoutRuns = &sessions[i]
+		}
+	}
+	if gotWithRuns == nil || gotWithRuns.FirstPrompt == nil || *gotWithRuns.FirstPrompt != "first instruction" {
+		t.Fatalf("session with runs first prompt = %#v", gotWithRuns)
+	}
+	if gotWithoutRuns == nil || gotWithoutRuns.FirstPrompt != nil {
+		t.Fatalf("session without runs first prompt = %#v", gotWithoutRuns)
+	}
+}
+
 func TestMigrationsAreIdempotent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "manager.db")
