@@ -59,6 +59,17 @@ func TestHashItemChangesWithRequestedReviewers(t *testing.T) {
 	}
 }
 
+func TestHashItemChangesWithConflicting(t *testing.T) {
+	a := baseItem()
+	a.Kind = protocol.GitHubItemPullRequest
+	a.PullRequest = &protocol.GitHubPullRequestDetails{Conflicting: false}
+	b := a
+	b.PullRequest = &protocol.GitHubPullRequestDetails{Conflicting: true}
+	if HashItem(a) == HashItem(b) {
+		t.Fatalf("hash must change when conflict state changes")
+	}
+}
+
 func TestHashItemChangesWithProjectFields(t *testing.T) {
 	a := baseItem()
 	a.ProjectFields = []protocol.GitHubProjectFieldValue{{ProjectTitle: "Roadmap", FieldName: "Status", Value: "Todo"}}

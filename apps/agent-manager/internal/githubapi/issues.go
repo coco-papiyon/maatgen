@@ -143,6 +143,13 @@ func normalizePullRequest(pull *github.PullRequest) protocol.GitHubItem {
 			Base:               protocol.GitHubBranchRef{Ref: pull.GetBase().GetRef(), SHA: pull.GetBase().GetSHA()},
 			Head:               protocol.GitHubBranchRef{Ref: pull.GetHead().GetRef(), SHA: pull.GetHead().GetSHA()},
 			RequestedReviewers: []protocol.GitHubUser{},
+			// GitHub's List Pull Requests endpoint never returns
+			// mergeable_state (only Get does, and only once GitHub has
+			// finished computing it), so this is "dirty" only when a
+			// prior single-PR fetch observed a real conflict; List
+			// results always normalize to false here and are refreshed
+			// by githubmonitor.Poller.withConflictState.
+			Conflicting: pull.GetMergeableState() == "dirty",
 		},
 	}
 	for _, assignee := range pull.Assignees {

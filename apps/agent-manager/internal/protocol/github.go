@@ -53,6 +53,13 @@ type GitHubPullRequestDetails struct {
 	Base               GitHubBranchRef `json:"base"`
 	Head               GitHubBranchRef `json:"head"`
 	RequestedReviewers []GitHubUser    `json:"requestedReviewers"`
+	// Conflicting reports whether GitHub has determined this Pull Request
+	// has a merge conflict against its base branch (GitHub's
+	// mergeable_state == "dirty"). GitHub computes this asynchronously, so
+	// a freshly observed or not-yet-refetched Pull Request has it false;
+	// per Issue #29, an undetermined state is treated as "no conflict"
+	// rather than blocking or guessing.
+	Conflicting bool `json:"conflicting"`
 }
 
 // GitHubItem is the normalized representation shared by Issues and Pull
@@ -178,6 +185,7 @@ type GitHubMonitorFilters struct {
 	Draft         *bool                         `json:"draft,omitempty"`
 	BaseBranches  []string                      `json:"baseBranches,omitempty"`
 	HeadBranches  []string                      `json:"headBranches,omitempty"`
+	Conflicting   *bool                         `json:"conflicting,omitempty"`
 	Project       *GitHubProjectFilterCondition `json:"project,omitempty"`
 	CreatedAfter  *time.Time                    `json:"createdAfter,omitempty"`
 	CreatedBefore *time.Time                    `json:"createdBefore,omitempty"`

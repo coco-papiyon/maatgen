@@ -18,7 +18,7 @@ import (
 // HashItem returns a stable hash over the GitHubItem fields that matter for
 // change detection (ADR-007 section 6): title, body, state, author,
 // assignees, labels, milestone, PR-specific fields (including requested
-// reviewers), and Project field
+// reviewers and conflict state), and Project field
 // values. Equal items (regardless of field order in slices) always hash
 // the same; any relevant field changing changes the hash.
 //
@@ -66,6 +66,8 @@ func HashItem(item protocol.GitHubItem) string {
 		b.WriteString(item.PullRequest.Head.SHA)
 		b.WriteByte('\n')
 		writeSortedJoin(&b, userLogins(item.PullRequest.RequestedReviewers))
+		b.WriteString(strconv.FormatBool(item.PullRequest.Conflicting))
+		b.WriteByte('\n')
 	}
 	if item.HasProjectData() {
 		writeSortedJoin(&b, projectFieldEntries(item.ProjectFields))
