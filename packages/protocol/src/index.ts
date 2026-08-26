@@ -300,6 +300,19 @@ export interface GitHubTriggerRuleRequest {
   priority: GitHubJobPriority;
 }
 
+// GitHubTriggerRulePromptPreviewRequest/Response preview how a not-yet-saved
+// Prompt template would expand at runtime (Issue #32), using fixed sample
+// values instead of a real Issue/Pull Request.
+export interface GitHubTriggerRulePromptPreviewRequest {
+  promptTemplate: string;
+  includeBody: boolean;
+}
+
+export interface GitHubTriggerRulePromptPreviewResponse {
+  issue: string;
+  pullRequest: string;
+}
+
 export interface GitHubTriggerRuleListResponse {
   rules: GitHubTriggerRule[];
 }

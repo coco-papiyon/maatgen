@@ -430,6 +430,54 @@ func TestCreateRuleValidatesTemplateAndProvider(t *testing.T) {
 	}
 }
 
+func TestPreviewRulePromptExpandsIssueAndPullRequestWithFixedSampleValues(t *testing.T) {
+	ctx := context.Background()
+	service := New(newFakeStore(), fakeValidator{}, "", nil, nil, nil, nil)
+
+	preview, err := service.PreviewRulePrompt(ctx, protocol.GitHubTriggerRulePromptPreviewRequest{
+		PromptTemplate: "{{.Kind}} #{{.Number}} {{.Title}} draft={{.Draft}} unknown={{.NotARealField}}",
+	})
+	if err != nil {
+		t.Fatalf("PreviewRulePrompt: %v", err)
+	}
+	if preview.Issue != "issue #1 Issueタイトル draft= unknown=" {
+		t.Fatalf("issue preview = %q", preview.Issue)
+	}
+	if preview.PullRequest != "pull_request #1 Issueタイトル draft=false unknown=" {
+		t.Fatalf("pull request preview = %q", preview.PullRequest)
+	}
+}
+
+func TestPreviewRulePromptRespectsIncludeBody(t *testing.T) {
+	ctx := context.Background()
+	service := New(newFakeStore(), fakeValidator{}, "", nil, nil, nil, nil)
+
+	excluded, err := service.PreviewRulePrompt(ctx, protocol.GitHubTriggerRulePromptPreviewRequest{PromptTemplate: "[{{.Body}}]", IncludeBody: false})
+	if err != nil {
+		t.Fatalf("PreviewRulePrompt: %v", err)
+	}
+	if excluded.Issue != "[]" || excluded.PullRequest != "[]" {
+		t.Fatalf("preview with includeBody=false = %#v, want empty Body", excluded)
+	}
+
+	included, err := service.PreviewRulePrompt(ctx, protocol.GitHubTriggerRulePromptPreviewRequest{PromptTemplate: "[{{.Body}}]", IncludeBody: true})
+	if err != nil {
+		t.Fatalf("PreviewRulePrompt: %v", err)
+	}
+	if included.Issue == "[]" || included.PullRequest == "[]" {
+		t.Fatalf("preview with includeBody=true = %#v, want non-empty Body", included)
+	}
+}
+
+func TestPreviewRulePromptRejectsInvalidTemplateSyntax(t *testing.T) {
+	ctx := context.Background()
+	service := New(newFakeStore(), fakeValidator{}, "", nil, nil, nil, nil)
+
+	if _, err := service.PreviewRulePrompt(ctx, protocol.GitHubTriggerRulePromptPreviewRequest{PromptTemplate: "{{.Title"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("err = %v, want ErrInvalidRequest", err)
+	}
+}
+
 func TestUpdateRuleChangesRepository(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()

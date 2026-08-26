@@ -357,6 +357,22 @@ func (s *Service) DeleteRule(ctx context.Context, id string) error {
 	return s.store.DeleteTriggerRule(ctx, id)
 }
 
+// PreviewRulePrompt expands request.PromptTemplate against fixed sample
+// values for an Issue and a Pull Request (Issue #32), without touching the
+// store: the rule being previewed may not exist yet, or may still be
+// mid-edit, so this never fetches or requires a real GitHubItem.
+func (s *Service) PreviewRulePrompt(_ context.Context, request protocol.GitHubTriggerRulePromptPreviewRequest) (protocol.GitHubTriggerRulePromptPreviewResponse, error) {
+	issue, err := githubmonitor.RenderPrompt(request.PromptTemplate, githubmonitor.SamplePromptFields(protocol.GitHubItemIssue, request.IncludeBody))
+	if err != nil {
+		return protocol.GitHubTriggerRulePromptPreviewResponse{}, fmt.Errorf("%w: promptTemplate is invalid: %v", ErrInvalidRequest, err)
+	}
+	pullRequest, err := githubmonitor.RenderPrompt(request.PromptTemplate, githubmonitor.SamplePromptFields(protocol.GitHubItemPullRequest, request.IncludeBody))
+	if err != nil {
+		return protocol.GitHubTriggerRulePromptPreviewResponse{}, fmt.Errorf("%w: promptTemplate is invalid: %v", ErrInvalidRequest, err)
+	}
+	return protocol.GitHubTriggerRulePromptPreviewResponse{Issue: issue, PullRequest: pullRequest}, nil
+}
+
 func normalizeConcurrencyPolicy(policy protocol.GitHubConcurrencyPolicy) protocol.GitHubConcurrencyPolicy {
 	if policy == "" {
 		return protocol.GitHubConcurrencyCoalesce
