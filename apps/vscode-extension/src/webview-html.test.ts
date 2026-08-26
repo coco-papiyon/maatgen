@@ -62,6 +62,8 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('const effectiveModel = provider?.models?.includes(selectedModel)');
     expect(html).toContain("type: 'model.select'");
     expect(html).toContain("session.agent + ' · ' + session.status");
+    expect(html).toContain("session.activeRunStatus === 'running'");
+    expect(html).toContain("runningMark.textContent = '実行中'");
     expect(html).toContain("(provider?.label || 'Agent') + 'に指示する…'");
     expect(html).toContain('id="approval-card"');
     expect(html).toContain('data-approval-decision="allow_permanent"');

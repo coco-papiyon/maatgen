@@ -50,6 +50,7 @@ interface AgentSession {
   workspace: string;
   agentThreadId?: string;
   status: 'active' | 'closed';
+  activeRunStatus?: 'queued' | 'starting' | 'running' | 'waiting_for_approval';
   createdAt: string;
   closedAt?: string;
 }
@@ -71,6 +72,8 @@ interface AgentRun {
   exitCode?: number;
 }
 ```
+
+`activeRunStatus`は一覧取得時に現在の非終端Runがある場合だけ設定する。両UIは一覧を定期更新し、値が`running`のSessionに同等の実行中マークを表示する。
 
 初期版では、実行中Sessionへの追加メッセージは許可せず、`409 Conflict`を返す。メッセージqueueingやsteeringは後続課題とする。
 

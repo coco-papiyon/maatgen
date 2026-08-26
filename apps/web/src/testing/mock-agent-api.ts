@@ -139,6 +139,7 @@ export class MockAgentApi implements AgentApi {
   async sendMessage(id: string, request: SendMessageRequest): Promise<AgentRun> {
     const session = this.requireSession(id);
     if (!session.firstPrompt) session.firstPrompt = request.message;
+    session.activeRunStatus = 'running';
     const run: AgentRun = {
       id: `run-${Date.now()}`,
       sessionId: id,
@@ -156,6 +157,7 @@ export class MockAgentApi implements AgentApi {
       window.setTimeout(() => {
         run.status = 'completed';
         run.finishedAt = new Date().toISOString();
+        delete session.activeRunStatus;
         this.appendEvent(id, 'change_detected', 'manager', { files: this.changes.get(id)?.files.length ?? 0 }, run.id);
         this.appendEvent(id, 'run_completed', 'manager', {}, run.id);
         this.runTimers.delete(run.id);
@@ -172,6 +174,7 @@ export class MockAgentApi implements AgentApi {
     this.runTimers.delete(id);
     run.status = 'cancelled';
     run.finishedAt = new Date().toISOString();
+    delete this.requireSession(run.sessionId).activeRunStatus;
     this.appendEvent(run.sessionId, 'run_cancelled', 'manager', {}, run.id);
   }
 

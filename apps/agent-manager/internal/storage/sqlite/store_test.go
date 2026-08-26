@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -247,6 +248,62 @@ func TestListSessionsIncludesFirstPrompt(t *testing.T) {
 	}
 	if gotWithoutRuns == nil || gotWithoutRuns.FirstPrompt != nil {
 		t.Fatalf("session without runs first prompt = %#v", gotWithoutRuns)
+	}
+}
+
+func TestListSessionsIncludesActiveRunStatus(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	base := time.Date(2026, 8, 15, 1, 0, 0, 0, time.UTC)
+	statuses := []protocol.RunStatus{
+		protocol.RunQueued,
+		protocol.RunStarting,
+		protocol.RunRunning,
+		protocol.RunWaitingForApproval,
+		protocol.RunCompleted,
+	}
+	for index, status := range statuses {
+		session := protocol.AgentSession{
+			ID:        fmt.Sprintf("session-%d", index),
+			Agent:     protocol.AgentCodex,
+			Workspace: "C:/workspace",
+			Status:    protocol.SessionActive,
+			CreatedAt: base.Add(time.Duration(index) * time.Minute),
+		}
+		if err := store.CreateSession(ctx, session); err != nil {
+			t.Fatalf("create session for %s: %v", status, err)
+		}
+		if err := store.CreateRun(ctx, protocol.AgentRun{
+			ID:        fmt.Sprintf("run-%d", index),
+			SessionID: session.ID,
+			Status:    status,
+			Prompt:    "work",
+		}); err != nil {
+			t.Fatalf("create %s run: %v", status, err)
+		}
+	}
+
+	sessions, err := store.ListSessions(ctx, 10, nil, "")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	for _, session := range sessions {
+		index := int(session.ID[len("session-")] - '0')
+		want := statuses[index]
+		if want == protocol.RunCompleted {
+			if session.ActiveRunStatus != nil {
+				t.Fatalf("completed session active status = %q, want nil", *session.ActiveRunStatus)
+			}
+			continue
+		}
+		if session.ActiveRunStatus == nil || *session.ActiveRunStatus != want {
+			t.Fatalf("session %s active status = %v, want %q", session.ID, session.ActiveRunStatus, want)
+		}
 	}
 }
 

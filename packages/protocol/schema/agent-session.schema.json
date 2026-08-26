@@ -18,6 +18,7 @@
     "githubItemNumber": { "type": "integer" },
     "createdAt": { "type": "string", "format": "date-time" },
     "closedAt": { "type": "string", "format": "date-time" },
-    "firstPrompt": { "type": "string", "minLength": 1 }
+    "firstPrompt": { "type": "string", "minLength": 1 },
+    "activeRunStatus": { "enum": ["queued", "starting", "running", "waiting_for_approval"] }
   }
 }

@@ -1108,6 +1108,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           :title="session.workspace"
         >
           <span class="session-title">{{ session.firstPrompt ?? shortPath(session.workspace) }}</span>
+          <span v-if="session.activeRunStatus === 'running'" class="running-mark" title="実行中">実行中</span>
           <span v-if="unreadSessionIDs.has(session.id)" class="unread-mark" title="未読">未読</span>
           <span class="session-meta">
             <span :class="['mini-dot', session.status]" />{{ directoryName(session.workspace) }} · {{ session.agent }}

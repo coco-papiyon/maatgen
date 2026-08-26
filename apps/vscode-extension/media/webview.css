@@ -49,6 +49,7 @@ button { font: inherit; }
 .history-item { display: grid; gap: 2px; padding: 7px 8px; color: var(--vscode-foreground); text-align: left; background: transparent; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
 .history-item:hover { background: var(--vscode-list-hoverBackground); }.history-item.selected { border-color: var(--vscode-focusBorder); background: var(--panel); cursor: default; }
 .history-item strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.history-item span { color: var(--muted); font: 9px var(--vscode-editor-font-family); }
+.history-item .running-mark { justify-self: start; padding: 1px 5px; border: 1px solid var(--green); border-radius: 8px; color: var(--green); font-weight: 700; }
 .eyebrow { margin: 0 0 4px; color: var(--muted); font: 600 9px var(--vscode-editor-font-family); letter-spacing: .08em; text-transform: uppercase; }
 .workspace-inline { display: flex; align-items: baseline; gap: 7px; min-width: 0; white-space: nowrap; }
 .workspace-inline .eyebrow { flex: 0 0 auto; margin: 0; }

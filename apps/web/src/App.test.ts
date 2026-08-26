@@ -17,6 +17,7 @@ afterEach(() => {
   localStorage.removeItem('maatgen.sidePanel');
   localStorage.removeItem('maatgen.sessionStatusFilter');
   localStorage.removeItem('maatgen.workspaceHistory');
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -59,6 +60,38 @@ describe('App with MockAgentApi', () => {
     await flushPromises();
 
     expect(unreadSession.find('.unread-mark').exists()).toBe(false);
+  });
+
+  it('marks only running sessions and removes the mark after the session list refreshes', async () => {
+    vi.useFakeTimers();
+    class RunningSessionApi extends MockAgentApi {
+      running = true;
+
+      override async listSessions() {
+        const page = await super.listSessions();
+        return {
+          ...page,
+          sessions: page.sessions.map((session, index) => ({
+            ...session,
+            ...(index === 0 && this.running ? { activeRunStatus: 'running' as const } : {}),
+            ...(index === 1 ? { activeRunStatus: 'starting' as const } : {}),
+          })),
+        };
+      }
+    }
+    const api = new RunningSessionApi();
+    wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+
+    expect(wrapper.findAll('.running-mark')).toHaveLength(1);
+    expect(wrapper.find('.running-mark').text()).toBe('実行中');
+    expect(wrapper.find('.running-mark').element.parentElement?.textContent).toContain('success');
+
+    api.running = false;
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flushPromises();
+
+    expect(wrapper.find('.running-mark').exists()).toBe(false);
   });
 
   it('shows the remaining provider usage percentage', async () => {
