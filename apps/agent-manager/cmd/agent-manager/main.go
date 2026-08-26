@@ -319,7 +319,7 @@ func run() error {
 		return githubClients(host)
 	}, remoteResolver)
 	githubMonitor = githubcontroller.New(store, checkpointManager, checkpointManager.GitPath(), toolConfig.GitHub.AllowedEnterpriseHosts, poller,
-		func(host string) (githubcontroller.GitHubClient, error) { return githubClients(host) })
+		func(host string) (githubcontroller.GitHubClient, error) { return githubClients(host) }, sessions)
 
 	// Periodic polling (ADR-007 section 2): separate from the manual "sync
 	// now" action (which calls the same Poller directly through

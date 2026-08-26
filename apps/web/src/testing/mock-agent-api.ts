@@ -21,7 +21,7 @@ import type {
   UsageSummary,
   WsTicketResponse,
 } from '@maatgen/protocol';
-import { AgentApiError, type AgentApi, type GitHubItemQuery, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from '../api';
+import { AgentApiError, type AgentApi, type GitHubItemQuery, type JobStatusFilter, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from '../api';
 import type { EventStreamFactory } from '../event-stream';
 
 const GITHUB_DEMO_WORKSPACE = 'C:/demo/current-repository';
@@ -114,9 +114,17 @@ export class MockAgentApi implements AgentApi {
 
   async closeSession(id: string): Promise<AgentSession> {
     const session = this.requireSession(id);
+    this.closeSessionInternal(session);
+    return clone(session);
+  }
+
+  private closeSessionInternal(session: AgentSession): void {
+    if (session.status === 'closed') return;
     session.status = 'closed';
     session.closedAt = new Date().toISOString();
-    return clone(session);
+    for (const githubEvent of this.githubEvents.values()) {
+      if (githubEvent.sessionId === session.id) this.closeGitHubMonitorEventInternal(githubEvent);
+    }
   }
 
   async reopenSession(id: string): Promise<AgentSession> {
@@ -520,9 +528,10 @@ export class MockAgentApi implements AgentApi {
     this.githubRules.delete(id);
   }
 
-  async listGitHubMonitorEvents(workspace?: string, limit = 100): Promise<GitHubMonitorEvent[]> {
+  async listGitHubMonitorEvents(workspace?: string, limit = 100, status?: JobStatusFilter): Promise<GitHubMonitorEvent[]> {
     const events = [...this.githubEvents.values()];
     return (workspace ? events.filter((githubEvent) => githubEvent.repository === workspace) : events)
+      .filter((githubEvent) => matchesJobStatusFilter(githubEvent.status, status))
       .slice(0, limit)
       .map(clone);
   }
@@ -546,6 +555,22 @@ export class MockAgentApi implements AgentApi {
     const skipped: GitHubMonitorEvent = { ...event, status: 'skipped', skipReason: 'manually skipped by user', updatedAt: now };
     this.githubEvents.set(eventId, skipped);
     return clone(skipped);
+  }
+
+  async closeGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent> {
+    const event = this.githubEvents.get(eventId);
+    if (!event) throw new AgentApiError('monitor event was not found', 404, 'not_found');
+    this.closeGitHubMonitorEventInternal(event);
+    return clone(event);
+  }
+
+  private closeGitHubMonitorEventInternal(event: GitHubMonitorEvent): void {
+    if (event.status === 'closed') return;
+    event.status = 'closed';
+    event.closedAt = new Date().toISOString();
+    this.githubEvents.set(event.id, event);
+    const session = event.sessionId ? this.sessions.get(event.sessionId) : undefined;
+    if (session) this.closeSessionInternal(session);
   }
 
   async listGitHubIssues(_workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse> {
@@ -706,6 +731,12 @@ function clone<T>(value: T): T {
 function mockRepoNameFromWorkspace(workspace: string): string {
   const segment = workspace.split(/[/\\]/).filter(Boolean).pop() ?? workspace;
   return segment.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+}
+
+function matchesJobStatusFilter(status: GitHubMonitorEvent['status'], filter?: JobStatusFilter): boolean {
+  if (!filter || filter === 'open') return status !== 'closed';
+  if (filter === 'all') return true;
+  return status === filter;
 }
 
 function matchesMockGitHubQuery(item: GitHubItem, query?: GitHubItemQuery): boolean {

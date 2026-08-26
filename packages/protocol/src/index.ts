@@ -109,7 +109,8 @@ export type GitHubMonitorEventStatus =
   | 'skipped'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'closed';
 
 export interface GitHubUser {
   login: string;
@@ -243,6 +244,7 @@ export interface GitHubMonitorEvent {
   lastError?: string;
   createdAt: string;
   updatedAt: string;
+  closedAt?: string;
 }
 
 export interface GitHubRemoteCandidate {

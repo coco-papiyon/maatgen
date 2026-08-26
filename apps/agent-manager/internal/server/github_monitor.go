@@ -11,6 +11,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubcontroller"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitworktree"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
+	sessionservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/session"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 )
 
@@ -31,9 +32,10 @@ type GitHubMonitorController interface {
 	UpdateRule(ctx context.Context, id string, request protocol.GitHubTriggerRuleRequest) (protocol.GitHubTriggerRule, error)
 	DeleteRule(ctx context.Context, id string) error
 
-	ListEvents(ctx context.Context, workspace string, limit int) ([]protocol.GitHubMonitorEvent, error)
+	ListEvents(ctx context.Context, workspace string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error)
 	SkipEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error)
 	ReplayEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error)
+	CloseEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error)
 
 	ListIssues(ctx context.Context, workspace string, query githubcontroller.ItemQuery) (protocol.GitHubItemListResponse, error)
 	GetIssue(ctx context.Context, workspace string, number int) (protocol.GitHubItem, error)
@@ -174,7 +176,11 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, controller GitHubMonitorCon
 		if !ok {
 			return
 		}
-		events, err := controller.ListEvents(r.Context(), r.URL.Query().Get("workspace"), limit)
+		filter, ok := parseJobStatusFilter(w, r)
+		if !ok {
+			return
+		}
+		events, err := controller.ListEvents(r.Context(), r.URL.Query().Get("workspace"), limit, filter)
 		if err != nil {
 			writeGitHubMonitorError(w, err)
 			return
@@ -199,6 +205,14 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, controller GitHubMonitorCon
 			return
 		}
 		writeJSON(w, http.StatusCreated, replay)
+	}))
+	mux.Handle("POST /api/v1/github/events/{id}/close", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		event, err := controller.CloseEvent(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeGitHubMonitorError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, event)
 	}))
 
 	mux.Handle("GET /api/v1/github/issues", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -286,6 +300,10 @@ func writeGitHubMonitorError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusConflict, "ambiguous_remote", "multiple GitHub remotes were found; specify remoteName", nil)
 	case errors.Is(err, githubcontroller.ErrInvalidRequest):
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
+	case errors.Is(err, sessionservice.ErrRunActive):
+		writeAPIError(w, http.StatusConflict, "run_already_active", "session has an active run", nil)
+	case errors.Is(err, sessionservice.ErrCleanupFailed):
+		writeAPIError(w, http.StatusServiceUnavailable, "checkpoint_cleanup_failed", "checkpoint cleanup failed; retry the close request", nil)
 	case errors.Is(err, githubapi.ErrAuthenticationRequired):
 		writeAPIError(w, http.StatusUnauthorized, "github_auth_required", "GitHubの認証またはProject参照権限が必要です。初回は `gh auth login --scopes \"read:project\"`、既存の認証を更新する場合は `gh auth refresh -s read:project` を実行してから再試行してください。", nil)
 	default:

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import type { GitHubMonitorEvent, GitHubRepositoryMonitor, GitHubTriggerRule, Provider } from '@maatgen/protocol';
-import { AgentApiError } from '../api';
+import { AgentApiError, type JobStatusFilter } from '../api';
 import { useAgentApi } from '../github/useAgentApi';
 import { priorityLabel } from '../github/priority';
 
@@ -15,6 +15,14 @@ const loading = ref(false);
 const error = ref('');
 const replayingId = ref('');
 const skippingId = ref('');
+const closingId = ref('');
+
+const JOB_STATUS_FILTER_KEY = 'maatgen.jobStatusFilter';
+const statusFilter = ref<JobStatusFilter>((localStorage.getItem(JOB_STATUS_FILTER_KEY) as JobStatusFilter | null) ?? 'open');
+const JOB_STATUSES: JobStatusFilter[] = [
+  'detected', 'matched', 'queued', 'session_created', 'run_started',
+  'skipped', 'completed', 'failed', 'cancelled', 'closed',
+];
 
 const REPLAYABLE = new Set(['skipped', 'failed', 'cancelled']);
 const SKIPPABLE = new Set(['detected', 'matched', 'queued']);
@@ -50,12 +58,21 @@ function canSkip(event: GitHubMonitorEvent): boolean {
   return SKIPPABLE.has(event.status);
 }
 
+function canClose(event: GitHubMonitorEvent): boolean {
+  return event.status !== 'closed';
+}
+
+function changeStatusFilter() {
+  localStorage.setItem(JOB_STATUS_FILTER_KEY, statusFilter.value);
+  void refresh();
+}
+
 async function refresh() {
   loading.value = true;
   error.value = '';
   try {
     const [eventList, ruleList, monitorList, providerList] = await Promise.all([
-      api.listGitHubMonitorEvents(undefined, 200),
+      api.listGitHubMonitorEvents(undefined, 200, statusFilter.value),
       api.listGitHubTriggerRules().catch(() => []),
       api.listGitHubMonitors().catch(() => []),
       api.listProviders().catch(() => ({ providers: [] })),
@@ -97,6 +114,19 @@ async function skip(event: GitHubMonitorEvent) {
   }
 }
 
+async function close(event: GitHubMonitorEvent) {
+  closingId.value = event.id;
+  error.value = '';
+  try {
+    await api.closeGitHubMonitorEvent(event.id);
+    await refresh();
+  } catch (cause) {
+    error.value = describeError(cause);
+  } finally {
+    closingId.value = '';
+  }
+}
+
 function describeError(cause: unknown): string {
   if (cause instanceof AgentApiError) return cause.message;
   return cause instanceof Error ? cause.message : String(cause);
@@ -109,6 +139,11 @@ onMounted(() => void refresh());
   <div class="github-view">
     <div class="github-card-header">
       <h1 class="github-view-title">Job</h1>
+      <select v-model="statusFilter" aria-label="Job status filter" :disabled="loading" @change="changeStatusFilter">
+        <option value="open">Open</option>
+        <option v-for="status in JOB_STATUSES" :key="status" :value="status">{{ status }}</option>
+        <option value="all">すべて</option>
+      </select>
       <button type="button" :disabled="loading" @click="refresh">更新</button>
     </div>
 
@@ -128,6 +163,7 @@ onMounted(() => void refresh());
           <th>プロバイダー</th>
           <th>優先度</th>
           <th>Session / Run</th>
+          <th></th>
           <th></th>
         </tr>
       </thead>
@@ -158,6 +194,11 @@ onMounted(() => void refresh());
             </button>
             <button v-if="canReplay(event)" type="button" :disabled="replayingId === event.id" @click="replay(event)">
               このイベントを実行
+            </button>
+          </td>
+          <td>
+            <button v-if="canClose(event)" type="button" :disabled="closingId === event.id" @click="close(event)">
+              クローズ
             </button>
           </td>
         </tr>

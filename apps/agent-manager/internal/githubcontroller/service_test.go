@@ -127,22 +127,38 @@ func (f *fakeStore) DeleteTriggerRule(ctx context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeStore) ListMonitorEvents(ctx context.Context, repository string, limit int) ([]protocol.GitHubMonitorEvent, error) {
+func (f *fakeStore) ListMonitorEvents(ctx context.Context, repository string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error) {
 	var result []protocol.GitHubMonitorEvent
 	for _, event := range f.events {
-		if event.Repository == repository {
+		if event.Repository == repository && matchesJobStatusFilter(event.Status, filter) {
 			result = append(result, event)
 		}
 	}
 	return result, nil
 }
 
-func (f *fakeStore) ListAllMonitorEvents(ctx context.Context, limit int) ([]protocol.GitHubMonitorEvent, error) {
+func (f *fakeStore) ListAllMonitorEvents(ctx context.Context, limit int, filter string) ([]protocol.GitHubMonitorEvent, error) {
 	var result []protocol.GitHubMonitorEvent
 	for _, event := range f.events {
-		result = append(result, event)
+		if matchesJobStatusFilter(event.Status, filter) {
+			result = append(result, event)
+		}
 	}
 	return result, nil
+}
+
+// matchesJobStatusFilter mirrors sqlite.monitorEventStatusFilter's
+// semantics for the fake store: "" and "open" exclude closed events, "all"
+// applies no filter, anything else is an exact status match.
+func matchesJobStatusFilter(status protocol.GitHubMonitorEventStatus, filter string) bool {
+	switch filter {
+	case "", "open":
+		return status != protocol.GitHubMonitorEventClosed
+	case "all":
+		return true
+	default:
+		return string(status) == filter
+	}
 }
 
 func (f *fakeStore) GetMonitorEvent(ctx context.Context, id string) (protocol.GitHubMonitorEvent, error) {
@@ -161,6 +177,20 @@ func (f *fakeStore) SkipMonitorEvent(ctx context.Context, id, reason string, upd
 	event.Status = protocol.GitHubMonitorEventSkipped
 	event.SkipReason = &reason
 	event.UpdatedAt = updatedAt
+	f.events[id] = event
+	return nil
+}
+
+func (f *fakeStore) CloseMonitorEvent(ctx context.Context, id string, closedAt time.Time) error {
+	event, ok := f.events[id]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	if event.Status == protocol.GitHubMonitorEventClosed {
+		return nil
+	}
+	event.Status = protocol.GitHubMonitorEventClosed
+	event.ClosedAt = &closedAt
 	f.events[id] = event
 	return nil
 }
@@ -206,7 +236,7 @@ func TestResolveRepositorySingleRemoteAndExistingMonitor(t *testing.T) {
 	repo := initGitRepoWithRemotes(t, map[string]string{"origin": "https://github.com/octo-org/example.git"})
 	store := newFakeStore()
 	gitPath, _ := exec.LookPath("git")
-	service := New(store, fakeValidator{}, gitPath, nil, nil, nil)
+	service := New(store, fakeValidator{}, gitPath, nil, nil, nil, nil)
 
 	resolution, err := service.ResolveRepository(ctx, repo)
 	if err != nil {
@@ -239,7 +269,7 @@ func TestCreateMonitorRequiresRemoteNameWhenAmbiguous(t *testing.T) {
 		"b": "https://github.com/other-org/example.git",
 	})
 	gitPath, _ := exec.LookPath("git")
-	service := New(newFakeStore(), fakeValidator{}, gitPath, nil, nil, nil)
+	service := New(newFakeStore(), fakeValidator{}, gitPath, nil, nil, nil, nil)
 
 	_, err := service.CreateMonitor(ctx, protocol.CreateGitHubMonitorRequest{Workspace: repo, PollIntervalSeconds: 300})
 	if !errors.Is(err, ErrAmbiguousRemote) {
@@ -260,7 +290,7 @@ func TestCreateMonitorRejectsInvalidPollInterval(t *testing.T) {
 	ctx := context.Background()
 	repo := initGitRepoWithRemotes(t, map[string]string{"origin": "https://github.com/octo-org/example.git"})
 	gitPath, _ := exec.LookPath("git")
-	service := New(newFakeStore(), fakeValidator{}, gitPath, nil, nil, nil)
+	service := New(newFakeStore(), fakeValidator{}, gitPath, nil, nil, nil, nil)
 
 	if _, err := service.CreateMonitor(ctx, protocol.CreateGitHubMonitorRequest{Workspace: repo, PollIntervalSeconds: 0}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("err = %v, want ErrInvalidRequest", err)
@@ -275,7 +305,7 @@ func TestUpdateMonitorCanReResolveRemote(t *testing.T) {
 	})
 	gitPath, _ := exec.LookPath("git")
 	store := newFakeStore()
-	service := New(store, fakeValidator{}, gitPath, nil, nil, nil)
+	service := New(store, fakeValidator{}, gitPath, nil, nil, nil, nil)
 
 	created, err := service.CreateMonitor(ctx, protocol.CreateGitHubMonitorRequest{Workspace: repo, PollIntervalSeconds: 300})
 	if err != nil {
@@ -303,7 +333,7 @@ func TestSyncNowDelegatesToPoller(t *testing.T) {
 	monitor := protocol.GitHubRepositoryMonitor{Repository: "/repo", Host: "github.com", Owner: "octo-org", Name: "example"}
 	_ = store.CreateRepositoryMonitor(ctx, monitor)
 	poller := &fakePoller{result: githubmonitor.SyncResult{IssuesProcessed: 2, EventsMatched: 1}}
-	service := New(store, fakeValidator{}, "", nil, poller, nil)
+	service := New(store, fakeValidator{}, "", nil, poller, nil, nil)
 
 	result, err := service.SyncNow(ctx, "/repo")
 	if err != nil {
@@ -315,6 +345,19 @@ func TestSyncNowDelegatesToPoller(t *testing.T) {
 	if poller.calledRepository != "/repo" {
 		t.Fatalf("poller called with %q", poller.calledRepository)
 	}
+}
+
+type fakeSessionCloser struct {
+	closedSessionID string
+	err             error
+}
+
+func (f *fakeSessionCloser) CloseSession(_ context.Context, id string) (protocol.AgentSession, error) {
+	if f.err != nil {
+		return protocol.AgentSession{}, f.err
+	}
+	f.closedSessionID = id
+	return protocol.AgentSession{ID: id, Status: protocol.SessionClosed}, nil
 }
 
 type fakePoller struct {
@@ -334,7 +377,7 @@ func (f *fakePoller) SyncRepository(ctx context.Context, repository string) (git
 func TestCreateRuleValidatesTemplateAndProvider(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	service := New(store, fakeValidator{}, "", nil, nil, nil)
+	service := New(store, fakeValidator{}, "", nil, nil, nil, nil)
 
 	base := protocol.GitHubTriggerRuleRequest{
 		Workspace: "/repo", Name: "rule", EventKinds: []protocol.GitHubItemKind{protocol.GitHubItemIssue},
@@ -390,7 +433,7 @@ func TestCreateRuleValidatesTemplateAndProvider(t *testing.T) {
 func TestUpdateRuleChangesRepository(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	service := New(store, fakeValidator{}, "", nil, nil, nil)
+	service := New(store, fakeValidator{}, "", nil, nil, nil, nil)
 
 	created, err := service.CreateRule(ctx, protocol.GitHubTriggerRuleRequest{
 		Workspace: "/repo-a", Name: "rule", EventKinds: []protocol.GitHubItemKind{protocol.GitHubItemIssue},
@@ -418,7 +461,7 @@ func TestUpdateRuleChangesRepository(t *testing.T) {
 func TestListRulesEmptyWorkspaceListsAllRepositories(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	service := New(store, fakeValidator{}, "", nil, nil, nil)
+	service := New(store, fakeValidator{}, "", nil, nil, nil, nil)
 
 	base := protocol.GitHubTriggerRuleRequest{
 		Name: "rule", EventKinds: []protocol.GitHubItemKind{protocol.GitHubItemIssue},
@@ -455,12 +498,12 @@ func TestListRulesEmptyWorkspaceListsAllRepositories(t *testing.T) {
 func TestListEventsEmptyWorkspaceListsAllRepositories(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	service := New(store, fakeValidator{}, "", nil, nil, nil)
+	service := New(store, fakeValidator{}, "", nil, nil, nil, nil)
 
 	store.events["event-a"] = protocol.GitHubMonitorEvent{ID: "event-a", Repository: "/repo-a", Status: protocol.GitHubMonitorEventDetected}
 	store.events["event-b"] = protocol.GitHubMonitorEvent{ID: "event-b", Repository: "/repo-b", Status: protocol.GitHubMonitorEventDetected}
 
-	scoped, err := service.ListEvents(ctx, "/repo-a", 0)
+	scoped, err := service.ListEvents(ctx, "/repo-a", 0, "")
 	if err != nil {
 		t.Fatalf("ListEvents(/repo-a): %v", err)
 	}
@@ -468,7 +511,7 @@ func TestListEventsEmptyWorkspaceListsAllRepositories(t *testing.T) {
 		t.Fatalf("scoped events = %#v, want exactly the /repo-a event", scoped)
 	}
 
-	all, err := service.ListEvents(ctx, "", 0)
+	all, err := service.ListEvents(ctx, "", 0, "")
 	if err != nil {
 		t.Fatalf("ListEvents(\"\"): %v", err)
 	}
@@ -477,10 +520,80 @@ func TestListEventsEmptyWorkspaceListsAllRepositories(t *testing.T) {
 	}
 }
 
+func TestListEventsStatusFilter(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	service := New(store, fakeValidator{}, "", nil, nil, nil, nil)
+
+	store.events["event-open"] = protocol.GitHubMonitorEvent{ID: "event-open", Repository: "/repo", Status: protocol.GitHubMonitorEventCompleted}
+	store.events["event-closed"] = protocol.GitHubMonitorEvent{ID: "event-closed", Repository: "/repo", Status: protocol.GitHubMonitorEventClosed}
+
+	open, err := service.ListEvents(ctx, "", 0, "open")
+	if err != nil {
+		t.Fatalf("ListEvents(open): %v", err)
+	}
+	if len(open) != 1 || open[0].ID != "event-open" {
+		t.Fatalf("open events = %#v, want exactly event-open", open)
+	}
+
+	completed, err := service.ListEvents(ctx, "", 0, "completed")
+	if err != nil {
+		t.Fatalf("ListEvents(completed): %v", err)
+	}
+	if len(completed) != 1 || completed[0].ID != "event-open" {
+		t.Fatalf("completed events = %#v, want exactly event-open", completed)
+	}
+
+	all, err := service.ListEvents(ctx, "", 0, "all")
+	if err != nil {
+		t.Fatalf("ListEvents(all): %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("all events = %#v, want both events", all)
+	}
+}
+
+func TestCloseEventCascadesToItsSession(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	sessionID := "session-1"
+	store.events["event-1"] = protocol.GitHubMonitorEvent{ID: "event-1", Repository: "/repo", Status: protocol.GitHubMonitorEventCompleted, SessionID: &sessionID}
+	sessions := &fakeSessionCloser{}
+	service := New(store, fakeValidator{}, "", nil, nil, nil, sessions)
+
+	closed, err := service.CloseEvent(ctx, "event-1")
+	if err != nil {
+		t.Fatalf("CloseEvent: %v", err)
+	}
+	if closed.Status != protocol.GitHubMonitorEventClosed || closed.ClosedAt == nil {
+		t.Fatalf("closed event = %#v", closed)
+	}
+	if sessions.closedSessionID != sessionID {
+		t.Fatalf("closedSessionID = %q, want %q", sessions.closedSessionID, sessionID)
+	}
+}
+
+func TestCloseEventPropagatesSessionCloseFailureWithoutClosingEvent(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	sessionID := "session-1"
+	store.events["event-1"] = protocol.GitHubMonitorEvent{ID: "event-1", Repository: "/repo", Status: protocol.GitHubMonitorEventRunStarted, SessionID: &sessionID}
+	sessionErr := errors.New("session has an active run")
+	sessions := &fakeSessionCloser{err: sessionErr}
+	service := New(store, fakeValidator{}, "", nil, nil, nil, sessions)
+
+	if _, err := service.CloseEvent(ctx, "event-1"); !errors.Is(err, sessionErr) {
+		t.Fatalf("err = %v, want %v", err, sessionErr)
+	}
+	if store.events["event-1"].Status == protocol.GitHubMonitorEventClosed {
+		t.Fatalf("event must not be closed when the session cascade fails")
+	}
+}
+
 func TestListMonitorsReturnsEveryRegisteredRepository(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	service := New(store, fakeValidator{}, "", nil, nil, nil)
+	service := New(store, fakeValidator{}, "", nil, nil, nil, nil)
 
 	now := time.Now().UTC()
 	monitorA := protocol.GitHubRepositoryMonitor{
@@ -513,7 +626,7 @@ func TestReplayEventCreatesNewQueuedEventWithoutTouchingOriginal(t *testing.T) {
 		ID: "event-1", Repository: "/repo", Status: protocol.GitHubMonitorEventSkipped, DeliveryKey: &deliveryKey,
 	}
 	store.events[original.ID] = original
-	service := New(store, fakeValidator{}, "", nil, nil, nil)
+	service := New(store, fakeValidator{}, "", nil, nil, nil, nil)
 
 	replay, err := service.ReplayEvent(ctx, "event-1")
 	if err != nil {
@@ -584,7 +697,7 @@ func TestListIssuesFetchesProjectsOnlyWhenQueried(t *testing.T) {
 	monitor := protocol.GitHubRepositoryMonitor{Repository: "/repo", Host: "github.com", Owner: "octo-org", Name: "example"}
 	_ = store.CreateRepositoryMonitor(ctx, monitor)
 	client := &fakeGitHubClient{issues: []protocol.GitHubItem{{Kind: protocol.GitHubItemIssue, Number: 1, Title: "t"}}}
-	service := New(store, fakeValidator{}, "", nil, nil, func(string) (GitHubClient, error) { return client, nil })
+	service := New(store, fakeValidator{}, "", nil, nil, func(string) (GitHubClient, error) { return client, nil }, nil)
 
 	if _, err := service.ListIssues(ctx, "/repo", ItemQuery{}); err != nil {
 		t.Fatalf("ListIssues: %v", err)
