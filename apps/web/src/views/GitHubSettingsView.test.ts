@@ -152,6 +152,28 @@ describe('GitHubSettingsView', () => {
     expect(rule?.filters.reviewers).toEqual(['carol', 'dave']);
   });
 
+  it('saves a PR conflict condition and redisplays it when editing the rule', async () => {
+    const { wrapper, api } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    expect(wrapper.find('select[aria-label="コンフリクト"]').exists()).toBe(false);
+
+    await wrapper.get('input[value="pull_request"]').setValue(true);
+    const conflictSelect = wrapper.get('select[aria-label="コンフリクト"]');
+    expect((conflictSelect.element as HTMLSelectElement).value).toBe('');
+    await conflictSelect.setValue('true');
+    await wrapper.get('.github-rule-form input:not([disabled])').setValue('コンフリクトルール');
+    await wrapper.get('.github-rule-form textarea').setValue('Resolve {{.Title}}');
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+
+    const rule = (await api.listGitHubTriggerRules()).find((candidate) => candidate.name === 'コンフリクトルール');
+    expect(rule?.filters.conflicting).toBe(true);
+
+    await wrapper.get('.github-rule-list li:last-child button').trigger('click');
+    expect((wrapper.get('select[aria-label="コンフリクト"]').element as HTMLSelectElement).value).toBe('true');
+  });
+
   it('offers only the installed providers, scopes the model dropdown to the selected provider, and offers a fixed reasoning-effort dropdown', async () => {
     const { wrapper } = await mountSettings();
     await wrapper.get('.github-card-header button').trigger('click');

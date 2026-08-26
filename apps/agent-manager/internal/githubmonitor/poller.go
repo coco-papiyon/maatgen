@@ -3,6 +3,7 @@ package githubmonitor
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubapi"
@@ -15,6 +16,10 @@ import (
 type GitHubClient interface {
 	ListIssues(ctx context.Context, owner, repo string, opts githubapi.ListOptions) ([]protocol.GitHubItem, error)
 	ListPullRequests(ctx context.Context, owner, repo string, opts githubapi.ListOptions) ([]protocol.GitHubItem, error)
+	// GetPullRequest fetches a single Pull Request. Unlike ListPullRequests,
+	// GitHub populates mergeable_state on this endpoint, so it is used to
+	// refresh conflict state per PR (see withConflictState).
+	GetPullRequest(ctx context.Context, owner, repo string, number int) (protocol.GitHubItem, error)
 	FetchProjectFields(ctx context.Context, owner, repo string, kind protocol.GitHubItemKind, number int) ([]protocol.GitHubProjectFieldValue, error)
 }
 
@@ -153,6 +158,7 @@ func (p *Poller) SyncRepository(ctx context.Context, repository string) (SyncRes
 	}
 	for _, pull := range pulls {
 		pull = p.withProjectFields(ctx, client, monitor, pull)
+		pull = p.withConflictState(ctx, client, monitor, pull)
 		events, evalErr := p.evaluator.EvaluateItem(ctx, monitor, pull)
 		if evalErr != nil {
 			p.recordFailure(ctx, monitor, evalErr)
@@ -181,6 +187,27 @@ func (p *Poller) withProjectFields(ctx context.Context, client GitHubClient, mon
 		return item
 	}
 	item.ProjectFields = fields
+	return item
+}
+
+// withConflictState refreshes item's PullRequest.Conflicting from a
+// single-PR fetch, since ListPullRequests never returns mergeable_state
+// (see githubapi.normalizePullRequest). A fetch failure, or GitHub not
+// having finished computing mergeable_state yet, leaves Conflicting at its
+// current (false) value: per Issue #29, an undetermined conflict state is
+// treated as "no conflict", never as a sync failure.
+func (p *Poller) withConflictState(ctx context.Context, client GitHubClient, monitor protocol.GitHubRepositoryMonitor, item protocol.GitHubItem) protocol.GitHubItem {
+	if item.PullRequest == nil {
+		return item
+	}
+	fresh, err := client.GetPullRequest(ctx, monitor.Owner, monitor.Name, item.Number)
+	if err != nil {
+		slog.Warn("github pull request conflict state fetch failed", "repository", monitor.Repository, "number", item.Number, "error", err)
+		return item
+	}
+	if fresh.PullRequest != nil {
+		item.PullRequest.Conflicting = fresh.PullRequest.Conflicting
+	}
 	return item
 }
 

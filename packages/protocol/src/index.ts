@@ -139,6 +139,7 @@ export interface GitHubPullRequestDetails {
   base: GitHubBranchRef;
   head: GitHubBranchRef;
   requestedReviewers: GitHubUser[];
+  conflicting: boolean;
 }
 
 export interface GitHubItem {
@@ -196,6 +197,7 @@ export interface GitHubMonitorFilters {
   draft?: boolean;
   baseBranches?: string[];
   headBranches?: string[];
+  conflicting?: boolean;
   project?: GitHubProjectFilterCondition;
   createdAfter?: string;
   createdBefore?: string;

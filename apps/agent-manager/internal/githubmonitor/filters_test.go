@@ -70,6 +70,32 @@ func TestMatchesDraftAndBranchesRequirePullRequest(t *testing.T) {
 	}
 }
 
+func TestMatchesConflictingRequiresPullRequestAndMatchesValue(t *testing.T) {
+	want := true
+	issue := baseItem()
+	if Matches(protocol.GitHubMonitorFilters{Conflicting: &want}, issue, "opened") {
+		t.Fatalf("a Conflicting filter must not match a plain Issue")
+	}
+
+	conflicting := baseItem()
+	conflicting.Kind = protocol.GitHubItemPullRequest
+	conflicting.PullRequest = &protocol.GitHubPullRequestDetails{Conflicting: true}
+	if !Matches(protocol.GitHubMonitorFilters{Conflicting: &want}, conflicting, "opened") {
+		t.Fatalf("expected match: pull request has a conflict and filter wants Conflicting=true")
+	}
+
+	clean := baseItem()
+	clean.Kind = protocol.GitHubItemPullRequest
+	clean.PullRequest = &protocol.GitHubPullRequestDetails{Conflicting: false}
+	if Matches(protocol.GitHubMonitorFilters{Conflicting: &want}, clean, "opened") {
+		t.Fatalf("expected no match: pull request has no conflict but filter wants Conflicting=true")
+	}
+	wantFalse := false
+	if !Matches(protocol.GitHubMonitorFilters{Conflicting: &wantFalse}, clean, "opened") {
+		t.Fatalf("expected match: pull request has no conflict and filter wants Conflicting=false")
+	}
+}
+
 func TestMatchesReviewersRequirePullRequestAndMatchRequestedReviewer(t *testing.T) {
 	issue := baseItem()
 	if Matches(protocol.GitHubMonitorFilters{Reviewers: []string{"alice"}}, issue, "opened") {

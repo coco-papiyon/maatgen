@@ -200,6 +200,52 @@ func TestGetPullRequestNormalizesFields(t *testing.T) {
 	}
 }
 
+func TestGetPullRequestNormalizesConflictState(t *testing.T) {
+	client := newTestRESTClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"number":          8,
+			"title":           "Add feature",
+			"state":           "open",
+			"html_url":        "https://github.com/octo-org/example/pull/8",
+			"user":            map[string]any{"login": "carol"},
+			"base":            map[string]any{"ref": "main", "sha": "aaa"},
+			"head":            map[string]any{"ref": "feature", "sha": "bbb"},
+			"mergeable_state": "dirty",
+		})
+	})
+
+	item, err := client.GetPullRequest(context.Background(), "octo-org", "example", 8)
+	if err != nil {
+		t.Fatalf("GetPullRequest: %v", err)
+	}
+	if item.PullRequest == nil || !item.PullRequest.Conflicting {
+		t.Fatalf("item.PullRequest = %#v, want Conflicting=true for mergeable_state=dirty", item.PullRequest)
+	}
+}
+
+func TestGetPullRequestTreatsUnknownMergeableStateAsNoConflict(t *testing.T) {
+	client := newTestRESTClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"number":          9,
+			"title":           "Add feature",
+			"state":           "open",
+			"html_url":        "https://github.com/octo-org/example/pull/9",
+			"user":            map[string]any{"login": "carol"},
+			"base":            map[string]any{"ref": "main", "sha": "aaa"},
+			"head":            map[string]any{"ref": "feature", "sha": "bbb"},
+			"mergeable_state": "unknown",
+		})
+	})
+
+	item, err := client.GetPullRequest(context.Background(), "octo-org", "example", 9)
+	if err != nil {
+		t.Fatalf("GetPullRequest: %v", err)
+	}
+	if item.PullRequest == nil || item.PullRequest.Conflicting {
+		t.Fatalf("item.PullRequest = %#v, want Conflicting=false when GitHub has not determined mergeability yet", item.PullRequest)
+	}
+}
+
 func TestListIssuesWrapsError(t *testing.T) {
 	client := newTestRESTClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

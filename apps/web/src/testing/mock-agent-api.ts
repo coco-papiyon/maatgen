@@ -803,6 +803,7 @@ function mockGitHubPullRequests(): GitHubItem[] {
       base: { ref: 'main', sha: 'abc123' },
       head: { ref: 'feature/retry', sha: 'def456' },
       requestedReviewers: [{ login: 'bob' }],
+      conflicting: false,
     },
   }];
 }

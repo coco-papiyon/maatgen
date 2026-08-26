@@ -37,6 +37,7 @@ type PromptFields struct {
 	Draft         string
 	BaseRef       string
 	HeadRef       string
+	Conflicting   string
 	Action        string
 	ProjectFields string
 	Body          string
@@ -77,6 +78,7 @@ func BuildPromptFields(monitor protocol.GitHubRepositoryMonitor, item protocol.G
 		fields.Draft = strconv.FormatBool(item.PullRequest.Draft)
 		fields.BaseRef = item.PullRequest.Base.Ref
 		fields.HeadRef = item.PullRequest.Head.Ref
+		fields.Conflicting = strconv.FormatBool(item.PullRequest.Conflicting)
 	}
 	if includeBody {
 		fields.Body = item.Body
@@ -122,6 +124,7 @@ func buildExternalDataBlock(fields PromptFields) string {
 		fmt.Fprintf(&b, "draft: %s\n", fields.Draft)
 		fmt.Fprintf(&b, "base: %s\n", fields.BaseRef)
 		fmt.Fprintf(&b, "head: %s\n", fields.HeadRef)
+		fmt.Fprintf(&b, "conflicting: %s\n", fields.Conflicting)
 	}
 	fmt.Fprintf(&b, "action: %s\n", fields.Action)
 	fmt.Fprintf(&b, "projectFields: %s\n", fields.ProjectFields)
@@ -157,6 +160,7 @@ func (f PromptFields) asMap() map[string]string {
 		"Draft":             f.Draft,
 		"BaseRef":           f.BaseRef,
 		"HeadRef":           f.HeadRef,
+		"Conflicting":       f.Conflicting,
 		"Action":            f.Action,
 		"ProjectFields":     f.ProjectFields,
 		"Body":              f.Body,

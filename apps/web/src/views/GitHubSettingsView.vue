@@ -220,6 +220,7 @@ interface RuleForm {
   labels: string;
   assignees: string;
   reviewers: string;
+  conflicting: '' | 'true' | 'false';
   projectTitle: string;
   projectField: string;
   projectValue: string;
@@ -234,7 +235,7 @@ function blankRuleForm(): RuleForm {
   return {
     id: '', repository, name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
     provider: providers.value[0]?.id ?? 'codex', model: '', reasoningEffort: '', autoApprove: false, concurrencyPolicy: 'coalesce', priority: 'medium',
-    labels: '', assignees: '', reviewers: '', projectTitle: repositoryProjectName(repository), projectField: '', projectValue: '',
+    labels: '', assignees: '', reviewers: '', conflicting: '', projectTitle: repositoryProjectName(repository), projectField: '', projectValue: '',
   };
 }
 
@@ -304,6 +305,7 @@ function startEditRule(rule: GitHubTriggerRule) {
     labels: (rule.filters.labels ?? []).join(', '),
     assignees: (rule.filters.assignees ?? []).join(', '),
     reviewers: (rule.filters.reviewers ?? []).join(', '),
+    conflicting: rule.filters.conflicting === undefined ? '' : rule.filters.conflicting ? 'true' : 'false',
     projectTitle: rule.filters.project?.projectTitle ?? '', projectField: rule.filters.project?.fieldName ?? '',
     projectValue: rule.filters.project?.value ?? '',
   };
@@ -332,6 +334,7 @@ async function saveRule() {
         ...(labels.length ? { labels } : {}),
         ...(assignees.length ? { assignees } : {}),
         ...(form.eventKinds.includes('pull_request') && reviewers.length ? { reviewers } : {}),
+        ...(form.eventKinds.includes('pull_request') && form.conflicting !== '' ? { conflicting: form.conflicting === 'true' } : {}),
         ...(form.projectTitle && form.projectField
           ? { project: { projectTitle: form.projectTitle, fieldName: form.projectField, value: form.projectValue } }
           : {}),
@@ -521,6 +524,13 @@ onMounted(() => void refresh());
             </label>
             <label v-if="includesPullRequests">レビューア（GitHub login、カンマ区切り）
               <input v-model="editingRule.reviewers" aria-label="レビューア" placeholder="reviewer1, reviewer2" />
+            </label>
+            <label v-if="includesPullRequests">コンフリクト
+              <select v-model="editingRule.conflicting" aria-label="コンフリクト">
+                <option value="">未指定</option>
+                <option value="true">あり</option>
+                <option value="false">なし</option>
+              </select>
             </label>
           </div>
           <label>label条件（カンマ区切り、任意）<input v-model="editingRule.labels" placeholder="bug, needs-design" /></label>

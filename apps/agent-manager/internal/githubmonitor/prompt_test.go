@@ -107,16 +107,20 @@ func TestBuildPromptFieldsProjectAndPullRequestData(t *testing.T) {
 	pr := baseItem()
 	pr.Kind = protocol.GitHubItemPullRequest
 	pr.PullRequest = &protocol.GitHubPullRequestDetails{
-		Draft: true,
-		Base:  protocol.GitHubBranchRef{Ref: "main"},
-		Head:  protocol.GitHubBranchRef{Ref: "feature/x"},
+		Draft:       true,
+		Base:        protocol.GitHubBranchRef{Ref: "main"},
+		Head:        protocol.GitHubBranchRef{Ref: "feature/x"},
+		Conflicting: true,
 	}
 	pr.ProjectFields = []protocol.GitHubProjectFieldValue{
 		{ProjectTitle: "Roadmap", FieldName: "Status", Value: "Ready"},
 	}
 	fields := BuildPromptFields(testMonitorForPrompt(), pr, "opened", false)
-	if fields.Draft != "true" || fields.BaseRef != "main" || fields.HeadRef != "feature/x" {
+	if fields.Draft != "true" || fields.BaseRef != "main" || fields.HeadRef != "feature/x" || fields.Conflicting != "true" {
 		t.Fatalf("fields = %#v", fields)
+	}
+	if !strings.Contains(fields.ExternalDataBlock, "conflicting: true") {
+		t.Fatalf("ExternalDataBlock should include conflicting state: %q", fields.ExternalDataBlock)
 	}
 	if fields.ProjectFields != "Roadmap/Status=Ready" {
 		t.Fatalf("ProjectFields = %q", fields.ProjectFields)

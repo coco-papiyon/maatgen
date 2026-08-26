@@ -11,14 +11,16 @@ import (
 )
 
 type fakeGitHubClient struct {
-	issues        []protocol.GitHubItem
-	pulls         []protocol.GitHubItem
-	projectFields map[int][]protocol.GitHubProjectFieldValue
-	projectErr    map[int]error
-	listIssuesErr error
-	listPullsErr  error
-	issueState    string
-	pullState     string
+	issues            []protocol.GitHubItem
+	pulls             []protocol.GitHubItem
+	projectFields     map[int][]protocol.GitHubProjectFieldValue
+	projectErr        map[int]error
+	getPullRequests   map[int]protocol.GitHubItem
+	getPullRequestErr map[int]error
+	listIssuesErr     error
+	listPullsErr      error
+	issueState        string
+	pullState         string
 }
 
 func (f *fakeGitHubClient) ListIssues(ctx context.Context, owner, repo string, opts githubapi.ListOptions) ([]protocol.GitHubItem, error) {
@@ -35,6 +37,18 @@ func (f *fakeGitHubClient) ListPullRequests(ctx context.Context, owner, repo str
 		return nil, f.listPullsErr
 	}
 	return f.pulls, nil
+}
+
+func (f *fakeGitHubClient) GetPullRequest(ctx context.Context, owner, repo string, number int) (protocol.GitHubItem, error) {
+	if f.getPullRequestErr != nil {
+		if err, ok := f.getPullRequestErr[number]; ok {
+			return protocol.GitHubItem{}, err
+		}
+	}
+	if f.getPullRequests == nil {
+		return protocol.GitHubItem{}, nil
+	}
+	return f.getPullRequests[number], nil
 }
 
 func (f *fakeGitHubClient) FetchProjectFields(ctx context.Context, owner, repo string, kind protocol.GitHubItemKind, number int) ([]protocol.GitHubProjectFieldValue, error) {
@@ -207,6 +221,74 @@ func TestPollerSyncRepositoryRecordsListFailure(t *testing.T) {
 	}
 	if updated.NextSyncAt == nil {
 		t.Fatalf("expected NextSyncAt to be scheduled even after a failure")
+	}
+}
+
+func TestPollerSyncRepositoryRefreshesPullRequestConflictState(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	repository := "/repo"
+	monitor := testRepositoryMonitor(repository, nil)
+	if err := store.CreateRepositoryMonitor(ctx, monitor); err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+
+	client := &fakeGitHubClient{
+		pulls: []protocol.GitHubItem{{
+			Kind: protocol.GitHubItemPullRequest, Number: 5, Title: "Add feature", State: protocol.GitHubItemOpen,
+			PullRequest: &protocol.GitHubPullRequestDetails{Conflicting: false},
+		}},
+		getPullRequests: map[int]protocol.GitHubItem{
+			5: {PullRequest: &protocol.GitHubPullRequestDetails{Conflicting: true}},
+		},
+	}
+	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil }, unchangedRemoteResolver)
+
+	if _, err := poller.SyncRepository(ctx, repository); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+
+	observed, err := store.GetObservedItem(ctx, repository, protocol.GitHubItemPullRequest, 5)
+	if err != nil {
+		t.Fatalf("get observed item: %v", err)
+	}
+	if observed.Snapshot.PullRequest == nil || !observed.Snapshot.PullRequest.Conflicting {
+		t.Fatalf("observed.Snapshot.PullRequest = %#v, want Conflicting=true refreshed from GetPullRequest", observed.Snapshot.PullRequest)
+	}
+}
+
+func TestPollerSyncRepositoryTreatsConflictFetchFailureAsNoConflict(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	repository := "/repo"
+	monitor := testRepositoryMonitor(repository, nil)
+	if err := store.CreateRepositoryMonitor(ctx, monitor); err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+
+	client := &fakeGitHubClient{
+		pulls: []protocol.GitHubItem{{
+			Kind: protocol.GitHubItemPullRequest, Number: 5, Title: "Add feature", State: protocol.GitHubItemOpen,
+			PullRequest: &protocol.GitHubPullRequestDetails{Conflicting: false},
+		}},
+		getPullRequestErr: map[int]error{5: errors.New("rate limited")},
+	}
+	poller := NewPoller(store, NewEvaluator(store), func(string) (GitHubClient, error) { return client, nil }, unchangedRemoteResolver)
+
+	result, err := poller.SyncRepository(ctx, repository)
+	if err != nil {
+		t.Fatalf("SyncRepository must not fail when only the conflict-state refetch fails: %v", err)
+	}
+	if result.PullRequestsProcessed != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+
+	observed, err := store.GetObservedItem(ctx, repository, protocol.GitHubItemPullRequest, 5)
+	if err != nil {
+		t.Fatalf("get observed item: %v", err)
+	}
+	if observed.Snapshot.PullRequest == nil || observed.Snapshot.PullRequest.Conflicting {
+		t.Fatalf("observed.Snapshot.PullRequest = %#v, want Conflicting=false when the refetch fails", observed.Snapshot.PullRequest)
 	}
 }
 

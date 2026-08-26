@@ -72,6 +72,9 @@ func Matches(filters protocol.GitHubMonitorFilters, item protocol.GitHubItem, ac
 	if len(filters.HeadBranches) > 0 && !matchesBranch(filters.HeadBranches, item.PullRequest, false) {
 		return false
 	}
+	if filters.Conflicting != nil && !matchesConflicting(*filters.Conflicting, item.PullRequest) {
+		return false
+	}
 	if filters.Project != nil && !matchesProject(*filters.Project, item) {
 		return false
 	}
@@ -153,6 +156,13 @@ func matchesDraft(want bool, pr *protocol.GitHubPullRequestDetails) bool {
 		return false
 	}
 	return pr.Draft == want
+}
+
+func matchesConflicting(want bool, pr *protocol.GitHubPullRequestDetails) bool {
+	if pr == nil {
+		return false
+	}
+	return pr.Conflicting == want
 }
 
 func matchesReviewers(reviewers []string, pr *protocol.GitHubPullRequestDetails) bool {
