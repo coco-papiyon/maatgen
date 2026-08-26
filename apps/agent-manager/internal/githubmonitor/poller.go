@@ -152,6 +152,7 @@ func (p *Poller) SyncRepository(ctx context.Context, repository string) (SyncRes
 		return result, fmt.Errorf("sync github repository: list pull requests: %w", err)
 	}
 	for _, pull := range pulls {
+		// FIXME: This needs to be refactored to handle conflict state.
 		pull = p.withProjectFields(ctx, client, monitor, pull)
 		events, evalErr := p.evaluator.EvaluateItem(ctx, monitor, pull)
 		if evalErr != nil {
