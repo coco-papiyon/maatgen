@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent"
-	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
 	claudeadapter "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/claude"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/codex"
 	copilotadapter "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/agent/copilot"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
@@ -416,6 +416,66 @@ func TestRunServiceReportsUnavailableCodex(t *testing.T) {
 	}
 	if terminal.Type != protocol.EventTypeRunFailed || json.Unmarshal(terminal.Data, &data) != nil || data.Code != "codex_unavailable" {
 		t.Fatalf("terminal event = %#v", terminal)
+	}
+}
+
+func TestRunServiceSchedulesUsageLimitRetryOnMatchingFailure(t *testing.T) {
+	store, session := createRunTestStore(t)
+	adapter := &fakeAdapter{
+		lines:  []agent.Output{{Stream: agent.OutputStdout, Line: "Claude AI usage limit reached|4102444800"}},
+		runErr: errors.New("exit status 1"),
+	}
+	service := New(store, adapter, WithCheckpointManager(&fakeCheckpointManager{}))
+	defer service.Close(context.Background())
+
+	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Do work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitForRunStatus(t, store, run.ID, protocol.RunFailed)
+	if failed.UsageLimitRetryPendingAt == nil {
+		t.Fatalf("expected usage limit retry to be pending, got %#v", failed)
+	}
+}
+
+func TestRunServiceDoesNotChainUsageLimitRetries(t *testing.T) {
+	store, session := createRunTestStore(t)
+	adapter := &fakeAdapter{
+		lines:  []agent.Output{{Stream: agent.OutputStdout, Line: "You've hit your session limit."}},
+		runErr: errors.New("exit status 1"),
+	}
+	service := New(store, adapter, WithCheckpointManager(&fakeCheckpointManager{}))
+	defer service.Close(context.Background())
+
+	originalRunID := "original-run"
+	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{
+		Message: "Resume please", AutoRetryOfRunID: &originalRunID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitForRunStatus(t, store, run.ID, protocol.RunFailed)
+	if failed.UsageLimitRetryPendingAt != nil {
+		t.Fatalf("a Run that is itself an automatic retry must not schedule another retry, got %#v", failed)
+	}
+	if failed.AutoRetryOfRunID == nil || *failed.AutoRetryOfRunID != originalRunID {
+		t.Fatalf("expected AutoRetryOfRunID to be preserved, got %#v", failed)
+	}
+}
+
+func TestRunServiceDoesNotScheduleUsageLimitRetryForUnrelatedFailure(t *testing.T) {
+	store, session := createRunTestStore(t)
+	adapter := &fakeAdapter{runErr: errors.New("exit status 1")}
+	service := New(store, adapter, WithCheckpointManager(&fakeCheckpointManager{}))
+	defer service.Close(context.Background())
+
+	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Do work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitForRunStatus(t, store, run.ID, protocol.RunFailed)
+	if failed.UsageLimitRetryPendingAt != nil {
+		t.Fatalf("expected no usage limit retry for an unrelated failure, got %#v", failed)
 	}
 }
 

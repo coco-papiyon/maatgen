@@ -115,6 +115,10 @@ type SendMessageRequest struct {
 	// granted automatically for this run, bypassing the AI/human approval
 	// flow (see agent.RunRequest.AutoApprove). Ignored by other providers.
 	AutoApprove bool `json:"autoApprove,omitempty"`
+	// AutoRetryOfRunID marks this Run as the automatic resume of a Run that
+	// stopped after its provider reported a usage/session limit (ADR-008).
+	// It is set internally by internal/usageretry, not by API clients.
+	AutoRetryOfRunID *string `json:"autoRetryOfRunId,omitempty"`
 }
 
 type AgentRun struct {
@@ -125,6 +129,17 @@ type AgentRun struct {
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	ExitCode   *int       `json:"exitCode,omitempty"`
+	// AutoRetryOfRunID is set when this Run was started automatically to
+	// resume another Run that stopped after hitting a usage/session limit
+	// (ADR-008). It bounds automatic retries to one per original stop: a Run
+	// that itself carries this field never schedules another automatic
+	// retry, even if it also fails on a usage limit.
+	AutoRetryOfRunID *string `json:"autoRetryOfRunId,omitempty"`
+	// UsageLimitRetryPendingAt is set when this Run failed after its output
+	// indicated a provider usage/session limit and it is eligible for one
+	// automatic retry (ADR-008). internal/usageretry clears it once it has
+	// either started the retry Run or given up.
+	UsageLimitRetryPendingAt *time.Time `json:"usageLimitRetryPendingAt,omitempty"`
 }
 
 type ApprovalStatus string

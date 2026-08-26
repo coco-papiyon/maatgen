@@ -10,4 +10,5 @@ export interface SendMessageRequest {
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   timeoutSeconds?: number;
   autoApprove?: boolean;
+  autoRetryOfRunId?: string;
 }
