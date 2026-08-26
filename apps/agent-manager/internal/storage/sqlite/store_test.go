@@ -268,6 +268,31 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	defer second.Close()
 }
 
+func TestMigrationVersionsAreUnique(t *testing.T) {
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[int]string)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		versionText, _, ok := strings.Cut(entry.Name(), "_")
+		if !ok {
+			t.Fatalf("invalid migration name %q", entry.Name())
+		}
+		version, err := strconv.Atoi(versionText)
+		if err != nil {
+			t.Fatalf("parse migration version %q: %v", entry.Name(), err)
+		}
+		if previous, exists := seen[version]; exists {
+			t.Fatalf("duplicate migration version %03d: %s and %s", version, previous, entry.Name())
+		}
+		seen[version] = entry.Name()
+	}
+}
+
 func TestRuleItemUniqueMigrationPreservesHistoryAndBlocksFutureDuplicates(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "manager.db")

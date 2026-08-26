@@ -16,8 +16,8 @@ description: Issue番号を引数に取り、mainを最新化してissue_<番号
 
 ## 手順
 
-1. リポジトリの指示を読み、現在の作業ツリーとブランチを確認する。未コミット変更がある場合は、stash、破棄、上書きをせずに停止し、ユーザーへ整理を依頼する。リモート`origin`と`main`が存在することも確認する。
-2. `git switch main`で`main`へ切り替え、`git pull --ff-only`で最新状態を取得する。切り替えやpullが失敗した場合は、原因を報告して実装を開始しない。既存のローカル変更を自動的に退避しない。
+1. リポジトリの指示を読み、現在の作業ツリーとブランチを確認する。未コミット変更を判定するときは、依存関係管理ツールが生成するロックファイル（`package-lock.json`、`npm-shrinkwrap.json`、`yarn.lock`、`pnpm-lock.yaml`、`bun.lock`、`bun.lockb`、`Cargo.lock`、`Gemfile.lock`、`composer.lock`、`Pipfile.lock`、`poetry.lock`、`uv.lock`、`.terraform.lock.hcl`など）だけの変更は無視して処理を続ける。ロックファイル以外に未コミット変更がある場合は、stash、破棄、上書きをせずに停止し、ユーザーへ整理を依頼する。リモート`origin`と`main`が存在することも確認する。
+2. `git switch main`で`main`へ切り替え、`git pull --ff-only`で最新状態を取得する。無視したロックファイルの変更は保持し、stash、破棄、上書き、stage、commitしない。ロックファイルを含むローカル変更が原因で切り替えやpullが拒否された場合も、強制せず原因を報告して実装を開始しない。既存のローカル変更を自動的に退避しない。
 3. Issue番号からGitHub Issue情報を取得する。少なくともタイトル、本文、状態、ラベル、コメント、リンクされた資料を読む。利用可能なGitHub連携を優先し、なければ認証済みのGitHub CLI/APIを使う。Issueを取得できない場合は推測せず停止する。
 4. `issue_<Issue番号>`という名前の新しいブランチを`main`から作成する（例: `git switch -c issue_123`）。同名ブランチがすでに存在する場合は削除、reset、上書きをせず停止して指示を求める。
 5. Issueの要求から観測可能な受け入れ条件を導き、実装方針を決める。要件とIssueに書かれた実装案を区別し、リポジトリの文脈でも解消できない重大な曖昧さだけを確認する。
@@ -48,6 +48,7 @@ description: Issue番号を引数に取り、mainを最新化してissue_<番号
 ## 境界
 
 - このスキルでは、上記の`main`切り替え、fast-forward限定のpull、新規ブランチ作成、Issue取得、計画ファイル作成が明示された作業フローである。
+- 作業開始時に無視したロックファイルの未コミット変更はユーザーの変更として保持し、実装差分への混入やcommitを行わない。
 - このスキルでは、実装計画と実装結果、GitHubの自動クローズ用`Close #<Issue番号>`をPR本文へ投稿するために必要なcommit、ブランチpush、既存PR本文の更新、PR作成、およびPR発行後の対応IssueのProject Statusを`In review`へ変更する。PRのマージ、Issueの手動クローズ、ラベル変更、Issueへのコメント投稿は行わない。IssueはPRが後でマージされたときにGitHubのキーワード機能でクローズされる。
 - `main`のpull、Issue取得、ブランチ作成のいずれかが失敗した場合は、部分的な実装を進めず停止する。
 - 関連するリファクタリングや整理へ、暗黙に作業範囲を広げない。

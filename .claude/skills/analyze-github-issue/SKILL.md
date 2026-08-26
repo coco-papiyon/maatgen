@@ -48,9 +48,9 @@ description: Issue番号を引数に取り、GitHub Issue本文を解析して�
 5. 受入条件は、実装後に第三者が確認できる観測可能な表現にする。Issueに明示されていない条件を追加する場合は、推定であることを示すか「要確認」とする。実装内容には実装方針を断定せず、Issueで指定された範囲と未確定事項を区別する。
 6. 更新前に、対象Issue番号と更新差分を再確認する。本文更新後にIssueのステータスを`Refined`へ変更することを明示する。ラベル、担当者、マイルストーン、コメントは変更しない。
 7. GitHub Issue本文だけを更新する。利用可能なGitHub連携を優先し、なければ認証済みの`gh issue edit <番号> --body-file <一時ファイル>`または同等のAPIを使う。一時ファイルには本文を書き込むが、処理後に不要なら削除する。更新が失敗した場合は再試行を繰り返さず、原因と未更新の状態を報告する。
-8. 更新後にIssue本文を再取得し、4つの見出し、受入条件、原文保持の要否を確認する。本文の再取得・検証に失敗した場合は、ステータスを変更せず停止する。
+8. 更新後に`gh issue view <番号> --json title,body,state,labels,assignees,milestone,comments,url,projectItems`（または利用可能なGitHub連携の同等操作）でIssueを再取得し、4つの見出し、受入条件、原文保持の要否を確認する。更新後の確認に`gh project item-list`は使用しない。本文の再取得・検証に失敗した場合は、ステータスを変更せず停止する。
 9. 本文の更新と検証が成功した後、対象Issueが所属するGitHub Projectの`Status`フィールドを`Refined`へ変更する。利用可能なGitHub連携を優先し、なければ認証済みのGitHub APIまたは`gh project item-edit`相当の操作を使う。対象Projectが複数ある場合はIssueが現在所属するProjectを特定し、`Refined`という既存の選択肢を使用する。Project、Statusフィールド、または`Refined`選択肢を特定できない場合は、Issue本文は更新済みだがステータス未変更として停止し、推測でラベル追加や別Projectの変更を行わない。
-10. ステータス更新後にIssueとProjectを再取得し、Statusが正確に`Refined`であること、ラベル・コメント・その他のIssue属性に意図しない変更がないことを確認する。
+10. ステータス更新後も`gh issue view <番号> --json title,body,state,labels,assignees,milestone,comments,url,projectItems`（または利用可能なGitHub連携の同等操作）でIssueを再取得する。`projectItems`からStatusが正確に`Refined`であることを確認し、ラベル・コメント・その他のIssue属性に意図しない変更がないことを確認する。この確認に`gh project item-list`は使用しない。
 
 ## 境界
 
