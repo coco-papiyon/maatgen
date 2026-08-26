@@ -92,6 +92,17 @@ func TestCloseSessionRejectsActiveRunAndCleansCheckpointRefs(t *testing.T) {
 	}
 }
 
+func TestCloseSessionCascadesToItsGitHubMonitorEvent(t *testing.T) {
+	store := &fakeStore{session: protocol.AgentSession{ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repo", Status: protocol.SessionActive, CreatedAt: time.Now()}}
+	service := New(store, &fakeRepositoryManager{root: "C:/repo"})
+	if _, err := service.CloseSession(context.Background(), "session-1"); err != nil {
+		t.Fatal(err)
+	}
+	if store.closedMonitorEventForSession != "session-1" {
+		t.Fatalf("closedMonitorEventForSession = %q, want session-1", store.closedMonitorEventForSession)
+	}
+}
+
 func TestGetWorkspaceFileTreeListsTopLevelAndSkipsExcludedDirs(t *testing.T) {
 	root := t.TempDir()
 	mustMkdir(t, filepath.Join(root, "node_modules"))
@@ -212,9 +223,10 @@ func mustWriteFile(t *testing.T, path, contents string) {
 }
 
 type fakeStore struct {
-	session     protocol.AgentSession
-	closeErr    error
-	sourceStats protocol.SourceStats
+	session                      protocol.AgentSession
+	closeErr                     error
+	sourceStats                  protocol.SourceStats
+	closedMonitorEventForSession string
 }
 
 func (f *fakeStore) CreateSession(_ context.Context, s protocol.AgentSession) error {
@@ -245,6 +257,10 @@ func (f *fakeStore) ReopenSession(_ context.Context, id string) error {
 }
 func (f *fakeStore) ReplaceSourceStats(_ context.Context, stats protocol.SourceStats) error {
 	f.sourceStats = stats
+	return nil
+}
+func (f *fakeStore) CloseMonitorEventForSession(_ context.Context, sessionID string, _ time.Time) error {
+	f.closedMonitorEventForSession = sessionID
 	return nil
 }
 

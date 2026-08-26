@@ -255,7 +255,29 @@ const (
 	GitHubMonitorEventCompleted      GitHubMonitorEventStatus = "completed"
 	GitHubMonitorEventFailed         GitHubMonitorEventStatus = "failed"
 	GitHubMonitorEventCancelled      GitHubMonitorEventStatus = "cancelled"
+	// GitHubMonitorEventClosed is a user-initiated terminal state (Issue
+	// #34's "Job" close action): it overwrites whatever status the event was
+	// in, the same way AgentSession collapses to SessionClosed regardless of
+	// its prior activity. Closing an event with a SessionID cascades to
+	// close that Session, and vice versa (see session.Service.CloseSession
+	// and githubcontroller.Service.CloseEvent).
+	GitHubMonitorEventClosed GitHubMonitorEventStatus = "closed"
 )
+
+// AllGitHubMonitorEventStatuses lists every valid GitHubMonitorEventStatus,
+// used to validate the Job list's per-status filter (server.parseJobStatusFilter).
+var AllGitHubMonitorEventStatuses = []GitHubMonitorEventStatus{
+	GitHubMonitorEventDetected,
+	GitHubMonitorEventMatched,
+	GitHubMonitorEventQueued,
+	GitHubMonitorEventSessionCreated,
+	GitHubMonitorEventRunStarted,
+	GitHubMonitorEventSkipped,
+	GitHubMonitorEventCompleted,
+	GitHubMonitorEventFailed,
+	GitHubMonitorEventCancelled,
+	GitHubMonitorEventClosed,
+}
 
 // GitHubMonitorEvent records one detected change and everything needed to
 // evaluate it, deduplicate it, and (if it matched) trace it to the Session
@@ -285,6 +307,7 @@ type GitHubMonitorEvent struct {
 	LastError       *string                  `json:"lastError,omitempty"`
 	CreatedAt       time.Time                `json:"createdAt"`
 	UpdatedAt       time.Time                `json:"updatedAt"`
+	ClosedAt        *time.Time               `json:"closedAt,omitempty"`
 }
 
 // GitHubRemoteCandidate identifies a GitHub repository resolved from one of

@@ -644,6 +644,26 @@ func parseSessionStatusFilter(w http.ResponseWriter, r *http.Request) (protocol.
 	}
 }
 
+// parseJobStatusFilter reads the "status" query parameter used to filter
+// GET /api/v1/github/events (the Job screen, Issue #34). Closed jobs are
+// hidden from the list by default (status="" behaves like "open"): callers
+// pass status=all to see them, or a specific protocol.GitHubMonitorEventStatus
+// (including "closed") to see only jobs in that exact status.
+func parseJobStatusFilter(w http.ResponseWriter, r *http.Request) (string, bool) {
+	value := r.URL.Query().Get("status")
+	switch value {
+	case "", "open", "all":
+		return value, true
+	}
+	for _, status := range protocol.AllGitHubMonitorEventStatuses {
+		if value == string(status) {
+			return value, true
+		}
+	}
+	writeAPIError(w, http.StatusBadRequest, "invalid_request", "status must be one of: open, all, or a valid job status", nil)
+	return "", false
+}
+
 func writeStorageError(w http.ResponseWriter, err error) {
 	if errors.Is(err, storage.ErrNotFound) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "resource was not found", nil)

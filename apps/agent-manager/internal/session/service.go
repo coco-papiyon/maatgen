@@ -34,6 +34,11 @@ type Store interface {
 	CloseSession(ctx context.Context, id string, closedAt time.Time) error
 	ReopenSession(ctx context.Context, id string) error
 	ReplaceSourceStats(ctx context.Context, stats protocol.SourceStats) error
+	// CloseMonitorEventForSession closes the GitHub monitor event (Job) that
+	// created this session, if any, cascading a Session close into closing
+	// its Job (Issue #34). It is a no-op when no event references the
+	// session.
+	CloseMonitorEventForSession(ctx context.Context, sessionID string, closedAt time.Time) error
 }
 
 type RepositoryManager interface {
@@ -148,6 +153,9 @@ func (s *Service) CloseSession(ctx context.Context, id string) (protocol.AgentSe
 		} else if err != nil {
 			return protocol.AgentSession{}, err
 		}
+	}
+	if err := s.store.CloseMonitorEventForSession(ctx, id, s.now().UTC()); err != nil {
+		return protocol.AgentSession{}, fmt.Errorf("close github monitor event for session: %w", err)
 	}
 	if err := s.repositories.CleanupSession(ctx, session.Workspace, session.ID); err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("%w: %v", ErrCleanupFailed, err)

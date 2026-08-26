@@ -275,7 +275,7 @@ func TestListMonitorEventsOrdersNewestFirstAndRespectsLimit(t *testing.T) {
 		}
 	}
 
-	events, err := store.ListMonitorEvents(ctx, monitor.Repository, 2)
+	events, err := store.ListMonitorEvents(ctx, monitor.Repository, 2, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestListAllMonitorEventsOrdersNewestFirstAcrossRepositoriesAndRespectsLimit
 		}
 	}
 
-	events, err := store.ListAllMonitorEvents(ctx, 2)
+	events, err := store.ListAllMonitorEvents(ctx, 2, "")
 	if err != nil {
 		t.Fatalf("list all: %v", err)
 	}
@@ -314,6 +314,145 @@ func TestListAllMonitorEventsOrdersNewestFirstAcrossRepositoriesAndRespectsLimit
 	}
 	if events[0].Repository != monitorA.Repository || events[1].Repository != monitorB.Repository {
 		t.Fatalf("events repositories = %#v, want [%s, %s]", events, monitorA.Repository, monitorB.Repository)
+	}
+}
+
+func TestListAllMonitorEventsStatusFilter(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	createdAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	monitor := newTestRepositoryForEvents(t, store, createdAt)
+
+	open := testMonitorEvent("event-open", monitor.Repository, createdAt)
+	open.Status = protocol.GitHubMonitorEventCompleted
+	if inserted, err := store.InsertMonitorEvent(ctx, open); err != nil || !inserted {
+		t.Fatalf("insert open: inserted=%v err=%v", inserted, err)
+	}
+	closed := testMonitorEvent("event-closed", monitor.Repository, createdAt.Add(time.Minute))
+	closed.Status = protocol.GitHubMonitorEventClosed
+	if inserted, err := store.InsertMonitorEvent(ctx, closed); err != nil || !inserted {
+		t.Fatalf("insert closed: inserted=%v err=%v", inserted, err)
+	}
+
+	defaultFiltered, err := store.ListAllMonitorEvents(ctx, 10, "")
+	if err != nil {
+		t.Fatalf("list default: %v", err)
+	}
+	if len(defaultFiltered) != 1 || defaultFiltered[0].ID != "event-open" {
+		t.Fatalf("default filter events = %#v, want only event-open", defaultFiltered)
+	}
+
+	openFiltered, err := store.ListAllMonitorEvents(ctx, 10, "open")
+	if err != nil {
+		t.Fatalf("list open: %v", err)
+	}
+	if len(openFiltered) != 1 || openFiltered[0].ID != "event-open" {
+		t.Fatalf("open filter events = %#v, want only event-open", openFiltered)
+	}
+
+	completedFiltered, err := store.ListAllMonitorEvents(ctx, 10, "completed")
+	if err != nil {
+		t.Fatalf("list completed: %v", err)
+	}
+	if len(completedFiltered) != 1 || completedFiltered[0].ID != "event-open" {
+		t.Fatalf("completed filter events = %#v, want only event-open", completedFiltered)
+	}
+
+	closedFiltered, err := store.ListAllMonitorEvents(ctx, 10, "closed")
+	if err != nil {
+		t.Fatalf("list closed: %v", err)
+	}
+	if len(closedFiltered) != 1 || closedFiltered[0].ID != "event-closed" {
+		t.Fatalf("closed filter events = %#v, want only event-closed", closedFiltered)
+	}
+
+	allFiltered, err := store.ListAllMonitorEvents(ctx, 10, "all")
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(allFiltered) != 2 {
+		t.Fatalf("all filter events = %#v, want both events", allFiltered)
+	}
+}
+
+func TestCloseMonitorEvent(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	createdAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	monitor := newTestRepositoryForEvents(t, store, createdAt)
+
+	event := testMonitorEvent("event-1", monitor.Repository, createdAt)
+	event.Status = protocol.GitHubMonitorEventCompleted
+	if inserted, err := store.InsertMonitorEvent(ctx, event); err != nil || !inserted {
+		t.Fatalf("insert: inserted=%v err=%v", inserted, err)
+	}
+
+	closedAt := createdAt.Add(time.Minute)
+	if err := store.CloseMonitorEvent(ctx, event.ID, closedAt); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	got, err := store.GetMonitorEvent(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != protocol.GitHubMonitorEventClosed || got.ClosedAt == nil || !got.ClosedAt.Equal(closedAt) {
+		t.Fatalf("got = %#v", got)
+	}
+
+	// Closing again is idempotent and must not move ClosedAt.
+	if err := store.CloseMonitorEvent(ctx, event.ID, closedAt.Add(time.Hour)); err != nil {
+		t.Fatalf("re-close: %v", err)
+	}
+	got, err = store.GetMonitorEvent(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.ClosedAt.Equal(closedAt) {
+		t.Fatalf("closedAt moved on re-close: %#v, want %v", got.ClosedAt, closedAt)
+	}
+
+	if err := store.CloseMonitorEvent(ctx, "missing", closedAt); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCloseMonitorEventForSession(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	createdAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	monitor := newTestRepositoryForEvents(t, store, createdAt)
+
+	event := testMonitorEvent("event-1", monitor.Repository, createdAt)
+	event.Status = protocol.GitHubMonitorEventRunStarted
+	if inserted, err := store.InsertMonitorEvent(ctx, event); err != nil || !inserted {
+		t.Fatalf("insert: inserted=%v err=%v", inserted, err)
+	}
+	session := protocol.AgentSession{
+		ID: "session-1", Agent: protocol.AgentCodex, Workspace: monitor.Repository,
+		Status: protocol.SessionActive, CreatedAt: createdAt,
+	}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.AttachMonitorEventSession(ctx, event.ID, session.ID, createdAt); err != nil {
+		t.Fatalf("attach session: %v", err)
+	}
+
+	// No event references "session-without-a-job": a silent no-op.
+	if err := store.CloseMonitorEventForSession(ctx, "session-without-a-job", createdAt); err != nil {
+		t.Fatalf("close for unrelated session: %v", err)
+	}
+
+	closedAt := createdAt.Add(time.Minute)
+	if err := store.CloseMonitorEventForSession(ctx, session.ID, closedAt); err != nil {
+		t.Fatalf("close for session: %v", err)
+	}
+	got, err := store.GetMonitorEvent(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != protocol.GitHubMonitorEventClosed || got.ClosedAt == nil || !got.ClosedAt.Equal(closedAt) {
+		t.Fatalf("got = %#v", got)
 	}
 }
 

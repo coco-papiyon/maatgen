@@ -24,16 +24,18 @@ type fakeGitHubMonitorController struct {
 	item       protocol.GitHubItem
 	err        error
 
-	lastWorkspace       string
-	lastCreateMonitor   protocol.CreateGitHubMonitorRequest
-	lastUpdateMonitor   protocol.UpdateGitHubMonitorRequest
-	lastRuleRequest     protocol.GitHubTriggerRuleRequest
-	lastRuleID          string
-	lastReplayEventID   string
-	lastSkipEventID     string
-	lastListEventsLimit int
-	lastItemQuery       githubcontroller.ItemQuery
-	lastItemNumber      int
+	lastWorkspace        string
+	lastCreateMonitor    protocol.CreateGitHubMonitorRequest
+	lastUpdateMonitor    protocol.UpdateGitHubMonitorRequest
+	lastRuleRequest      protocol.GitHubTriggerRuleRequest
+	lastRuleID           string
+	lastReplayEventID    string
+	lastSkipEventID      string
+	lastCloseEventID     string
+	lastListEventsLimit  int
+	lastListEventsFilter string
+	lastItemQuery        githubcontroller.ItemQuery
+	lastItemNumber       int
 }
 
 func (f *fakeGitHubMonitorController) ResolveRepository(ctx context.Context, workspace string) (protocol.GitHubRepositoryResolution, error) {
@@ -84,9 +86,10 @@ func (f *fakeGitHubMonitorController) DeleteRule(ctx context.Context, id string)
 	f.lastRuleID = id
 	return f.err
 }
-func (f *fakeGitHubMonitorController) ListEvents(ctx context.Context, workspace string, limit int) ([]protocol.GitHubMonitorEvent, error) {
+func (f *fakeGitHubMonitorController) ListEvents(ctx context.Context, workspace string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error) {
 	f.lastWorkspace = workspace
 	f.lastListEventsLimit = limit
+	f.lastListEventsFilter = filter
 	return f.events, f.err
 }
 func (f *fakeGitHubMonitorController) ReplayEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error) {
@@ -95,6 +98,10 @@ func (f *fakeGitHubMonitorController) ReplayEvent(ctx context.Context, eventID s
 }
 func (f *fakeGitHubMonitorController) SkipEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error) {
 	f.lastSkipEventID = eventID
+	return f.replay, f.err
+}
+func (f *fakeGitHubMonitorController) CloseEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error) {
+	f.lastCloseEventID = eventID
 	return f.replay, f.err
 }
 func (f *fakeGitHubMonitorController) ListIssues(ctx context.Context, workspace string, query githubcontroller.ItemQuery) (protocol.GitHubItemListResponse, error) {
@@ -325,6 +332,43 @@ func TestGitHubEventHistoryAndReplayAPI(t *testing.T) {
 	handler.ServeHTTP(recorder, apiRequest("POST", "/api/v1/github/events/event-1/skip"))
 	if recorder.Code != 200 || controller.lastSkipEventID != "event-1" {
 		t.Fatalf("skip status = %d, lastSkipEventID = %q", recorder.Code, controller.lastSkipEventID)
+	}
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, apiRequest("POST", "/api/v1/github/events/event-1/close"))
+	if recorder.Code != 200 || controller.lastCloseEventID != "event-1" {
+		t.Fatalf("close status = %d, lastCloseEventID = %q", recorder.Code, controller.lastCloseEventID)
+	}
+}
+
+func TestGitHubEventListStatusFilter(t *testing.T) {
+	controller := &fakeGitHubMonitorController{}
+	config := testConfig()
+	config.GitHubMonitorController = controller
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/events"))
+	if recorder.Code != 200 || controller.lastListEventsFilter != "" {
+		t.Fatalf("default filter: status = %d, filter = %q", recorder.Code, controller.lastListEventsFilter)
+	}
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/events?status=completed"))
+	if recorder.Code != 200 || controller.lastListEventsFilter != "completed" {
+		t.Fatalf("status filter: status = %d, filter = %q", recorder.Code, controller.lastListEventsFilter)
+	}
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/events?status=all"))
+	if recorder.Code != 200 || controller.lastListEventsFilter != "all" {
+		t.Fatalf("all filter: status = %d, filter = %q", recorder.Code, controller.lastListEventsFilter)
+	}
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/github/events?status=not-a-status"))
+	if recorder.Code != 400 {
+		t.Fatalf("invalid filter: status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
 

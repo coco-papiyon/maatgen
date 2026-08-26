@@ -8,6 +8,7 @@ import type {
   GitHubItemListResponse,
   GitHubMonitorEvent,
   GitHubMonitorEventListResponse,
+  GitHubMonitorEventStatus,
   GitHubRepositoryMonitor,
   GitHubRepositoryMonitorListResponse,
   GitHubRepositoryResolution,
@@ -33,6 +34,12 @@ export type UsageGranularity = 'day' | 'week' | 'month';
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type SessionStatusFilter = 'active' | 'closed' | 'all';
+
+// JobStatusFilter narrows the Job screen's event list (Issue #34): 'open'
+// excludes closed jobs regardless of their other status (the default),
+// 'all' applies no filter, and any GitHubMonitorEventStatus value (including
+// 'closed') is an exact match.
+export type JobStatusFilter = 'open' | 'all' | GitHubMonitorEventStatus;
 
 export interface SessionUsage {
   sessionId: string;
@@ -125,9 +132,10 @@ export interface AgentApi {
   deleteGitHubTriggerRule(id: string): Promise<void>;
   // Omitting workspace lists monitor events across every registered
   // repository (the Job screen's cross-repository event table).
-  listGitHubMonitorEvents(workspace?: string, limit?: number): Promise<GitHubMonitorEvent[]>;
+  listGitHubMonitorEvents(workspace?: string, limit?: number, status?: JobStatusFilter): Promise<GitHubMonitorEvent[]>;
   skipGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent>;
   replayGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent>;
+  closeGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent>;
   listGitHubIssues(workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse>;
   getGitHubIssue(workspace: string, number: number): Promise<GitHubItem>;
   listGitHubPullRequests(workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse>;
@@ -328,9 +336,10 @@ export const httpAgentApi: AgentApi = {
   deleteGitHubTriggerRule(id) {
     return request(`/api/v1/github/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
-  async listGitHubMonitorEvents(workspace, limit = 100) {
+  async listGitHubMonitorEvents(workspace, limit = 100, status) {
     const query = new URLSearchParams({ limit: String(limit) });
     if (workspace) query.set('workspace', workspace);
+    if (status) query.set('status', status);
     const response = await request<GitHubMonitorEventListResponse>(`/api/v1/github/events?${query}`);
     return response.events;
   },
@@ -339,6 +348,9 @@ export const httpAgentApi: AgentApi = {
   },
   skipGitHubMonitorEvent(eventId) {
     return request(`/api/v1/github/events/${encodeURIComponent(eventId)}/skip`, { method: 'POST' });
+  },
+  closeGitHubMonitorEvent(eventId) {
+    return request(`/api/v1/github/events/${encodeURIComponent(eventId)}/close`, { method: 'POST' });
   },
   listGitHubIssues(workspace, query) {
     return request(`/api/v1/github/issues?${githubItemQueryString(workspace, query)}`);

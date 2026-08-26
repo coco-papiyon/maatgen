@@ -58,11 +58,19 @@ type Store interface {
 	ListAllTriggerRules(ctx context.Context) ([]protocol.GitHubTriggerRule, error)
 	DeleteTriggerRule(ctx context.Context, id string) error
 
-	ListMonitorEvents(ctx context.Context, repository string, limit int) ([]protocol.GitHubMonitorEvent, error)
-	ListAllMonitorEvents(ctx context.Context, limit int) ([]protocol.GitHubMonitorEvent, error)
+	ListMonitorEvents(ctx context.Context, repository string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error)
+	ListAllMonitorEvents(ctx context.Context, limit int, filter string) ([]protocol.GitHubMonitorEvent, error)
 	GetMonitorEvent(ctx context.Context, id string) (protocol.GitHubMonitorEvent, error)
 	SkipMonitorEvent(ctx context.Context, id, reason string, updatedAt time.Time) error
 	CreateReplayEvent(ctx context.Context, originalEventID, newEventID string, createdAt time.Time) (protocol.GitHubMonitorEvent, error)
+	CloseMonitorEvent(ctx context.Context, id string, closedAt time.Time) error
+}
+
+// SessionCloser closes the Session a Job (GitHubMonitorEvent) started, as
+// part of the Job→Session close cascade (Issue #34). It is satisfied by
+// *session.Service.
+type SessionCloser interface {
+	CloseSession(ctx context.Context, id string) (protocol.AgentSession, error)
 }
 
 // Poller runs one GitHub sync cycle for a repository. It is satisfied by
@@ -91,15 +99,16 @@ type Service struct {
 	allowedHosts []string
 	poller       Poller
 	clients      ClientFactory
+	sessions     SessionCloser
 	newRuleID    func() (string, error)
 	newEventID   func() (string, error)
 	now          func() time.Time
 }
 
-func New(store Store, validator RepositoryValidator, gitPath string, allowedHosts []string, poller Poller, clients ClientFactory) *Service {
+func New(store Store, validator RepositoryValidator, gitPath string, allowedHosts []string, poller Poller, clients ClientFactory, sessions SessionCloser) *Service {
 	return &Service{
 		store: store, validator: validator, gitPath: gitPath, allowedHosts: allowedHosts,
-		poller: poller, clients: clients,
+		poller: poller, clients: clients, sessions: sessions,
 		newRuleID:  func() (string, error) { return generateID("github_rule") },
 		newEventID: func() (string, error) { return generateID("github_replay") },
 		now:        time.Now,
@@ -400,19 +409,42 @@ func validateRuleRequest(request protocol.GitHubTriggerRuleRequest) error {
 
 // ListEvents returns the events for workspace's repository, or, when
 // workspace is empty, the most recent events across every registered
-// repository (the Job screen's cross-repository event table).
-func (s *Service) ListEvents(ctx context.Context, workspace string, limit int) ([]protocol.GitHubMonitorEvent, error) {
+// repository (the Job screen's cross-repository event table). filter
+// narrows by status; see sqlite.monitorEventStatusFilter for its accepted
+// values ("", "open", "all", or an exact protocol.GitHubMonitorEventStatus).
+func (s *Service) ListEvents(ctx context.Context, workspace string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	if workspace == "" {
-		return s.store.ListAllMonitorEvents(ctx, limit)
+		return s.store.ListAllMonitorEvents(ctx, limit, filter)
 	}
 	repository, err := s.validator.ValidateRepository(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
-	return s.store.ListMonitorEvents(ctx, repository, limit)
+	return s.store.ListMonitorEvents(ctx, repository, limit, filter)
+}
+
+// CloseEvent closes a Job (GitHubMonitorEvent), cascading to close the
+// Session it started, if any (Issue #34). If the Session has an active Run,
+// the cascade fails with session.ErrRunActive (via SessionCloser.CloseSession)
+// and the Job is left unclosed: an in-progress Job cannot be closed, the same
+// way session.Service.CloseSession itself refuses to close an active Session.
+func (s *Service) CloseEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error) {
+	event, err := s.store.GetMonitorEvent(ctx, eventID)
+	if err != nil {
+		return protocol.GitHubMonitorEvent{}, err
+	}
+	if event.SessionID != nil {
+		if _, err := s.sessions.CloseSession(ctx, *event.SessionID); err != nil {
+			return protocol.GitHubMonitorEvent{}, err
+		}
+	}
+	if err := s.store.CloseMonitorEvent(ctx, eventID, s.now().UTC()); err != nil {
+		return protocol.GitHubMonitorEvent{}, err
+	}
+	return s.store.GetMonitorEvent(ctx, eventID)
 }
 
 // ReplayEvent re-executes a past monitor event as a new Outbox delivery
