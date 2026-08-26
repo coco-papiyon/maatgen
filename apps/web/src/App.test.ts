@@ -356,6 +356,33 @@ describe('App with MockAgentApi', () => {
     });
   });
 
+  it('does not send autoApprove by default', async () => {
+    const mounted = await mountApp();
+    const send = vi.spyOn(mounted.environment.agentApi, 'sendMessage').mockResolvedValue({
+      id: 'run-default', sessionId: 'mock-success', status: 'running', prompt: '通常のテスト',
+    });
+    expect((mounted.wrapper.get('input[aria-label="自動承認"]').element as HTMLInputElement).checked).toBe(false);
+    await mounted.wrapper.find('.composer textarea').setValue('通常のテスト');
+    await mounted.wrapper.find('.composer').trigger('submit');
+    await flushPromises();
+    expect(send).toHaveBeenCalledWith(expect.any(String), { message: '通常のテスト' });
+  });
+
+  it('enables Codex auto-approval for the next run', async () => {
+    const mounted = await mountApp();
+    const send = vi.spyOn(mounted.environment.agentApi, 'sendMessage').mockResolvedValue({
+      id: 'run-auto-approve', sessionId: 'mock-success', status: 'running', prompt: '自動承認のテスト',
+    });
+    await mounted.wrapper.get('input[aria-label="自動承認"]').setValue(true);
+    await mounted.wrapper.find('.composer textarea').setValue('自動承認のテスト');
+    await mounted.wrapper.find('.composer').trigger('submit');
+    await flushPromises();
+    expect(send).toHaveBeenCalledWith(expect.any(String), {
+      message: '自動承認のテスト',
+      autoApprove: true,
+    });
+  });
+
   it('restores the previously selected provider for a new session', async () => {
     localStorage.setItem('maatgen.provider', 'other');
     class MultiProviderApi extends MockAgentApi {

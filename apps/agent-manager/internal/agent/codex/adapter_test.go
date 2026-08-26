@@ -84,6 +84,30 @@ func TestRunAppServerApproval(t *testing.T) {
 	}
 }
 
+func TestRunAppServerAutoApprove(t *testing.T) {
+	t.Setenv("MAATGEN_CODEX_HELPER", "1")
+	adapter := New(os.Args[0])
+	adapter.prefixArgs = []string{"-test.run=TestCodexHelper", "--"}
+
+	approvalCalled := false
+	approval := func(_ context.Context, request agent.ApprovalRequest) (agent.ApprovalDecision, error) {
+		approvalCalled = true
+		return agent.ApprovalDecision{Approved: false}, nil
+	}
+
+	_, err := adapter.Run(context.Background(), agent.RunRequest{
+		Directory: t.TempDir(), Prompt: "implement the task", Model: "test-model",
+		Timeout: 10 * time.Second, Approval: approval, AutoApprove: true,
+	}, func(agent.Output) error { return nil })
+
+	if err != nil {
+		t.Fatalf("run app-server: %v", err)
+	}
+	if approvalCalled {
+		t.Fatal("approval handler was called even though AutoApprove was set")
+	}
+}
+
 func TestGetUsageCodex(t *testing.T) {
 	t.Setenv("MAATGEN_CODEX_HELPER", "1")
 	adapter := New(os.Args[0])

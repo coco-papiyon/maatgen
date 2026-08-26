@@ -296,9 +296,10 @@ func (s *Service) CreateRule(ctx context.Context, request protocol.GitHubTrigger
 		ID: id, Repository: repository, Name: strings.TrimSpace(request.Name), Enabled: request.Enabled,
 		EventKinds: request.EventKinds, Filters: request.Filters, PromptTemplate: request.PromptTemplate,
 		IncludeBody: request.IncludeBody, Provider: request.Provider, Model: request.Model,
-		ReasoningEffort: request.ReasoningEffort, ConcurrencyPolicy: normalizeConcurrencyPolicy(request.ConcurrencyPolicy),
-		Priority:  normalizeJobPriority(request.Priority),
-		CreatedAt: now, UpdatedAt: now,
+		ReasoningEffort: request.ReasoningEffort, AutoApprove: request.AutoApprove,
+		ConcurrencyPolicy: normalizeConcurrencyPolicy(request.ConcurrencyPolicy),
+		Priority:          normalizeJobPriority(request.Priority),
+		CreatedAt:         now, UpdatedAt: now,
 	}
 	if err := s.store.CreateTriggerRule(ctx, rule); err != nil {
 		return protocol.GitHubTriggerRule{}, err
@@ -333,6 +334,7 @@ func (s *Service) UpdateRule(ctx context.Context, id string, request protocol.Gi
 	updated.Provider = request.Provider
 	updated.Model = request.Model
 	updated.ReasoningEffort = request.ReasoningEffort
+	updated.AutoApprove = request.AutoApprove
 	updated.ConcurrencyPolicy = normalizeConcurrencyPolicy(request.ConcurrencyPolicy)
 	updated.Priority = normalizeJobPriority(request.Priority)
 	updated.UpdatedAt = s.now().UTC()

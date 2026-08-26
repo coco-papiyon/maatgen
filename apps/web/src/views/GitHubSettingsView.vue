@@ -214,6 +214,7 @@ interface RuleForm {
   provider: AgentName;
   model: string;
   reasoningEffort: string;
+  autoApprove: boolean;
   concurrencyPolicy: GitHubConcurrencyPolicy;
   priority: GitHubJobPriority;
   labels: string;
@@ -232,7 +233,7 @@ function blankRuleForm(): RuleForm {
   const repository = repositories.value[0]?.repository ?? '';
   return {
     id: '', repository, name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
-    provider: providers.value[0]?.id ?? 'codex', model: '', reasoningEffort: '', concurrencyPolicy: 'coalesce', priority: 'medium',
+    provider: providers.value[0]?.id ?? 'codex', model: '', reasoningEffort: '', autoApprove: false, concurrencyPolicy: 'coalesce', priority: 'medium',
     labels: '', assignees: '', reviewers: '', projectTitle: repositoryProjectName(repository), projectField: '', projectValue: '',
   };
 }
@@ -298,7 +299,7 @@ function startEditRule(rule: GitHubTriggerRule) {
   editingRule.value = {
     id: rule.id, repository: rule.repository, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider,
-    model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', concurrencyPolicy: rule.concurrencyPolicy,
+    model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', autoApprove: rule.autoApprove, concurrencyPolicy: rule.concurrencyPolicy,
     priority: rule.priority,
     labels: (rule.filters.labels ?? []).join(', '),
     assignees: (rule.filters.assignees ?? []).join(', '),
@@ -340,6 +341,7 @@ async function saveRule() {
       provider: form.provider,
       ...(form.model ? { model: form.model } : {}),
       ...(form.reasoningEffort ? { reasoningEffort: form.reasoningEffort } : {}),
+      autoApprove: form.autoApprove,
       concurrencyPolicy: form.concurrencyPolicy,
       priority: form.priority,
     };
@@ -548,6 +550,7 @@ onMounted(() => void refresh());
                 <option v-for="option in reasoningEffortSelectOptions" :key="option.value || 'default-effort'" :value="option.value">{{ option.label }}</option>
               </select>
             </label>
+            <label class="github-checkbox"><input v-model="editingRule.autoApprove" type="checkbox" aria-label="自動承認" /> 自動承認</label>
           </div>
           <div class="github-form-row">
             <label>同時実行時の扱い

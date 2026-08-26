@@ -9,4 +9,5 @@ export interface SendMessageRequest {
   model?: string;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   timeoutSeconds?: number;
+  autoApprove?: boolean;
 }

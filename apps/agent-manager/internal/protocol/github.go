@@ -200,10 +200,15 @@ type GitHubTriggerRule struct {
 	// template. It defaults to false: body text is untrusted external
 	// input, so ADR-007 section 2 requires it be left out of the Prompt
 	// unless a rule explicitly opts in.
-	IncludeBody       bool                    `json:"includeBody"`
-	Provider          AgentName               `json:"provider"`
-	Model             *string                 `json:"model,omitempty"`
-	ReasoningEffort   *string                 `json:"reasoningEffort,omitempty"`
+	IncludeBody     bool      `json:"includeBody"`
+	Provider        AgentName `json:"provider"`
+	Model           *string   `json:"model,omitempty"`
+	ReasoningEffort *string   `json:"reasoningEffort,omitempty"`
+	// AutoApprove grants Codex's command execution approvals automatically
+	// for runs this rule starts, bypassing the AI/human approval flow
+	// (ADR-007 is silent on this; see agent.RunRequest.AutoApprove). Ignored
+	// by other providers, which have no approval flow to bypass.
+	AutoApprove       bool                    `json:"autoApprove"`
 	ConcurrencyPolicy GitHubConcurrencyPolicy `json:"concurrencyPolicy"`
 	Priority          GitHubJobPriority       `json:"priority"`
 	CreatedAt         time.Time               `json:"createdAt"`
@@ -343,6 +348,7 @@ type GitHubTriggerRuleRequest struct {
 	Provider          AgentName               `json:"provider"`
 	Model             *string                 `json:"model,omitempty"`
 	ReasoningEffort   *string                 `json:"reasoningEffort,omitempty"`
+	AutoApprove       bool                    `json:"autoApprove"`
 	ConcurrencyPolicy GitHubConcurrencyPolicy `json:"concurrencyPolicy"`
 	Priority          GitHubJobPriority       `json:"priority"`
 }
