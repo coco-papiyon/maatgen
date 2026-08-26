@@ -21,6 +21,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubmonitor"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	runservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/run"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 )
 
 // defaultCoalesceQueueLimit backstops GitHubRepositoryMonitor.CoalesceQueueLimit
@@ -51,6 +52,12 @@ type Store interface {
 // automated Runs must not be mixed into an existing manual Session).
 type SessionCreator interface {
 	CreateSession(ctx context.Context, request protocol.CreateSessionRequest) (protocol.AgentSession, error)
+	// CloseSession closes a Session dispatchQueued just created after
+	// discovering, via AttachMonitorEventSession's storage.ErrConflict, that
+	// the event it was created for was closed (Issue #34) in the meantime.
+	// Without this, that Session would be left orphaned: never attached to
+	// its event and never started.
+	CloseSession(ctx context.Context, id string) (protocol.AgentSession, error)
 }
 
 // RunStarter is satisfied by *run.Service.
@@ -377,6 +384,16 @@ func (d *Dispatcher) dispatchQueued(ctx context.Context, event protocol.GitHubMo
 		return
 	}
 	if err := d.store.AttachMonitorEventSession(ctx, event.ID, session.ID, d.now().UTC()); err != nil {
+		if errors.Is(err, storage.ErrConflict) {
+			// The event was closed (Issue #34) after Tick listed it as
+			// queued but before this could claim it. It must stay closed,
+			// not be resurrected into session_created or failed, so just
+			// clean up the Session that was created for it and start no Run.
+			if _, closeErr := d.sessions.CloseSession(ctx, session.ID); closeErr != nil {
+				slog.Error("close orphaned session for closed github monitor event failed", "event", event.ID, "session", session.ID, "error", closeErr)
+			}
+			return
+		}
 		d.failEvent(ctx, event.ID, "attach session failed: "+err.Error())
 		return
 	}

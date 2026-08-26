@@ -87,12 +87,37 @@ func (s *Store) UpdateMonitorEventStatus(ctx context.Context, id string, status 
 }
 
 // AttachMonitorEventSession records the Session created for this event and
-// advances its status to session_created.
+// advances its status to session_created. The update only applies while the
+// event is still queued: the dispatcher (githuboutbox.Dispatcher) lists
+// queued events, then creates a Session for one, then calls this to claim
+// it, and a user can close the event (Issue #34) in between those two
+// steps. Without this guard, a closed event would be silently resurrected
+// into session_created here. When the event exists but is no longer
+// queued, storage.ErrConflict is returned so the dispatcher can close the
+// orphaned Session it just created instead of starting a Run for a Job the
+// user closed.
 func (s *Store) AttachMonitorEventSession(ctx context.Context, id, sessionID string, updatedAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE github_monitor_events
-		SET session_id = ?, status = ?, updated_at = ? WHERE id = ?`,
-		sessionID, protocol.GitHubMonitorEventSessionCreated, formatTime(updatedAt), id)
-	return updateResult("attach github monitor event session", result, err)
+		SET session_id = ?, status = ?, updated_at = ? WHERE id = ? AND status = ?`,
+		sessionID, protocol.GitHubMonitorEventSessionCreated, formatTime(updatedAt), id, protocol.GitHubMonitorEventQueued)
+	if err != nil {
+		return fmt.Errorf("attach github monitor event session: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM github_monitor_events WHERE id = ?", id).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return storage.ErrNotFound
+		}
+		return fmt.Errorf("attach github monitor event session: event is no longer queued: %w", storage.ErrConflict)
+	}
+	return nil
 }
 
 // AttachMonitorEventRun records the Run started for this event's Session

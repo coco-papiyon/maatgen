@@ -175,6 +175,47 @@ func TestMonitorEventLifecycleTransitions(t *testing.T) {
 	}
 }
 
+// TestAttachMonitorEventSessionConflictsWithClosedEvent guards against the
+// race the PR #36 review flagged: the Outbox dispatcher lists a "queued"
+// event, creates a Session for it, and only then calls
+// AttachMonitorEventSession to claim it. If the event was closed (Issue
+// #34) in between, this must not resurrect it into session_created; the
+// dispatcher relies on storage.ErrConflict here to know it must close the
+// orphaned Session instead of starting a Run for a Job the user closed.
+func TestAttachMonitorEventSessionConflictsWithClosedEvent(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	createdAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	monitor := newTestRepositoryForEvents(t, store, createdAt)
+
+	event := testMonitorEvent("event-1", monitor.Repository, createdAt)
+	event.Status = protocol.GitHubMonitorEventQueued
+	if inserted, err := store.InsertMonitorEvent(ctx, event); err != nil || !inserted {
+		t.Fatalf("insert: inserted=%v err=%v", inserted, err)
+	}
+	if err := store.CloseMonitorEvent(ctx, event.ID, createdAt.Add(time.Minute)); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	session := protocol.AgentSession{
+		ID: "session-1", Agent: protocol.AgentCodex, Workspace: monitor.Repository,
+		Status: protocol.SessionActive, CreatedAt: createdAt,
+	}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.AttachMonitorEventSession(ctx, event.ID, session.ID, createdAt.Add(2*time.Minute)); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+	got, err := store.GetMonitorEvent(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != protocol.GitHubMonitorEventClosed || got.SessionID != nil {
+		t.Fatalf("got = %#v, want status still closed and no session attached", got)
+	}
+}
+
 func TestSkipAndFailMonitorEvent(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
@@ -422,11 +463,6 @@ func TestCloseMonitorEventForSession(t *testing.T) {
 	createdAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
 	monitor := newTestRepositoryForEvents(t, store, createdAt)
 
-	event := testMonitorEvent("event-1", monitor.Repository, createdAt)
-	event.Status = protocol.GitHubMonitorEventRunStarted
-	if inserted, err := store.InsertMonitorEvent(ctx, event); err != nil || !inserted {
-		t.Fatalf("insert: inserted=%v err=%v", inserted, err)
-	}
 	session := protocol.AgentSession{
 		ID: "session-1", Agent: protocol.AgentCodex, Workspace: monitor.Repository,
 		Status: protocol.SessionActive, CreatedAt: createdAt,
@@ -434,8 +470,11 @@ func TestCloseMonitorEventForSession(t *testing.T) {
 	if err := store.CreateSession(ctx, session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := store.AttachMonitorEventSession(ctx, event.ID, session.ID, createdAt); err != nil {
-		t.Fatalf("attach session: %v", err)
+	event := testMonitorEvent("event-1", monitor.Repository, createdAt)
+	event.Status = protocol.GitHubMonitorEventRunStarted
+	event.SessionID = &session.ID
+	if inserted, err := store.InsertMonitorEvent(ctx, event); err != nil || !inserted {
+		t.Fatalf("insert: inserted=%v err=%v", inserted, err)
 	}
 
 	// No event references "session-without-a-job": a silent no-op.

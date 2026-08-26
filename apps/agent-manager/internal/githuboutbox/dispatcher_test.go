@@ -82,6 +82,9 @@ func (f *fakeStore) AttachMonitorEventSession(ctx context.Context, id, sessionID
 	if !ok {
 		return storage.ErrNotFound
 	}
+	if event.Status != protocol.GitHubMonitorEventQueued {
+		return storage.ErrConflict
+	}
 	event.SessionID = &sessionID
 	event.Status = protocol.GitHubMonitorEventSessionCreated
 	event.UpdatedAt = updatedAt
@@ -155,10 +158,17 @@ func (f *fakeStore) GetRun(ctx context.Context, id string) (protocol.AgentRun, e
 }
 
 type fakeSessions struct {
-	mu      sync.Mutex
-	created []protocol.CreateSessionRequest
-	nextID  int
-	err     error
+	mu       sync.Mutex
+	created  []protocol.CreateSessionRequest
+	nextID   int
+	err      error
+	closed   []string
+	closeErr error
+	// onCreate, if set, runs after CreateSession builds its response but
+	// before returning it, so tests can simulate something else happening
+	// concurrently in the window between the Session being created and the
+	// dispatcher claiming it with AttachMonitorEventSession.
+	onCreate func()
 }
 
 func (f *fakeSessions) CreateSession(ctx context.Context, request protocol.CreateSessionRequest) (protocol.AgentSession, error) {
@@ -169,10 +179,24 @@ func (f *fakeSessions) CreateSession(ctx context.Context, request protocol.Creat
 	}
 	f.created = append(f.created, request)
 	f.nextID++
-	return protocol.AgentSession{
+	session := protocol.AgentSession{
 		ID: fmt.Sprintf("session-%d", f.nextID), Agent: request.Agent, Workspace: request.Workspace,
 		Status: protocol.SessionActive,
-	}, nil
+	}
+	if f.onCreate != nil {
+		f.onCreate()
+	}
+	return session, nil
+}
+
+func (f *fakeSessions) CloseSession(ctx context.Context, id string) (protocol.AgentSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closeErr != nil {
+		return protocol.AgentSession{}, f.closeErr
+	}
+	f.closed = append(f.closed, id)
+	return protocol.AgentSession{ID: id, Status: protocol.SessionClosed}, nil
 }
 
 type runStartCall struct {
@@ -267,6 +291,59 @@ func TestDispatchQueuedCreatesSessionAndStartsRun(t *testing.T) {
 	}
 	if got.SessionID == nil || *got.SessionID != "session-1" || got.RunID == nil || *got.RunID != "run-1" {
 		t.Fatalf("event = %#v", got)
+	}
+}
+
+// TestDispatchQueuedClosesOrphanedSessionWhenEventClosedDuringDispatch
+// guards against the race the PR #36 review flagged: Tick lists a "queued"
+// event, dispatchQueued creates a Session for it, and only then calls
+// AttachMonitorEventSession to claim it. If a user closes the Job (Issue
+// #34) in that window, the event's status is already "closed" by the time
+// AttachMonitorEventSession runs, so fakeStore (mirroring the real store's
+// conditional UPDATE) returns storage.ErrConflict. The event must stay
+// closed rather than being resurrected into session_created or failed, and
+// the now-orphaned Session must be closed instead of used to start a Run.
+func TestDispatchQueuedClosesOrphanedSessionWhenEventClosedDuringDispatch(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.addMonitor(testMonitor("/repo"))
+	store.addRule(testRule("rule-1", "/repo", protocol.GitHubConcurrencyCoalesce))
+	event := testEvent("event-1", "/repo", "rule-1", protocol.GitHubMonitorEventQueued, time.Now())
+	store.addEvent(event)
+
+	sessions := &fakeSessions{}
+	runs := &fakeRuns{}
+	dispatcher := NewDispatcher(store, sessions, runs)
+
+	// Simulate the user closing the Job after Tick already listed it as
+	// queued (dispatchQueued is already running with that in-memory copy)
+	// but before dispatchQueued claims the just-created Session with
+	// AttachMonitorEventSession.
+	sessions.onCreate = func() {
+		closed := event
+		closed.Status = protocol.GitHubMonitorEventClosed
+		store.addEvent(closed)
+	}
+
+	if err := dispatcher.Tick(ctx); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if len(sessions.created) != 1 {
+		t.Fatalf("sessions.created = %#v, want exactly one Session created before the conflict was discovered", sessions.created)
+	}
+	if len(sessions.closed) != 1 || sessions.closed[0] != "session-1" {
+		t.Fatalf("sessions.closed = %#v, want the orphaned session-1 closed", sessions.closed)
+	}
+	if len(runs.calls) != 0 {
+		t.Fatalf("runs.calls = %#v, want no Run started for a closed Job", runs.calls)
+	}
+	got := store.getEvent("event-1")
+	if got.Status != protocol.GitHubMonitorEventClosed {
+		t.Fatalf("event.Status = %v, want closed (must not be resurrected)", got.Status)
+	}
+	if got.SessionID != nil {
+		t.Fatalf("event.SessionID = %#v, want nil: a closed Job must not end up referencing a Session", got.SessionID)
 	}
 }
 
