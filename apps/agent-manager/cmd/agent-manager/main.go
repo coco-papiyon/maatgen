@@ -42,6 +42,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 	storesqlite "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage/sqlite"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/toolconfig"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/usageretry"
 )
 
 var version = "dev"
@@ -274,6 +275,17 @@ func run() error {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = dispatcher.Close(closeCtx)
+	}()
+
+	// Usage-limit auto-retry (ADR-008, issue #27): waits for a Run that
+	// stopped on a provider usage/session limit (flagged by run.Service) to
+	// recover, then resumes the same Session with one retry Run.
+	usageLimitRetrier := usageretry.New(store, runs, providerUsage)
+	usageLimitRetrier.Start()
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = usageLimitRetrier.Close(closeCtx)
 	}()
 
 	configuredGitHubToken := toolConfig.GitHub.Token

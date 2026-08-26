@@ -12,4 +12,6 @@ export interface AgentRun {
   startedAt?: string;
   finishedAt?: string;
   exitCode?: number;
+  autoRetryOfRunId?: string;
+  usageLimitRetryPendingAt?: string;
 }

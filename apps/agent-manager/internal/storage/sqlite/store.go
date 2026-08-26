@@ -344,9 +344,9 @@ func (s *Store) ReopenSession(ctx context.Context, id string) error {
 func (s *Store) CreateRun(ctx context.Context, run protocol.AgentRun) error {
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO runs(
-			id, session_id, status, prompt, started_at, finished_at, exit_code, created_at
+			id, session_id, status, prompt, started_at, finished_at, exit_code, auto_retry_of_run_id, created_at
 		)
-		SELECT ?, ?, ?, ?, ?, ?, ?, ?
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
 		FROM sessions
 		WHERE id = ? AND status = ?`,
 		run.ID,
@@ -356,6 +356,7 @@ func (s *Store) CreateRun(ctx context.Context, run protocol.AgentRun) error {
 		nullableTime(run.StartedAt),
 		nullableTime(run.FinishedAt),
 		nullableInt(run.ExitCode),
+		nullableString(run.AutoRetryOfRunID),
 		formatTime(time.Now().UTC()),
 		run.SessionID,
 		protocol.SessionActive,
@@ -382,7 +383,8 @@ func (s *Store) CreateRun(ctx context.Context, run protocol.AgentRun) error {
 
 func (s *Store) GetRun(ctx context.Context, id string) (protocol.AgentRun, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, session_id, status, prompt, started_at, finished_at, exit_code
+		SELECT id, session_id, status, prompt, started_at, finished_at, exit_code,
+			auto_retry_of_run_id, usage_limit_retry_pending_at
 		FROM runs WHERE id = ?`, id)
 	return scanRun(row)
 }
@@ -390,15 +392,44 @@ func (s *Store) GetRun(ctx context.Context, id string) (protocol.AgentRun, error
 func (s *Store) UpdateRun(ctx context.Context, run protocol.AgentRun) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE runs
-		SET status = ?, started_at = ?, finished_at = ?, exit_code = ?
+		SET status = ?, started_at = ?, finished_at = ?, exit_code = ?, usage_limit_retry_pending_at = ?
 		WHERE id = ?`,
 		run.Status,
 		nullableTime(run.StartedAt),
 		nullableTime(run.FinishedAt),
 		nullableInt(run.ExitCode),
+		nullableTime(run.UsageLimitRetryPendingAt),
 		run.ID,
 	)
 	return updateResult("update run", result, err)
+}
+
+// ListRunsPendingUsageLimitRetry returns Runs that stopped after their
+// output indicated a provider usage/session limit and are still awaiting
+// the one automatic retry ADR-008 allows.
+func (s *Store) ListRunsPendingUsageLimitRetry(ctx context.Context) ([]protocol.AgentRun, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, session_id, status, prompt, started_at, finished_at, exit_code,
+			auto_retry_of_run_id, usage_limit_retry_pending_at
+		FROM runs WHERE usage_limit_retry_pending_at IS NOT NULL
+		ORDER BY julianday(usage_limit_retry_pending_at) ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list runs pending usage limit retry: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []protocol.AgentRun
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list runs pending usage limit retry: %w", err)
+	}
+	return runs, nil
 }
 
 type scanner interface {
@@ -478,7 +509,7 @@ func scanSessionRow(row scanner, firstPrompt *sql.NullString) (protocol.AgentSes
 
 func scanRun(row scanner) (protocol.AgentRun, error) {
 	var run protocol.AgentRun
-	var startedAt, finishedAt sql.NullString
+	var startedAt, finishedAt, autoRetryOfRunID, usageLimitRetryPendingAt sql.NullString
 	var exitCode sql.NullInt64
 	if err := row.Scan(
 		&run.ID,
@@ -488,6 +519,8 @@ func scanRun(row scanner) (protocol.AgentRun, error) {
 		&startedAt,
 		&finishedAt,
 		&exitCode,
+		&autoRetryOfRunID,
+		&usageLimitRetryPendingAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return protocol.AgentRun{}, storage.ErrNotFound
@@ -504,6 +537,12 @@ func scanRun(row scanner) (protocol.AgentRun, error) {
 	if exitCode.Valid {
 		value := int(exitCode.Int64)
 		run.ExitCode = &value
+	}
+	if autoRetryOfRunID.Valid {
+		run.AutoRetryOfRunID = &autoRetryOfRunID.String
+	}
+	if run.UsageLimitRetryPendingAt, err = parseNullableTime(usageLimitRetryPendingAt); err != nil {
+		return protocol.AgentRun{}, fmt.Errorf("scan run usage_limit_retry_pending_at: %w", err)
 	}
 	return run, nil
 }

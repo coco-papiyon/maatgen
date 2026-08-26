@@ -189,7 +189,7 @@ func (s *Service) StartRun(ctx context.Context, sessionID string, request protoc
 	s.activeByRun[id] = activeRun{sessionID: sessionID, repository: session.Workspace, cancel: cancel}
 	s.mu.Unlock()
 
-	run := protocol.AgentRun{ID: id, SessionID: sessionID, Status: protocol.RunQueued, Prompt: message}
+	run := protocol.AgentRun{ID: id, SessionID: sessionID, Status: protocol.RunQueued, Prompt: message, AutoRetryOfRunID: request.AutoRetryOfRunID}
 	if err := s.store.CreateRun(ctx, run); err != nil {
 		s.release(id, sessionID)
 		if errors.Is(err, storage.ErrSessionClosed) {
@@ -297,6 +297,8 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 
 	var completedData, failedData json.RawMessage
 	var accumulatedUsage protocol.TokenUsage
+	var usageLimitDetected bool
+	var usageLimitMessage string
 	adapter, configured := s.adapters[session.Agent]
 	if !configured {
 		s.finishPersistenceFailure(run, session.Workspace, fmt.Errorf("agent %q is not configured", session.Agent))
@@ -329,6 +331,15 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		Model: model, ReasoningEffort: stringValue(request.ReasoningEffort), Timeout: timeout, Approval: approvalHandler,
 		AutoApprove: request.AutoApprove,
 	}, func(output agent.Output) error {
+		// Scanned across every output line, on both streams and regardless
+		// of whether the line parses as structured JSONL, because a CLI
+		// hitting its usage/session limit does not always report it through
+		// a channel each provider's parser recognizes as a structured
+		// failure (ADR-008).
+		if !usageLimitDetected && agent.LooksLikeUsageLimitMessage(output.Line) {
+			usageLimitDetected = true
+			usageLimitMessage = strings.TrimSpace(output.Line)
+		}
 		if output.Stream == agent.OutputStderr {
 			return s.persistRaw(ctx, session.ID, run.ID, session.Agent, map[string]any{"stream": "stderr", "line": output.Line})
 		}
@@ -494,6 +505,18 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 		terminalSource = protocol.EventSourceManager
 		terminalData = mustJSON(map[string]any{"message": "capture changes after agent run", "code": "checkpoint_capture_failed"})
 		slog.Error("agent run failed due to checkpoint capture error", "run", run.ID, "session", session.ID, "agent", session.Agent, "error", snapshotErr)
+	}
+	// A Run that was itself started to resume another Run's usage-limit stop
+	// (AutoRetryOfRunID set) never schedules another automatic retry, even
+	// if it also fails on a usage limit: this bounds ADR-008's retry to one
+	// attempt per original stop instead of chaining indefinitely. A
+	// checkpoint-capture failure (snapshotErr) is unrelated to provider
+	// usage, so it never schedules a retry even if some earlier output line
+	// happened to match a usage-limit phrase.
+	if run.Status == protocol.RunFailed && usageLimitDetected && snapshotErr == nil && run.AutoRetryOfRunID == nil {
+		pendingAt := s.now().UTC()
+		run.UsageLimitRetryPendingAt = &pendingAt
+		slog.Warn("agent run stopped on a usage limit; scheduling one automatic retry", "run", run.ID, "session", session.ID, "agent", session.Agent, "message", usageLimitMessage)
 	}
 	_ = s.store.UpdateRun(persistCtx, run)
 	if s.terminalObserver != nil {
