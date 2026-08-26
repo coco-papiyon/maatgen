@@ -135,6 +135,58 @@ func buildExternalDataBlock(fields PromptFields) string {
 	return b.String()
 }
 
+// SamplePromptFields builds fixed, clearly-labeled sample PromptFields for
+// previewing a Prompt template before it is saved (Issue #32): the caller
+// has no real GitHubItem yet (the rule is still being edited), so this
+// stands in for BuildPromptFields' monitor+item inputs with identifiable
+// placeholder values. Reusing BuildPromptFields keeps the preview's
+// expansion rules (PR-only fields empty for an Issue, Body/ExternalDataBlock
+// gated by includeBody) identical to the runtime path.
+func SamplePromptFields(kind protocol.GitHubItemKind, includeBody bool) PromptFields {
+	monitor := protocol.GitHubRepositoryMonitor{
+		Repository: "/path/to/example-repo",
+		Host:       "github.com",
+		Owner:      "octo-org",
+		Name:       "example-repo",
+		RemoteName: "origin",
+	}
+	item := protocol.GitHubItem{
+		Kind:   kind,
+		Number: 1,
+		Title:  "Issueタイトル",
+		Body:   "サンプル本文",
+		State:  protocol.GitHubItemOpen,
+		Author: protocol.GitHubUser{Login: "サンプルユーザー"},
+		Assignees: []protocol.GitHubUser{
+			{Login: "サンプル担当者1"}, {Login: "サンプル担当者2"},
+		},
+		Labels: []protocol.GitHubLabel{
+			{Name: "サンプルラベル1"}, {Name: "サンプルラベル2"},
+		},
+		Milestone: &protocol.GitHubMilestone{Title: "サンプルマイルストーン"},
+		URL:       samplePromptItemURL(kind),
+		ProjectFields: []protocol.GitHubProjectFieldValue{
+			{ProjectTitle: "サンプルプロジェクト", FieldName: "ステータス", Value: "Ready"},
+		},
+	}
+	if kind == protocol.GitHubItemPullRequest {
+		item.PullRequest = &protocol.GitHubPullRequestDetails{
+			Draft:       false,
+			Base:        protocol.GitHubBranchRef{Ref: "main"},
+			Head:        protocol.GitHubBranchRef{Ref: "feature/sample"},
+			Conflicting: false,
+		}
+	}
+	return BuildPromptFields(monitor, item, "opened", includeBody)
+}
+
+func samplePromptItemURL(kind protocol.GitHubItemKind) string {
+	if kind == protocol.GitHubItemPullRequest {
+		return "https://github.com/octo-org/example-repo/pull/1"
+	}
+	return "https://github.com/octo-org/example-repo/issues/1"
+}
+
 // asMap flattens PromptFields for text/template. Using a map (rather than
 // executing the template against the struct directly) combined with the
 // "missingkey=zero" option is what makes an unrecognized template

@@ -242,6 +242,9 @@ function blankRuleForm(): RuleForm {
 const editingRule = ref<RuleForm>();
 const savingRule = ref(false);
 const ruleDialog = ref<HTMLElement>();
+const promptPreview = ref<{ issue: string; pullRequest: string }>();
+const promptPreviewError = ref('');
+const previewingPrompt = ref(false);
 const includesIssues = computed(() => editingRule.value?.eventKinds.includes('issue') ?? false);
 const includesPullRequests = computed(() => editingRule.value?.eventKinds.includes('pull_request') ?? false);
 const availableModels = computed(() => providers.value.find((provider) => provider.id === editingRule.value?.provider)?.models ?? []);
@@ -291,12 +294,34 @@ function focusRuleDialog() {
   void nextTick(() => ruleDialog.value?.querySelector<HTMLElement>('input, select')?.focus());
 }
 
+function resetPromptPreview() {
+  promptPreview.value = undefined;
+  promptPreviewError.value = '';
+}
+
+async function previewPrompt() {
+  const form = editingRule.value;
+  if (!form) return;
+  previewingPrompt.value = true;
+  promptPreviewError.value = '';
+  promptPreview.value = undefined;
+  try {
+    promptPreview.value = await api.previewGitHubTriggerRulePrompt({ promptTemplate: form.promptTemplate, includeBody: form.includeBody });
+  } catch (cause) {
+    promptPreviewError.value = describeError(cause);
+  } finally {
+    previewingPrompt.value = false;
+  }
+}
+
 function startCreateRule() {
   editingRule.value = blankRuleForm();
+  resetPromptPreview();
   focusRuleDialog();
 }
 
 function startEditRule(rule: GitHubTriggerRule) {
+  resetPromptPreview();
   editingRule.value = {
     id: rule.id, repository: rule.repository, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider,
@@ -314,6 +339,7 @@ function startEditRule(rule: GitHubTriggerRule) {
 
 function cancelEditRule() {
   editingRule.value = undefined;
+  resetPromptPreview();
 }
 
 async function saveRule() {
@@ -354,6 +380,7 @@ async function saveRule() {
       await api.createGitHubTriggerRule(request);
     }
     editingRule.value = undefined;
+    resetPromptPreview();
     rules.value = await api.listGitHubTriggerRules();
   } catch (cause) {
     error.value = describeError(cause);
@@ -542,6 +569,47 @@ onMounted(() => void refresh());
           <label>Promptテンプレート
             <textarea v-model="editingRule.promptTemplate" rows="4" required placeholder="Design {{.Title}} (#{{.Number}})"></textarea>
           </label>
+          <details class="github-prompt-help">
+            <summary>使用できる変数</summary>
+            <dl v-pre class="github-kv">
+              <dt>{{.Repository}}</dt><dd>ローカルリポジトリの絶対パス</dd>
+              <dt>{{.Host}}</dt><dd>GitHubホスト（例: github.com）</dd>
+              <dt>{{.Owner}}</dt><dd>リポジトリのオーナー</dd>
+              <dt>{{.Name}}</dt><dd>リポジトリ名</dd>
+              <dt>{{.RemoteName}}</dt><dd>ローカルGitのremote名</dd>
+              <dt>{{.Kind}}</dt><dd>issue または pull_request</dd>
+              <dt>{{.Number}}</dt><dd>Issue/Pull Requestの番号</dd>
+              <dt>{{.Title}}</dt><dd>タイトル</dd>
+              <dt>{{.URL}}</dt><dd>Issue/Pull RequestのURL</dd>
+              <dt>{{.Author}}</dt><dd>作成者のGitHub login</dd>
+              <dt>{{.Assignees}}</dt><dd>アサインされたGitHub login（カンマ区切り）</dd>
+              <dt>{{.Labels}}</dt><dd>ラベル名（カンマ区切り）</dd>
+              <dt>{{.Milestone}}</dt><dd>マイルストーン名（未設定時は空）</dd>
+              <dt>{{.State}}</dt><dd>open または closed</dd>
+              <dt>{{.Draft}}</dt><dd>Pull Requestのドラフト状態（Issueでは空）</dd>
+              <dt>{{.BaseRef}}</dt><dd>Pull Requestのベースブランチ（Issueでは空）</dd>
+              <dt>{{.HeadRef}}</dt><dd>Pull Requestのヘッドブランチ（Issueでは空）</dd>
+              <dt>{{.Conflicting}}</dt><dd>Pull Requestのコンフリクト有無（Issueでは空）</dd>
+              <dt>{{.Action}}</dt><dd>検出したaction（例: opened）</dd>
+              <dt>{{.ProjectFields}}</dt><dd>Projectフィールド値（"Project/Field=Value"形式、複数は;区切り）</dd>
+              <dt>{{.Body}}</dt><dd>本文（「Issue/PR本文をPromptに含める」が無効な場合は空）</dd>
+              <dt>{{.ExternalDataBlock}}</dt><dd>上記GitHub由来の情報を区切り付きでまとめたもの（本文の収録有無は「Issue/PR本文をPromptに含める」の設定に従う）</dd>
+            </dl>
+            <div class="github-form-actions">
+              <button type="button" :disabled="previewingPrompt" @click="previewPrompt">プレビューを確認</button>
+            </div>
+            <p v-if="promptPreviewError" class="github-error">{{ promptPreviewError }}</p>
+            <div v-else-if="promptPreview" class="github-prompt-preview">
+              <div>
+                <p class="github-meta">Issueの場合</p>
+                <pre>{{ promptPreview.issue }}</pre>
+              </div>
+              <div>
+                <p class="github-meta">Pull Requestの場合</p>
+                <pre>{{ promptPreview.pullRequest }}</pre>
+              </div>
+            </div>
+          </details>
           <label class="github-checkbox"><input v-model="editingRule.includeBody" type="checkbox" /> Issue/PR本文をPromptに含める</label>
           <div class="github-form-row">
             <label>Provider

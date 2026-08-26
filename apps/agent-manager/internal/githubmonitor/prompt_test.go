@@ -103,6 +103,35 @@ func TestExternalDataBlockIsDelimitedAndNotReparsedAsTemplate(t *testing.T) {
 	}
 }
 
+func TestSamplePromptFieldsUsesIdentifiableFixedValues(t *testing.T) {
+	fields := SamplePromptFields(protocol.GitHubItemIssue, false)
+	if fields.Number != "1" || fields.Title != "Issueタイトル" {
+		t.Fatalf("Number/Title = %q/%q, want 1/Issueタイトル", fields.Number, fields.Title)
+	}
+	if fields.Kind != "issue" {
+		t.Fatalf("Kind = %q, want issue", fields.Kind)
+	}
+	if fields.Draft != "" || fields.BaseRef != "" || fields.HeadRef != "" {
+		t.Fatalf("PR-only fields = %#v, want empty for an Issue", fields)
+	}
+	if fields.Body != "" {
+		t.Fatalf("Body = %q, want empty when includeBody is false", fields.Body)
+	}
+}
+
+func TestSamplePromptFieldsPullRequestPopulatesPROnlyFields(t *testing.T) {
+	fields := SamplePromptFields(protocol.GitHubItemPullRequest, true)
+	if fields.Kind != "pull_request" {
+		t.Fatalf("Kind = %q, want pull_request", fields.Kind)
+	}
+	if fields.Draft == "" || fields.BaseRef == "" || fields.HeadRef == "" {
+		t.Fatalf("PR-only fields = %#v, want populated for a Pull Request", fields)
+	}
+	if fields.Body == "" {
+		t.Fatalf("Body = %q, want non-empty when includeBody is true", fields.Body)
+	}
+}
+
 func TestBuildPromptFieldsProjectAndPullRequestData(t *testing.T) {
 	pr := baseItem()
 	pr.Kind = protocol.GitHubItemPullRequest

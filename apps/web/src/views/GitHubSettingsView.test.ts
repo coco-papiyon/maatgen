@@ -286,6 +286,37 @@ describe('GitHubSettingsView', () => {
     expect(label).toBeTruthy();
   });
 
+  it('shows a closed-by-default variable help section with a preview that expands fixed sample values', async () => {
+    const { wrapper } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    const details = wrapper.get('.github-prompt-help');
+    expect(details.element.hasAttribute('open')).toBe(false);
+    expect(wrapper.find('.github-prompt-preview').exists()).toBe(false);
+
+    await wrapper.get('.github-rule-form textarea').setValue('Design {{.Title}} (#{{.Number}})');
+    await wrapper.get('.github-prompt-help button').trigger('click');
+    await flushPromises();
+
+    const preview = wrapper.get('.github-prompt-preview');
+    expect(preview.text()).toContain('Design Issueタイトル (#1)');
+  });
+
+  it('shows an invalid template syntax error in the preview area without saving the rule', async () => {
+    const { wrapper, api } = await mountSettings();
+    const rulesBefore = await api.listGitHubTriggerRules();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    await wrapper.get('.github-rule-form textarea').setValue('{{.Title');
+    await wrapper.get('.github-prompt-help button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.github-prompt-help .github-error').exists()).toBe(true);
+    expect(wrapper.find('.github-prompt-preview').exists()).toBe(false);
+    expect(await api.listGitHubTriggerRules()).toHaveLength(rulesBefore.length);
+    expect((wrapper.get('.github-rule-form textarea').element as HTMLTextAreaElement).value).toBe('{{.Title');
+  });
+
   it('deletes a repository monitor after confirmation', async () => {
     const originalConfirm = window.confirm;
     window.confirm = () => true;

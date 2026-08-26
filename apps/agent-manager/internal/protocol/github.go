@@ -388,6 +388,23 @@ type GitHubTriggerRuleListResponse struct {
 	Rules []GitHubTriggerRule `json:"rules"`
 }
 
+// GitHubTriggerRulePromptPreviewRequest is the input to previewing how a
+// not-yet-saved Prompt template would expand at runtime (Issue #32).
+type GitHubTriggerRulePromptPreviewRequest struct {
+	PromptTemplate string `json:"promptTemplate"`
+	IncludeBody    bool   `json:"includeBody"`
+}
+
+// GitHubTriggerRulePromptPreviewResponse is
+// GitHubTriggerRulePromptPreviewRequest.PromptTemplate expanded against
+// fixed sample values (see githubmonitor.SamplePromptFields), once for an
+// Issue and once for a Pull Request, using the exact same expansion rules
+// as the runtime path (githubmonitor.RenderPrompt).
+type GitHubTriggerRulePromptPreviewResponse struct {
+	Issue       string `json:"issue"`
+	PullRequest string `json:"pullRequest"`
+}
+
 // GitHubRepositoryMonitorListResponse lists every registered repository
 // monitor, regardless of which repository is currently selected in the UI
 // (multi-repository settings table).

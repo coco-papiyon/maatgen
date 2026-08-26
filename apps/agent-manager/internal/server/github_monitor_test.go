@@ -22,6 +22,7 @@ type fakeGitHubMonitorController struct {
 	replay     protocol.GitHubMonitorEvent
 	items      protocol.GitHubItemListResponse
 	item       protocol.GitHubItem
+	preview    protocol.GitHubTriggerRulePromptPreviewResponse
 	err        error
 
 	lastWorkspace        string
@@ -29,6 +30,7 @@ type fakeGitHubMonitorController struct {
 	lastUpdateMonitor    protocol.UpdateGitHubMonitorRequest
 	lastRuleRequest      protocol.GitHubTriggerRuleRequest
 	lastRuleID           string
+	lastPreviewRequest   protocol.GitHubTriggerRulePromptPreviewRequest
 	lastReplayEventID    string
 	lastSkipEventID      string
 	lastCloseEventID     string
@@ -85,6 +87,10 @@ func (f *fakeGitHubMonitorController) UpdateRule(ctx context.Context, id string,
 func (f *fakeGitHubMonitorController) DeleteRule(ctx context.Context, id string) error {
 	f.lastRuleID = id
 	return f.err
+}
+func (f *fakeGitHubMonitorController) PreviewRulePrompt(ctx context.Context, request protocol.GitHubTriggerRulePromptPreviewRequest) (protocol.GitHubTriggerRulePromptPreviewResponse, error) {
+	f.lastPreviewRequest = request
+	return f.preview, f.err
 }
 func (f *fakeGitHubMonitorController) ListEvents(ctx context.Context, workspace string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error) {
 	f.lastWorkspace = workspace
@@ -300,6 +306,33 @@ func TestGitHubTriggerRuleAPI(t *testing.T) {
 	handler.ServeHTTP(recorder, apiRequest("DELETE", "/api/v1/github/rules/rule-1"))
 	if recorder.Code != 204 {
 		t.Fatalf("delete status = %d", recorder.Code)
+	}
+}
+
+func TestGitHubTriggerRulePromptPreviewAPI(t *testing.T) {
+	controller := &fakeGitHubMonitorController{
+		preview: protocol.GitHubTriggerRulePromptPreviewResponse{Issue: "Design Issueタイトル", PullRequest: "Design Issueタイトル"},
+	}
+	config := testConfig()
+	config.GitHubMonitorController = controller
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, jsonRequest("POST", "/api/v1/github/rules/preview", `{
+		"promptTemplate":"Design {{.Title}}","includeBody":true
+	}`))
+	if recorder.Code != 200 {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if !controller.lastPreviewRequest.IncludeBody || controller.lastPreviewRequest.PromptTemplate != "Design {{.Title}}" {
+		t.Fatalf("lastPreviewRequest = %#v", controller.lastPreviewRequest)
+	}
+	var response protocol.GitHubTriggerRulePromptPreviewResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if response.Issue != "Design Issueタイトル" || response.PullRequest != "Design Issueタイトル" {
+		t.Fatalf("response = %#v", response)
 	}
 }
 

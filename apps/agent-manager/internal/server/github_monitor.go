@@ -31,6 +31,7 @@ type GitHubMonitorController interface {
 	GetRule(ctx context.Context, id string) (protocol.GitHubTriggerRule, error)
 	UpdateRule(ctx context.Context, id string, request protocol.GitHubTriggerRuleRequest) (protocol.GitHubTriggerRule, error)
 	DeleteRule(ctx context.Context, id string) error
+	PreviewRulePrompt(ctx context.Context, request protocol.GitHubTriggerRulePromptPreviewRequest) (protocol.GitHubTriggerRulePromptPreviewResponse, error)
 
 	ListEvents(ctx context.Context, workspace string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error)
 	SkipEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error)
@@ -169,6 +170,19 @@ func registerGitHubMonitorRoutes(mux *http.ServeMux, controller GitHubMonitorCon
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}))
+	mux.Handle("POST /api/v1/github/rules/preview", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request protocol.GitHubTriggerRulePromptPreviewRequest
+		if err := readJSON(w, r, &request); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
+			return
+		}
+		preview, err := controller.PreviewRulePrompt(r.Context(), request)
+		if err != nil {
+			writeGitHubMonitorError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, preview)
 	}))
 
 	mux.Handle("GET /api/v1/github/events", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
