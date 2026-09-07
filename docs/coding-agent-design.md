@@ -1,5 +1,7 @@
 # Coding Agent VS Code Extension 設計書
 
+> 2026-08-30更新: Sessionの対象をGitリポジトリに限定せず、通常のDirectoryでも制限付きでAgentを実行できるようにする。GitリポジトリではCheckpoint／ChangeSet／Restore／GitHub連携を提供し、通常Directoryではこれらを無効化する。
+
 > 2026-08-20更新: Session作成時に一度だけclocでGit管理下のコード数を計測し、Web版のUsage／Changesと並ぶ「コード数」Tabで表示する（13章）。Runごとの再計測は行わない。
 > 2026-08-22更新: Sessionオープン時とRun完了時に、選択Providerのアカウント使用量を取得する。CodexはApp Serverの`account/rateLimits/read`、Copilotは公式SDKの`account.getQuota`、Claude CodeはCLIの`/usage`を利用し、Web版とVS Code版のヘッダーへ残量を表示する。
 
@@ -607,9 +609,17 @@ git diff <before-tree> <after-tree>
 
 ## 15. Source Change Tracking
 
-Agent はユーザーが開いているリポジトリを直接変更する。変更は承認待ちにせず即座にWorking Treeへ現れ、利用者はそのままコードを編集・実行できる。
+Agent はユーザーが開いているWorkspaceを直接変更する。Session作成時に対象を`git_repository`または`directory`へ分類し、どちらもAgent CLIのcwdとして利用できる。Git管理下のサブディレクトリが指定された場合はリポジトリrootへ正規化し、Git管理外のDirectoryは指定Directoryをそのまま使用する。存在しないパスと通常ファイルは拒否する。
 
-Managerは各Runの開始直前と終了直後にGit checkpointを作成し、その差分をChangeSetとして管理する。ChangeSetは承認対象ではなく、変更内容の確認と復元範囲の選択に使う。
+| 機能 | Gitリポジトリ | 通常Directory |
+|---|---:|---:|
+| Agent実行、会話継続、Usage、ファイル参照 | ✓ | ✓ |
+| Run前後Checkpoint、ChangeSet、Restore | ✓ | — |
+| GitHub監視、Issue／PR連携 | ✓ | — |
+
+通常Directoryでの変更は即時反映されるがManagerでは追跡・復元できないため、UIに制限付きSessionであることを明示し、Changes／Restore操作を無効化する。Gitリポジトリの変更も承認待ちにせず即座にWorking Treeへ現れ、利用者はそのままコードを編集・実行できる。
+
+Gitリポジトリでは、Managerは各Runの開始直前と終了直後にGit checkpointを作成し、その差分をChangeSetとして管理する。ChangeSetは承認対象ではなく、変更内容の確認と復元範囲の選択に使う。
 
 ```text
 Agent

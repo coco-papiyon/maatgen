@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ func serveEventWebSocket(
 	events EventReader,
 	subscriber EventSubscriber,
 ) {
-	if !originAllowed(r.Header.Get("Origin"), config.AllowedOrigins) {
+	if !originAllowed(r.Header.Get("Origin"), r.Host, config.AllowedOrigins) {
 		writeAPIError(w, http.StatusForbidden, "origin_not_allowed", "origin is not allowed", nil)
 		return
 	}
@@ -109,8 +110,16 @@ func ticketFromProtocols(values []string) string {
 	return ""
 }
 
-func originAllowed(origin string, allowed []string) bool {
+// originAllowed accepts same-origin requests unconditionally, since the Web
+// UI is commonly served directly by this process (see start.bat) on a host
+// and port the operator did not have to add to --allowed-origins. Cross-origin
+// requests, such as a Vite dev server on a different port, still require an
+// explicit match in the allow list.
+func originAllowed(origin, host string, allowed []string) bool {
 	if origin == "" {
+		return true
+	}
+	if parsed, err := url.Parse(origin); err == nil && parsed.Host == host {
 		return true
 	}
 	for _, candidate := range allowed {

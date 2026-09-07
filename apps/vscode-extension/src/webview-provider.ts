@@ -45,6 +45,7 @@ const FILE_SEARCH_EXCLUDE = '**/{node_modules,.git,dist,out,build,.next,coverage
 const FILE_SEARCH_MAX_CANDIDATES = 2000;
 const FILE_SEARCH_MAX_RESULTS = 20;
 const isReasoningEffort = (value: string): value is ReasoningEffort => ['low', 'medium', 'high', 'xhigh', 'max'].includes(value);
+const emptyChangeSet = (sessionId: string): ChangeSet => ({ sessionId, checkpointId: '', files: [] });
 
 export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'maatgen.sessions';
@@ -236,8 +237,10 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         || runFinished
         || latestChangeRefreshSequence > this.lastChangeRefreshSequence;
       if (shouldRefreshChanges) {
-        this.changes = await this.manager.getChanges(this.session.id);
-        this.checkpointDocuments.updateChangeSet(this.changes);
+		this.changes = this.session.workspaceKind === 'directory'
+		  ? emptyChangeSet(this.session.id)
+		  : await this.manager.getChanges(this.session.id);
+		if (this.session.workspaceKind !== 'directory') this.checkpointDocuments.updateChangeSet(this.changes);
         this.lastChangeRefreshSequence = latestChangeRefreshSequence;
       }
       await this.postState(session, events, usage, this.changes);

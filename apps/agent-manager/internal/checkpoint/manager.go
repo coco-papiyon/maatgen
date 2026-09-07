@@ -56,6 +56,32 @@ func (m *Manager) ValidateRepository(ctx context.Context, workspace string) (str
 	return filepath.Clean(abs), nil
 }
 
+// ValidateWorkspace resolves a Session workspace. Paths inside a Git
+// repository use its top-level directory; ordinary directories are kept as-is
+// and run without checkpoint, diff, or restore support.
+func (m *Manager) ValidateWorkspace(ctx context.Context, workspace string) (string, bool, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "", false, errors.New("workspace is required")
+	}
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve workspace: %w", err)
+	}
+	abs = filepath.Clean(abs)
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", false, fmt.Errorf("inspect workspace: %w", err)
+	}
+	if !info.IsDir() {
+		return "", false, errors.New("workspace is not a directory")
+	}
+	if repository, err := m.ValidateRepository(ctx, abs); err == nil {
+		return repository, true, nil
+	}
+	return abs, false, nil
+}
+
 func (m *Manager) Capture(ctx context.Context, repository, sessionID, runID, phase string) (Snapshot, error) {
 	if phase != "before" && phase != "after" {
 		return Snapshot{}, fmt.Errorf("invalid checkpoint phase %q", phase)

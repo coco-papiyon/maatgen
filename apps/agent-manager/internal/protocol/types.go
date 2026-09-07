@@ -52,6 +52,13 @@ const (
 	SessionClosed SessionStatus = "closed"
 )
 
+type WorkspaceKind string
+
+const (
+	WorkspaceGitRepository WorkspaceKind = "git_repository"
+	WorkspaceDirectory     WorkspaceKind = "directory"
+)
+
 type RunStatus string
 
 const (
@@ -77,6 +84,7 @@ type AgentSession struct {
 	ID                 string          `json:"id"`
 	Agent              AgentName       `json:"agent"`
 	Workspace          string          `json:"workspace"`
+	WorkspaceKind      WorkspaceKind   `json:"workspaceKind"`
 	AgentThreadID      *string         `json:"agentThreadId,omitempty"`
 	Status             SessionStatus   `json:"status"`
 	TriggerSource      TriggerSource   `json:"triggerSource"`

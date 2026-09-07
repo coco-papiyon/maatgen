@@ -19,11 +19,11 @@ describe('AgentManagerClient session integration', () => {
   it('reads every shared Manager session page used by the Web app', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        sessions: [{ id: 'vscode-session', agent: 'codex', workspace: 'C:/repo', status: 'closed', createdAt: '2026-08-15T00:00:00Z' }],
+        sessions: [{ id: 'vscode-session', agent: 'codex', workspace: 'C:/repo', workspaceKind: 'git_repository', status: 'closed', createdAt: '2026-08-15T00:00:00Z' }],
         nextCursor: 'next',
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        sessions: [{ id: 'older-session', agent: 'codex', workspace: 'C:/repo', status: 'closed', createdAt: '2026-08-14T00:00:00Z' }],
+        sessions: [{ id: 'older-session', agent: 'codex', workspace: 'C:/repo', workspaceKind: 'git_repository', status: 'closed', createdAt: '2026-08-14T00:00:00Z' }],
       }), { status: 200 }));
     vi.stubGlobal('fetch', fetch);
 

@@ -194,13 +194,14 @@ func (s *Store) CreateSession(ctx context.Context, session protocol.AgentSession
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions(
-			id, agent, workspace, agent_thread_id, status, trigger_source,
+			id, agent, workspace, workspace_kind, agent_thread_id, status, trigger_source,
 			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
 			created_at, closed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Agent,
 		session.Workspace,
+		workspaceKind(session.WorkspaceKind),
 		nullableString(session.AgentThreadID),
 		session.Status,
 		triggerSource,
@@ -219,7 +220,7 @@ func (s *Store) CreateSession(ctx context.Context, session protocol.AgentSession
 
 func (s *Store) GetSession(ctx context.Context, id string) (protocol.AgentSession, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, agent, workspace, agent_thread_id, status, trigger_source,
+		SELECT id, agent, workspace, workspace_kind, agent_thread_id, status, trigger_source,
 			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
 			created_at, closed_at
 		FROM sessions WHERE id = ?`, id)
@@ -231,7 +232,7 @@ func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.Se
 		limit = 100
 	}
 	query := `
-		SELECT id, agent, workspace, agent_thread_id, status, trigger_source,
+		SELECT id, agent, workspace, workspace_kind, agent_thread_id, status, trigger_source,
 			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
 			created_at, closed_at,
 			(SELECT prompt FROM runs WHERE runs.session_id = sessions.id
@@ -463,6 +464,7 @@ func scanSessionRow(row scanner, firstPrompt, activeRunStatus *sql.NullString) (
 		&session.ID,
 		&session.Agent,
 		&session.Workspace,
+		&session.WorkspaceKind,
 		&threadID,
 		&session.Status,
 		&triggerSource,
@@ -516,6 +518,13 @@ func scanSessionRow(row scanner, firstPrompt, activeRunStatus *sql.NullString) (
 		session.ClosedAt = &parsed
 	}
 	return session, nil
+}
+
+func workspaceKind(kind protocol.WorkspaceKind) protocol.WorkspaceKind {
+	if kind == "" {
+		return protocol.WorkspaceGitRepository
+	}
+	return kind
 }
 
 func scanRun(row scanner) (protocol.AgentRun, error) {

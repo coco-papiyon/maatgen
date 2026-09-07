@@ -12,6 +12,7 @@ export interface AgentSession {
   id: string;
   agent: 'codex' | 'claude' | 'copilot';
   workspace: string;
+  workspaceKind: 'git_repository' | 'directory';
   agentThreadId?: string;
   status: 'active' | 'closed';
   triggerSource: 'manual' | 'github_monitor';

@@ -3,9 +3,37 @@ package checkpoint
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestValidateWorkspaceAcceptsNonGitDirectory(t *testing.T) {
+	directory := t.TempDir()
+	manager := &Manager{runOnce: func(context.Context, string, []string, ...string) (string, error) {
+		return "", errors.New("not a git repository")
+	}}
+	got, isRepository, err := manager.ValidateWorkspace(context.Background(), directory)
+	if err != nil || isRepository {
+		t.Fatalf("workspace = %q, repository = %v, err = %v", got, isRepository, err)
+	}
+	want, _ := filepath.Abs(directory)
+	if got != filepath.Clean(want) {
+		t.Fatalf("workspace = %q, want %q", got, want)
+	}
+}
+
+func TestValidateWorkspaceRejectsFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(file, []byte("content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{}
+	if _, _, err := manager.ValidateWorkspace(context.Background(), file); err == nil {
+		t.Fatal("expected non-directory workspace to be rejected")
+	}
+}
 
 func TestRunRetriesOnLockContentionThenSucceeds(t *testing.T) {
 	restore := setFastLockRetryDelays(t)

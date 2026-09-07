@@ -4,11 +4,12 @@
   "title": "AgentSession",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "agent", "workspace", "status", "triggerSource", "createdAt"],
+  "required": ["id", "agent", "workspace", "workspaceKind", "status", "triggerSource", "createdAt"],
   "properties": {
     "id": { "type": "string", "minLength": 1 },
     "agent": { "enum": ["codex", "claude", "copilot"] },
     "workspace": { "type": "string", "minLength": 1 },
+    "workspaceKind": { "enum": ["git_repository", "directory"] },
     "agentThreadId": { "type": "string", "minLength": 1 },
     "status": { "enum": ["active", "closed"] },
     "triggerSource": { "enum": ["manual", "github_monitor"] },

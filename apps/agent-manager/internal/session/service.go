@@ -42,7 +42,7 @@ type Store interface {
 }
 
 type RepositoryManager interface {
-	ValidateRepository(ctx context.Context, workspace string) (string, error)
+	ValidateWorkspace(ctx context.Context, workspace string) (string, bool, error)
 	CleanupSession(ctx context.Context, repository, sessionID string) error
 }
 
@@ -89,7 +89,7 @@ func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSess
 	if strings.TrimSpace(request.Workspace) == "" {
 		return protocol.AgentSession{}, fmt.Errorf("%w: workspace is required", ErrInvalidRequest)
 	}
-	repository, err := s.repositories.ValidateRepository(ctx, request.Workspace)
+	workspace, isRepository, err := s.repositories.ValidateWorkspace(ctx, request.Workspace)
 	if err != nil {
 		return protocol.AgentSession{}, err
 	}
@@ -102,13 +102,16 @@ func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSess
 		triggerSource = protocol.TriggerSourceManual
 	}
 	created := protocol.AgentSession{
-		ID: id, Agent: request.Agent, Workspace: repository,
+		ID: id, Agent: request.Agent, Workspace: workspace, WorkspaceKind: protocol.WorkspaceDirectory,
 		Status: protocol.SessionActive, TriggerSource: triggerSource,
 		GitHubMonitorEvent: request.GitHubMonitorEvent,
 		GitHubRuleID:       request.GitHubRuleID,
 		GitHubItemKind:     request.GitHubItemKind,
 		GitHubItemNumber:   request.GitHubItemNumber,
 		CreatedAt:          s.now().UTC(),
+	}
+	if isRepository {
+		created.WorkspaceKind = protocol.WorkspaceGitRepository
 	}
 	if err := s.store.CreateSession(ctx, created); err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("persist session: %w", err)
@@ -117,7 +120,7 @@ func (s *Service) CreateSession(ctx context.Context, request protocol.CreateSess
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			s.recordSourceStats(context.Background(), created.ID, repository)
+			s.recordSourceStats(context.Background(), created.ID, workspace)
 		}()
 	}
 	return created, nil
@@ -157,8 +160,10 @@ func (s *Service) CloseSession(ctx context.Context, id string) (protocol.AgentSe
 	if err := s.store.CloseMonitorEventForSession(ctx, id, s.now().UTC()); err != nil {
 		return protocol.AgentSession{}, fmt.Errorf("close github monitor event for session: %w", err)
 	}
-	if err := s.repositories.CleanupSession(ctx, session.Workspace, session.ID); err != nil {
-		return protocol.AgentSession{}, fmt.Errorf("%w: %v", ErrCleanupFailed, err)
+	if session.WorkspaceKind != protocol.WorkspaceDirectory {
+		if err := s.repositories.CleanupSession(ctx, session.Workspace, session.ID); err != nil {
+			return protocol.AgentSession{}, fmt.Errorf("%w: %v", ErrCleanupFailed, err)
+		}
 	}
 	return s.store.GetSession(ctx, id)
 }

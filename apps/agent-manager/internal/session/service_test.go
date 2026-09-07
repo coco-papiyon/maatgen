@@ -27,12 +27,28 @@ func TestCreateSessionUsesRepositoryDirectly(t *testing.T) {
 	}
 }
 
+func TestCreateSessionAcceptsOrdinaryDirectory(t *testing.T) {
+	store := &fakeStore{}
+	repositories := &fakeRepositoryManager{root: "C:/notes", directory: true}
+	service := New(store, repositories)
+	service.newID = func() (string, error) { return "session-directory", nil }
+	created, err := service.CreateSession(context.Background(), protocol.CreateSessionRequest{Agent: protocol.AgentCodex, Workspace: "C:/notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.WorkspaceKind != protocol.WorkspaceDirectory || created.Workspace != "C:/notes" {
+		t.Fatalf("session = %#v", created)
+	}
+}
+
 func TestCreateCopilotSession(t *testing.T) {
 	store := &fakeStore{}
 	service := New(store, &fakeRepositoryManager{root: "C:/repo"})
 	service.newID = func() (string, error) { return "session-copilot", nil }
 	created, err := service.CreateSession(context.Background(), protocol.CreateSessionRequest{Agent: protocol.AgentCopilot, Workspace: "C:/repo"})
-	if err != nil || created.Agent != protocol.AgentCopilot { t.Fatalf("session = %#v, err = %v", created, err) }
+	if err != nil || created.Agent != protocol.AgentCopilot {
+		t.Fatalf("session = %#v, err = %v", created, err)
+	}
 }
 
 func TestCreateClaudeSession(t *testing.T) {
@@ -40,7 +56,9 @@ func TestCreateClaudeSession(t *testing.T) {
 	service := New(store, &fakeRepositoryManager{root: "C:/repo"})
 	service.newID = func() (string, error) { return "session-claude", nil }
 	created, err := service.CreateSession(context.Background(), protocol.CreateSessionRequest{Agent: protocol.AgentClaude, Workspace: "C:/repo"})
-	if err != nil || created.Agent != protocol.AgentClaude { t.Fatalf("session = %#v, err = %v", created, err) }
+	if err != nil || created.Agent != protocol.AgentClaude {
+		t.Fatalf("session = %#v, err = %v", created, err)
+	}
 }
 
 func TestCreateSessionRecordsSourceStatsOnce(t *testing.T) {
@@ -276,10 +294,11 @@ func (f *fakeAnalyzer) Analyze(context.Context, string) (protocol.SourceStats, e
 type fakeRepositoryManager struct {
 	root, cleaned string
 	err           error
+	directory     bool
 }
 
-func (f *fakeRepositoryManager) ValidateRepository(context.Context, string) (string, error) {
-	return f.root, f.err
+func (f *fakeRepositoryManager) ValidateWorkspace(context.Context, string) (string, bool, error) {
+	return f.root, !f.directory, f.err
 }
 func (f *fakeRepositoryManager) CleanupSession(_ context.Context, _ string, id string) error {
 	f.cleaned = id

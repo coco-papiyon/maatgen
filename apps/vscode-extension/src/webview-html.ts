@@ -530,14 +530,16 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           renderSessionHistory(event.data.sessions || [], event.data.session?.id);
           emptyState.hidden = Boolean(event.data.session);
           sessionSection.hidden = !event.data.session;
-          sessionStatus.textContent = event.data.approvals?.length ? 'Approval required' : (event.data.activeRunId ? 'Running' : (event.data.session?.status ?? 'Offline'));
+          sessionStatus.textContent = event.data.approvals?.length
+            ? 'Approval required'
+            : (event.data.activeRunId ? 'Running' : (event.data.session?.workspaceKind === 'directory' ? 'Ready · limited directory' : (event.data.session?.status ?? 'Offline')));
           renderProviderOptions(event.data.providers, event.data.selectedProvider, event.data.selectedModel, event.data.selectedReasoningEffort, Boolean(event.data.session), Boolean(event.data.activeRunId));
           renderProviderUsage(event.data.providerUsage);
           newSessionButton.disabled = Boolean(event.data.activeRunId);
           runButton.hidden = Boolean(event.data.activeRunId);
           cancelButton.hidden = !event.data.activeRunId;
           closeSessionButton.disabled = Boolean(event.data.activeRunId);
-          canRestoreChanges = event.data.session?.status === 'active' && !event.data.activeRunId;
+          canRestoreChanges = event.data.session?.workspaceKind !== 'directory' && event.data.session?.status === 'active' && !event.data.activeRunId;
           renderEvents(event.data.events || []);
           renderApproval(event.data.approvals || []);
           renderChanges(event.data.changes);

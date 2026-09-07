@@ -137,7 +137,7 @@ Codexの`thread.started`、Copilot JSONLの`sessionId`、Claude Code stream-json
 
 ### 3.5 Direct Working TreeとCheckpoint
 
-AgentのcwdはSessionに指定されたリポジトリとし、専用worktreeは作成しない。Session開始時にcleanであることも要求しない。
+AgentのcwdはSessionに指定されたWorkspaceとし、専用worktreeは作成しない。Sessionは`workspaceKind: 'git_repository' | 'directory'`を保持する。Git管理下のパスはリポジトリrootへ正規化し、Git管理外では実在するDirectoryの絶対パスを保持する。Session開始時にGitリポジトリがcleanであることは要求しない。
 
 ```text
 ユーザーのリポジトリ
@@ -146,11 +146,13 @@ AgentのcwdはSessionに指定されたリポジトリとし、専用worktreeは
    └─ Agent
 ```
 
-各Runの開始直前にbefore checkpoint、終了直後にafter snapshotを作成する。checkpointは一時indexからGit treeを生成し、`refs/maatgen/checkpoints/<sessionId>/<runId>/{before,after}`からtreeを直接参照して保持する。ユーザーのindex、Working Tree、branch、HEADはcheckpoint作成によって変更しない。
+`git_repository`では各Runの開始直前にbefore checkpoint、終了直後にafter snapshotを作成する。checkpointは一時indexからGit treeを生成し、`refs/maatgen/checkpoints/<sessionId>/<runId>/{before,after}`からtreeを直接参照して保持する。ユーザーのindex、Working Tree、branch、HEADはcheckpoint作成によって変更しない。
 
 before checkpointの作成に失敗した場合はAgentを起動しない。after snapshotはRunのcompleted／failed／cancelled／timeoutを問わず作成し、途中までの変更もDiffとRestoreの対象にする。after snapshotを保存できない間は次のRunを開始せず、診断と再取得操作を表示する。
 
-tracked fileとuntrackedかつnon-ignored fileを対象とする。ignored file、submodule、非Gitディレクトリは初期対象外とする。既存の未コミット変更はbefore checkpointへ含める。
+tracked fileとuntrackedかつnon-ignored fileを対象とする。ignored fileとsubmoduleは初期対象外とする。既存の未コミット変更はbefore checkpointへ含める。
+
+`directory`ではAgent実行、同一Sessionのresume、Event／Usage保存、ファイル参照を提供する一方、Gitに依存するCheckpoint／ChangeSet／RestoreとGitHub連携は行わない。Runの成功・失敗はCheckpointの有無に左右されず、Session close時のprivate ref cleanupも省略する。Web版とVS Code版は制限付きDirectory Sessionであることを表示し、Changes／Restore操作を無効化する。
 
 ### 3.6 ChangeSet
 
@@ -604,7 +606,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 - API keyをManagerが常時保持・ログ出力しない
 - Raw Eventはマスク済みJSONのみ保存する
 - コマンド出力、Prompt、ソースコードの保存期間を設定可能にする
-- Sessionのrepository pathを正規化し、Session作成時にGit repositoryであることを検証する
+- Sessionのworkspace pathを正規化し、実在するDirectoryであることとGit管理の有無を判定する
 - checkpoint作成でignored fileを保存しない
 - Restore時に現在内容を検証し、後続編集を上書きしない
 - Process起動時の引数は配列で渡し、shell経由で実行しない
@@ -648,7 +650,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-11 | Port／tokenの通知方法 | 親プロセス指定のruntime metadata fileへJSONを書き、stdoutにも機械可読な1行を出力 | runtime metadata JSONにaddress／token／PID／versionを保存し、ログにはfile pathだけを出力 | Phase 0開始前 | 検討済み |
 | D-12 | Managerデータ保存先 | OS標準のユーザーデータディレクトリ配下の`maatgen/` | `os.UserConfigDir()/maatgen`。`--data-dir`で変更可能 | Phase 0開始前 | 検討済み |
 | D-13 | Agent作業場所 | 利用者が指定したrepositoryのWorking Treeを直接使用 | 専用worktreeは作成せず、Sessionのrepository pathをAgentのcwdにする | Phase 0開始前 | 検討済み |
-| D-14 | Session開始条件 | Git repositoryであること。dirty Working Treeを許可しRun前checkpointへ含める | Git repositoryであれば開始可能とし、既存のtracked／untracked non-ignored変更をRun前checkpointへ含める | Phase 0開始前 | 検討済み |
+| D-14 | Session開始条件 | 実在するDirectoryであること。Git管理の有無をSessionへ保存する | Git repositoryは既存のtracked／untracked non-ignored変更をRun前checkpointへ含めてフル機能、通常DirectoryはCheckpoint／ChangeSet／Restore／GitHub連携なしの制限付きで実行する | Phase 0開始前 | 検討済み |
 | D-15 | Codex実行バイナリ検出 | PATHから検出し、shellを介さず`codex --version`で検証・絶対パスとversionを保存 | `exec.LookPath`で検出し、shellなしの`--version`成功後に絶対パスとversionをAdapterへ保持 | Phase 0開始前 | 検討済み |
 | D-16 | Codex sandbox policy | `workspace-write` | `workspace-write` | Codex Adapter着手前 | 検討済み |
 | D-17 | Codex approval policy | 設定、AI診断、利用者確認の三段階 | App Serverの承認requestをAgent Managerで判定する。診断用Codexだけ`--ask-for-approval never`とread-only sandboxを使用する | Codex Adapter着手前 | 検討済み |

@@ -17,6 +17,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 	storesqlite "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage/sqlite"
 )
 
@@ -373,6 +374,35 @@ func TestRunServiceRefreshesChangeSetAfterSuccessfulRun(t *testing.T) {
 	}
 	if detector.repository != session.Workspace || detector.checkpoint.SessionID != session.ID {
 		t.Fatalf("detector arguments = %q, %#v", detector.repository, detector.checkpoint)
+	}
+}
+
+func TestRunServiceRunsInDirectoryWithoutCheckpointManager(t *testing.T) {
+	store, err := storesqlite.Open(context.Background(), filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session := protocol.AgentSession{
+		ID: "session-directory", Agent: protocol.AgentCodex, Workspace: t.TempDir(),
+		WorkspaceKind: protocol.WorkspaceDirectory, Status: protocol.SessionActive, CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{}
+	service := New(store, adapter)
+	defer service.Close(context.Background())
+	run, err := service.StartRun(context.Background(), session.ID, protocol.SendMessageRequest{Message: "Edit these files"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRunStatus(t, store, run.ID, protocol.RunCompleted)
+	if len(adapter.requests) != 1 || adapter.requests[0].Directory != session.Workspace {
+		t.Fatalf("adapter requests = %#v", adapter.requests)
+	}
+	if _, err := store.GetChangeSet(context.Background(), session.ID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("directory Run unexpectedly created a checkpoint: %v", err)
 	}
 }
 

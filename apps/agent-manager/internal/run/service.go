@@ -262,26 +262,30 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 	defer s.release(run.ID, session.ID)
 
 	checkpointID := "checkpoint_" + run.ID
-	if s.checkpoints == nil {
-		s.finishPersistenceFailure(run, session.Workspace, errors.New("checkpoint manager is not configured"))
-		return
+	checkpointEnabled := session.WorkspaceKind != protocol.WorkspaceDirectory
+	var checkpointRecord protocol.Checkpoint
+	if checkpointEnabled {
+		if s.checkpoints == nil {
+			s.finishPersistenceFailure(run, session.Workspace, errors.New("checkpoint manager is not configured"))
+			return
+		}
+		before, err := s.checkpoints.Capture(context.WithoutCancel(ctx), session.Workspace, session.ID, run.ID, "before")
+		if err != nil {
+			s.finishPersistenceFailure(run, session.Workspace, err)
+			return
+		}
+		checkpointRecord = protocol.Checkpoint{
+			ID: checkpointID, SessionID: session.ID, RunID: run.ID, HeadCommit: before.HeadCommit,
+			IndexTree: before.IndexTree, BeforeTree: before.Tree, BeforeRef: before.Ref, CreatedAt: s.now().UTC(),
+		}
+		if err := s.store.CreateCheckpoint(context.WithoutCancel(ctx), checkpointRecord); err != nil {
+			s.finishPersistenceFailure(run, session.Workspace, err)
+			return
+		}
+		_, _ = s.appendEvent(context.WithoutCancel(ctx), session.ID, run.ID, protocol.EventSourceManager, protocol.EventTypeCheckpointCreated, map[string]any{
+			"checkpointId": checkpointID, "beforeTree": before.Tree,
+		})
 	}
-	before, err := s.checkpoints.Capture(context.WithoutCancel(ctx), session.Workspace, session.ID, run.ID, "before")
-	if err != nil {
-		s.finishPersistenceFailure(run, session.Workspace, err)
-		return
-	}
-	checkpointRecord := protocol.Checkpoint{
-		ID: checkpointID, SessionID: session.ID, RunID: run.ID, HeadCommit: before.HeadCommit,
-		IndexTree: before.IndexTree, BeforeTree: before.Tree, BeforeRef: before.Ref, CreatedAt: s.now().UTC(),
-	}
-	if err := s.store.CreateCheckpoint(context.WithoutCancel(ctx), checkpointRecord); err != nil {
-		s.finishPersistenceFailure(run, session.Workspace, err)
-		return
-	}
-	_, _ = s.appendEvent(context.WithoutCancel(ctx), session.ID, run.ID, protocol.EventSourceManager, protocol.EventTypeCheckpointCreated, map[string]any{
-		"checkpointId": checkpointID, "beforeTree": before.Tree,
-	})
 
 	startedAt := s.now().UTC()
 	run.Status = protocol.RunRunning
@@ -486,18 +490,22 @@ func (s *Service) execute(ctx context.Context, session protocol.AgentSession, ru
 
 	persistCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	after, snapshotErr := s.checkpoints.Capture(persistCtx, session.Workspace, session.ID, run.ID, "after")
-	if snapshotErr == nil {
-		snapshotErr = s.store.CompleteCheckpoint(persistCtx, checkpointID, after.Tree, after.Ref, s.now().UTC())
-		checkpointRecord.AfterTree = &after.Tree
-		checkpointRecord.AfterRef = &after.Ref
-	}
-	if snapshotErr == nil && s.changeDetector != nil {
-		changeSet, err := s.changeDetector.Generate(persistCtx, session.Workspace, checkpointRecord)
-		if err == nil {
-			err = s.store.ReplaceChangeSet(persistCtx, changeSet)
-		}
+	var snapshotErr error
+	if checkpointEnabled {
+		after, err := s.checkpoints.Capture(persistCtx, session.Workspace, session.ID, run.ID, "after")
 		snapshotErr = err
+		if snapshotErr == nil {
+			snapshotErr = s.store.CompleteCheckpoint(persistCtx, checkpointID, after.Tree, after.Ref, s.now().UTC())
+			checkpointRecord.AfterTree = &after.Tree
+			checkpointRecord.AfterRef = &after.Ref
+		}
+		if snapshotErr == nil && s.changeDetector != nil {
+			changeSet, err := s.changeDetector.Generate(persistCtx, session.Workspace, checkpointRecord)
+			if err == nil {
+				err = s.store.ReplaceChangeSet(persistCtx, changeSet)
+			}
+			snapshotErr = err
+		}
 	}
 	if snapshotErr != nil {
 		run.Status = protocol.RunFailed

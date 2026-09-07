@@ -121,6 +121,7 @@ const visibleEvents = computed(() => events.value
   .filter((event) => hasVisibleEventText(event)));
 const isActive = computed(() => selected.value?.status === 'active');
 const isClosed = computed(() => selected.value?.status === 'closed');
+const isDirectoryWorkspace = computed(() => selected.value?.workspaceKind === 'directory');
 const selectedChange = computed(() => changes.value.files.find((file) => file.id === selectedChangeId.value));
 const selectedRunEntry = computed(() => usage.value.runs.find((entry) => entry.run.id === selectedRunId.value));
 const viewingFileIsMarkdown = computed(() => /\.mdx?$/i.test(viewingFilePath.value));
@@ -588,7 +589,7 @@ async function selectSession(session: AgentSession) {
   // The GitHub monitoring area (see Shell.vue/github/repository.ts) tracks
   // whichever repository the selected Session is backed by, so switching
   // sessions re-targets monitoring/Issue/PR without a separate picker.
-  githubWorkspace.value = session.workspace;
+  githubWorkspace.value = session.workspaceKind === 'directory' ? '' : session.workspace;
   const provider = providers.value.find((item) => item.id === session.agent);
   selectedModel.value = provider?.defaultModel && provider.models.includes(provider.defaultModel)
     ? provider.defaultModel
@@ -635,12 +636,12 @@ async function persistSelectedModel() {
 }
 
 async function refreshSelected(full = false) {
-  if (!selected.value) return;
-  const id = selected.value.id;
-  const [session, newEvents, changeSet, sessionUsage, pendingApprovals] = await Promise.all([
-    api.getSession(id),
-    api.getEvents(id, full ? 0 : lastSequence.value),
-    api.getChanges(id),
+	if (!selected.value) return;
+	const id = selected.value.id;
+	const session = await api.getSession(id);
+	const [newEvents, changeSet, sessionUsage, pendingApprovals] = await Promise.all([
+		api.getEvents(id, full ? 0 : lastSequence.value),
+		session.workspaceKind === 'directory' ? Promise.resolve(emptyChangeSet(id)) : api.getChanges(id),
     api.getUsage(id),
     api.listApprovals(id, true),
   ]);
@@ -658,9 +659,9 @@ async function refreshSelected(full = false) {
 }
 
 async function refreshSelectedState(sessionId: string) {
-  const [session, changeSet, sessionUsage, pendingApprovals] = await Promise.all([
-    api.getSession(sessionId),
-    api.getChanges(sessionId),
+	const session = await api.getSession(sessionId);
+	const [changeSet, sessionUsage, pendingApprovals] = await Promise.all([
+		session.workspaceKind === 'directory' ? Promise.resolve(emptyChangeSet(sessionId)) : api.getChanges(sessionId),
     api.getUsage(sessionId),
     api.listApprovals(sessionId, true),
   ]);
@@ -1089,9 +1090,9 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
             </select>
           </label>
         </div>
-        <label for="workspace">Repository path</label>
+        <label for="workspace">Workspace path</label>
         <div class="field-row">
-          <input id="workspace" v-model="workspace" list="workspace-history" autocomplete="off" placeholder="C:/path/to/repository" :disabled="busy" />
+          <input id="workspace" v-model="workspace" list="workspace-history" autocomplete="off" placeholder="C:/path/to/workspace" :disabled="busy" />
           <datalist id="workspace-history">
             <option v-for="path in workspaceHistory" :key="path" :value="path" />
           </datalist>
@@ -1124,7 +1125,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
     <main class="conversation">
       <div v-if="selected" class="conversation-header">
         <div>
-          <p class="eyebrow">DIRECT REPOSITORY SESSION</p>
+          <p class="eyebrow">{{ isDirectoryWorkspace ? 'LIMITED DIRECTORY SESSION' : 'DIRECT REPOSITORY SESSION' }}</p>
           <h1>{{ shortPath(selected.workspace) }}</h1>
           <p class="path" :title="selected.workspace">{{ selected.workspace }}</p>
         </div>
@@ -1168,7 +1169,8 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
         <div v-if="visibleEvents.length === 0" class="empty-state compact">
           <span class="empty-symbol">⌁</span>
           <h2>{{ providerLabel }}に最初の指示を送る</h2>
-          <p>対象Repositoryを直接編集します。各Run開始前にcheckpointを作成します。</p>
+          <p v-if="isDirectoryWorkspace">対象Directoryを直接編集します。Git checkpoint、差分表示、Restore、GitHub連携は利用できません。</p>
+          <p v-else>対象Repositoryを直接編集します。各Run開始前にcheckpointを作成します。</p>
         </div>
         <article v-for="event in visibleEvents" :key="event.id" class="event" :class="eventKind(event)">
           <div class="event-label">{{ eventKind(event) === 'assistant' ? providerLabel.toUpperCase() : eventKind(event).toUpperCase() }}</div>
@@ -1272,7 +1274,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
         <button id="usage-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'usage'" :class="{ selected: activeSidePanel === 'usage' }" @click="selectSidePanel('usage')">
           Usage <span class="tab-count">{{ usage.runs.length }}</span>
         </button>
-        <button id="changes-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'changes'" :class="{ selected: activeSidePanel === 'changes' }" @click="selectSidePanel('changes')">
+        <button id="changes-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'changes'" :class="{ selected: activeSidePanel === 'changes' }" :disabled="isDirectoryWorkspace" @click="selectSidePanel('changes')">
           Changes <span class="tab-count">{{ changes.files.length }}</span>
         </button>
         <button id="source-stats-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'sourceStats'" :class="{ selected: activeSidePanel === 'sourceStats' }" @click="selectSidePanel('sourceStats')">
@@ -1348,7 +1350,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           </div>
         </button>
       </div>
-      <div v-else class="no-changes"><span>◇</span><p>変更はまだありません</p><small>Run完了後にGit差分が表示されます。</small></div>
+      <div v-else class="no-changes"><span>◇</span><p>{{ isDirectoryWorkspace ? '制限付きDirectoryでは変更を追跡しません' : '変更はまだありません' }}</p><small v-if="!isDirectoryWorkspace">Run完了後にGit差分が表示されます。</small></div>
       </div>
       <div v-else-if="activeSidePanel === 'sourceStats'" id="source-stats-panel" class="source-stats-section" role="tabpanel" aria-labelledby="source-stats-tab">
         <div class="section-heading">
