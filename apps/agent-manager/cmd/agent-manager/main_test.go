@@ -15,8 +15,8 @@ import (
 
 type stubRepositoryManager struct{}
 
-func (stubRepositoryManager) ValidateRepository(_ context.Context, workspace string) (string, error) {
-	return workspace, nil
+func (stubRepositoryManager) ValidateWorkspace(_ context.Context, workspace string) (string, bool, error) {
+	return workspace, true, nil
 }
 
 func (stubRepositoryManager) CleanupSession(context.Context, string, string) error { return nil }
@@ -133,6 +133,33 @@ func TestCloseExpiredSessionsSkipsSessionsWithActiveRuns(t *testing.T) {
 	}
 	if got, err := store.GetSession(ctx, busy.ID); err != nil || got.Status != protocol.SessionActive {
 		t.Fatalf("session with active run = %#v, err = %v", got, err)
+	}
+}
+
+func TestCloseExpiredSessionsSkipsSessionsCreatedFromAJob(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	eventID := "event-1"
+	fromJob := protocol.AgentSession{
+		ID: "session-from-job", Agent: protocol.AgentCodex, Workspace: "C:/repo", Status: protocol.SessionActive,
+		TriggerSource: protocol.TriggerSourceGitHubMonitor, GitHubMonitorEvent: &eventID, CreatedAt: now.Add(-25 * time.Hour),
+	}
+	if err := store.CreateSession(ctx, fromJob); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	sessions := sessionservice.New(store, stubRepositoryManager{})
+	closed, err := closeExpiredSessions(ctx, store, sessions, now, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("close expired sessions: %v", err)
+	}
+	if closed != 0 {
+		t.Fatalf("closed = %d, want 0", closed)
+	}
+	if got, err := store.GetSession(ctx, fromJob.ID); err != nil || got.Status != protocol.SessionActive {
+		t.Fatalf("session from job = %#v, err = %v", got, err)
 	}
 }
 

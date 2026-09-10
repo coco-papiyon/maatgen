@@ -17,7 +17,6 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/process"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
-	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage"
 	storesqlite "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/storage/sqlite"
 )
 
@@ -248,7 +247,7 @@ func TestRunServiceRejectsConcurrentRunAndCancels(t *testing.T) {
 // be able to start a Run while another session's Run against it is active
 // — this applies even though the two Runs belong to different Sessions and
 // would otherwise pass the per-session ErrRunActive check.
-func TestRunServiceRejectsRunForBusyRepositoryAcrossSessions(t *testing.T) {
+func TestRunServiceQueuesRunForBusyRepositoryAcrossSessions(t *testing.T) {
 	store, first := createRunTestStore(t)
 	second := protocol.AgentSession{
 		ID: "session-2", Agent: protocol.AgentCodex, Workspace: first.Workspace,
@@ -266,8 +265,14 @@ func TestRunServiceRejectsRunForBusyRepositoryAcrossSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start first run: %v", err)
 	}
-	if _, err := service.StartRun(context.Background(), second.ID, protocol.SendMessageRequest{Message: "Second"}); !errors.Is(err, ErrRepositoryBusy) {
-		t.Fatalf("second session run error = %v, want ErrRepositoryBusy", err)
+	waitForRunStatus(t, store, firstRun.ID, protocol.RunRunning)
+	secondRun, err := service.StartRun(context.Background(), second.ID, protocol.SendMessageRequest{Message: "Second"})
+	if err != nil {
+		t.Fatalf("queue second session run: %v", err)
+	}
+	queued, err := store.GetRun(context.Background(), secondRun.ID)
+	if err != nil || queued.Status != protocol.RunQueued {
+		t.Fatalf("queued run = %#v, err = %v", queued, err)
 	}
 
 	if err := service.CancelRun(context.Background(), firstRun.ID); err != nil {
@@ -275,9 +280,9 @@ func TestRunServiceRejectsRunForBusyRepositoryAcrossSessions(t *testing.T) {
 	}
 	waitForRunStatus(t, store, firstRun.ID, protocol.RunCancelled)
 
-	secondRun, err := service.StartRun(context.Background(), second.ID, protocol.SendMessageRequest{Message: "Now allowed"})
-	if err != nil {
-		t.Fatalf("start second run after repository lock released: %v", err)
+	waitForRunStatus(t, store, secondRun.ID, protocol.RunRunning)
+	if len(adapter.requests) != 2 {
+		t.Fatalf("adapter requests after releasing repository = %d, want 2", len(adapter.requests))
 	}
 	if err := service.CancelRun(context.Background(), secondRun.ID); err != nil {
 		t.Fatalf("cancel second run: %v", err)
@@ -401,8 +406,9 @@ func TestRunServiceRunsInDirectoryWithoutCheckpointManager(t *testing.T) {
 	if len(adapter.requests) != 1 || adapter.requests[0].Directory != session.Workspace {
 		t.Fatalf("adapter requests = %#v", adapter.requests)
 	}
-	if _, err := store.GetChangeSet(context.Background(), session.ID); !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("directory Run unexpectedly created a checkpoint: %v", err)
+	changeSet, err := store.GetChangeSet(context.Background(), session.ID)
+	if err != nil || changeSet.CheckpointID != "" || len(changeSet.Files) != 0 {
+		t.Fatalf("directory Run unexpectedly created checkpoint changes: %#v, %v", changeSet, err)
 	}
 }
 

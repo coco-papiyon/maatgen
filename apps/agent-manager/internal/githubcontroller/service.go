@@ -373,6 +373,110 @@ func (s *Service) PreviewRulePrompt(_ context.Context, request protocol.GitHubTr
 	return protocol.GitHubTriggerRulePromptPreviewResponse{Issue: issue, PullRequest: pullRequest}, nil
 }
 
+// TestRule fetches every currently open Issue/Pull Request in workspace's
+// repository and reports which ones match request's condition right now,
+// without creating a Job: the Settings screen's "この条件で確認" action lets
+// a user verify a rule (saved or still mid-edit) finds what they expect
+// before relying on it to run automatically. Unlike SyncNow, it never calls
+// Evaluator or touches the observed-item/Outbox tables, so it has no effect
+// on the next real poll.
+//
+// Project field values are fetched per item only when request.Filters.Project
+// is set, and PR conflict state only when request.Filters.Conflicting is set,
+// mirroring listItems: this dry run should not cost more GitHub API calls
+// than the condition being tested actually needs.
+//
+// Because this never consults observation history, the "action" a filter
+// like Actions is compared against is always ActionForCurrentState's
+// "opened" fallback (every fetched item is open) rather than a real
+// transition like "labeled" or "reopened" — the same simplification
+// Evaluator falls back to when it has no prior action recorded.
+func (s *Service) TestRule(ctx context.Context, request protocol.GitHubTriggerRuleTestRequest) (protocol.GitHubTriggerRuleTestResponse, error) {
+	repository, err := s.validator.ValidateRepository(ctx, request.Workspace)
+	if err != nil {
+		return protocol.GitHubTriggerRuleTestResponse{}, err
+	}
+	if len(request.EventKinds) == 0 {
+		return protocol.GitHubTriggerRuleTestResponse{}, fmt.Errorf("%w: eventKinds is required", ErrInvalidRequest)
+	}
+	for _, kind := range request.EventKinds {
+		if kind != protocol.GitHubItemIssue && kind != protocol.GitHubItemPullRequest {
+			return protocol.GitHubTriggerRuleTestResponse{}, fmt.Errorf("%w: eventKinds contains an invalid value %q", ErrInvalidRequest, kind)
+		}
+	}
+	monitor, err := s.store.GetRepositoryMonitor(ctx, repository)
+	if err != nil {
+		return protocol.GitHubTriggerRuleTestResponse{}, err
+	}
+	client, err := s.clients(monitor.Host)
+	if err != nil {
+		return protocol.GitHubTriggerRuleTestResponse{}, err
+	}
+
+	opts := githubapi.ListOptions{State: "open"}
+	needsProjects := request.Filters.Project != nil
+	response := protocol.GitHubTriggerRuleTestResponse{MatchedItems: make([]protocol.GitHubItem, 0)}
+
+	if containsItemKind(request.EventKinds, protocol.GitHubItemIssue) {
+		issues, err := client.ListIssues(ctx, monitor.Owner, monitor.Name, opts)
+		if err != nil {
+			return protocol.GitHubTriggerRuleTestResponse{}, err
+		}
+		for _, issue := range issues {
+			if needsProjects {
+				issue = withTestProjectFields(ctx, client, monitor, issue, &response.ProjectsUnavailable)
+			}
+			response.IssuesProcessed++
+			if githubmonitor.Matches(request.Filters, issue, githubmonitor.ActionForCurrentState(issue)) {
+				response.MatchedItems = append(response.MatchedItems, issue)
+			}
+		}
+	}
+	if containsItemKind(request.EventKinds, protocol.GitHubItemPullRequest) {
+		pulls, err := client.ListPullRequests(ctx, monitor.Owner, monitor.Name, opts)
+		if err != nil {
+			return protocol.GitHubTriggerRuleTestResponse{}, err
+		}
+		for _, pull := range pulls {
+			if needsProjects {
+				pull = withTestProjectFields(ctx, client, monitor, pull, &response.ProjectsUnavailable)
+			}
+			if request.Filters.Conflicting != nil && pull.PullRequest != nil {
+				if fresh, fetchErr := client.GetPullRequest(ctx, monitor.Owner, monitor.Name, pull.Number); fetchErr == nil && fresh.PullRequest != nil {
+					pull.PullRequest.Conflicting = fresh.PullRequest.Conflicting
+				}
+			}
+			response.PullRequestsProcessed++
+			if githubmonitor.Matches(request.Filters, pull, githubmonitor.ActionForCurrentState(pull)) {
+				response.MatchedItems = append(response.MatchedItems, pull)
+			}
+		}
+	}
+
+	response.FetchedAt = s.now().UTC()
+	return response, nil
+}
+
+func withTestProjectFields(ctx context.Context, client GitHubClient, monitor protocol.GitHubRepositoryMonitor, item protocol.GitHubItem, projectsUnavailable *bool) protocol.GitHubItem {
+	fields, err := client.FetchProjectFields(ctx, monitor.Owner, monitor.Name, item.Kind, item.Number)
+	if err != nil {
+		item.ProjectsError = err.Error()
+		*projectsUnavailable = true
+		return item
+	}
+	item.ProjectFields = fields
+	return item
+}
+
+func containsItemKind(kinds []protocol.GitHubItemKind, kind protocol.GitHubItemKind) bool {
+	for _, k := range kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeConcurrencyPolicy(policy protocol.GitHubConcurrencyPolicy) protocol.GitHubConcurrencyPolicy {
 	if policy == "" {
 		return protocol.GitHubConcurrencyCoalesce

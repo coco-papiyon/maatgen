@@ -18,6 +18,8 @@ import type {
   GitHubTriggerRulePromptPreviewRequest,
   GitHubTriggerRulePromptPreviewResponse,
   GitHubTriggerRuleRequest,
+  GitHubTriggerRuleTestRequest,
+  GitHubTriggerRuleTestResponse,
   SendMessageRequest,
   SessionEvent,
   SessionListResponse,
@@ -133,6 +135,7 @@ export interface AgentApi {
   updateGitHubTriggerRule(id: string, request: GitHubTriggerRuleRequest): Promise<GitHubTriggerRule>;
   deleteGitHubTriggerRule(id: string): Promise<void>;
   previewGitHubTriggerRulePrompt(request: GitHubTriggerRulePromptPreviewRequest): Promise<GitHubTriggerRulePromptPreviewResponse>;
+  testGitHubTriggerRule(request: GitHubTriggerRuleTestRequest): Promise<GitHubTriggerRuleTestResponse>;
   // Omitting workspace lists monitor events across every registered
   // repository (the Job screen's cross-repository event table).
   listGitHubMonitorEvents(workspace?: string, limit?: number, status?: JobStatusFilter): Promise<GitHubMonitorEvent[]>;
@@ -341,6 +344,9 @@ export const httpAgentApi: AgentApi = {
   },
   previewGitHubTriggerRulePrompt(requestBody) {
     return request('/api/v1/github/rules/preview', { method: 'POST', body: JSON.stringify(requestBody) });
+  },
+  testGitHubTriggerRule(requestBody) {
+    return request('/api/v1/github/rules/test', { method: 'POST', body: JSON.stringify(requestBody) });
   },
   async listGitHubMonitorEvents(workspace, limit = 100, status) {
     const query = new URLSearchParams({ limit: String(limit) });

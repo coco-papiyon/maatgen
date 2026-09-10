@@ -499,13 +499,20 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
       : event);
     await this.view?.webview.postMessage({
       type: 'session.state', workspace: this.getWorkspaceState(), sessions: this.sessions, session, events: renderedEvents, usage, changes, activeRunId: this.activeRunId,
+      activeRunStatus: this.findActiveRunStatus(events),
       providerUsage: this.providerUsage, approvals: this.approvals, providers: this.providers, selectedProvider: this.selectedProvider, selectedModel: this.selectedModel, selectedReasoningEffort: this.selectedReasoningEffort,
     });
   }
 
   private findActiveRunId(events: SessionEvent[]): string | undefined {
     const terminal = new Set(events.filter((event) => ['run_completed', 'run_failed', 'run_cancelled'].includes(event.type)).map((event) => event.runId).filter(Boolean));
-    return [...events].reverse().find((event) => event.type === 'run_started' && event.runId && !terminal.has(event.runId))?.runId;
+    return [...events].reverse().find((event) => event.type === 'user_prompt' && event.runId && !terminal.has(event.runId))?.runId;
+  }
+
+  private findActiveRunStatus(events: SessionEvent[]): 'queued' | 'running' | undefined {
+    const runID = this.findActiveRunId(events);
+    if (!runID) return undefined;
+    return events.some((event) => event.type === 'run_started' && event.runId === runID) ? 'running' : 'queued';
   }
 
   private latestChangeRefreshSequence(events: SessionEvent[]): number {

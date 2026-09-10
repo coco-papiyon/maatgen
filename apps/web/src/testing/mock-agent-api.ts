@@ -12,9 +12,12 @@ import type {
   GitHubRepositoryResolution,
   GitHubSyncResult,
   GitHubTriggerRule,
+  GitHubMonitorFilters,
   GitHubTriggerRulePromptPreviewRequest,
   GitHubTriggerRulePromptPreviewResponse,
   GitHubTriggerRuleRequest,
+  GitHubTriggerRuleTestRequest,
+  GitHubTriggerRuleTestResponse,
   ProviderUsage,
   RestoreStatus,
   SendMessageRequest,
@@ -541,6 +544,13 @@ export class MockAgentApi implements AgentApi {
     };
   }
 
+  async testGitHubTriggerRule(request: GitHubTriggerRuleTestRequest): Promise<GitHubTriggerRuleTestResponse> {
+    const issues = request.eventKinds.includes('issue') ? this.githubIssues : [];
+    const pulls = request.eventKinds.includes('pull_request') ? this.githubPulls : [];
+    const matchedItems = [...issues, ...pulls].filter((item) => matchesMockGitHubFilters(item, request.filters)).map(clone);
+    return { matchedItems, issuesProcessed: issues.length, pullRequestsProcessed: pulls.length, fetchedAt: now };
+  }
+
   async listGitHubMonitorEvents(workspace?: string, limit = 100, status?: JobStatusFilter): Promise<GitHubMonitorEvent[]> {
     const events = [...this.githubEvents.values()];
     return (workspace ? events.filter((githubEvent) => githubEvent.repository === workspace) : events)
@@ -771,6 +781,36 @@ function matchesMockGitHubQuery(item: GitHubItem, query?: GitHubItemQuery): bool
       if (query.status && (field.fieldName.toLowerCase() !== 'status' || field.value.toLowerCase() !== query.status.toLowerCase())) return false;
       return true;
     });
+    if (!matched) return false;
+  }
+  return true;
+}
+
+// matchesMockGitHubFilters mirrors the subset of githubmonitor.Matches this
+// mock needs to demo the rule test feature: every populated field is ANDed,
+// an empty/undefined field imposes no constraint.
+function matchesMockGitHubFilters(item: GitHubItem, filters: GitHubMonitorFilters): boolean {
+  const foldIncludes = (values: string[] | undefined, target: string) =>
+    !values?.length || values.some((value) => value.toLowerCase() === target.toLowerCase());
+  if (filters.titleContains && !item.title.toLowerCase().includes(filters.titleContains.toLowerCase())) return false;
+  if (filters.bodyContains && !item.body.toLowerCase().includes(filters.bodyContains.toLowerCase())) return false;
+  if (!foldIncludes(filters.authors, item.author.login)) return false;
+  if (filters.assignees?.length && !item.assignees.some((assignee) => foldIncludes(filters.assignees, assignee.login))) return false;
+  if (filters.reviewers?.length) {
+    const reviewers = item.pullRequest?.requestedReviewers ?? [];
+    if (!reviewers.some((reviewer) => foldIncludes(filters.reviewers, reviewer.login))) return false;
+  }
+  if (filters.labels?.length && !item.labels.some((label) => foldIncludes(filters.labels, label.name))) return false;
+  if (filters.states?.length && !filters.states.includes(item.state)) return false;
+  if (filters.draft !== undefined && (item.pullRequest?.draft ?? false) !== filters.draft) return false;
+  if (filters.conflicting !== undefined && (item.pullRequest?.conflicting ?? false) !== filters.conflicting) return false;
+  if (filters.project) {
+    const matched = (item.projectFields ?? []).some(
+      (field) =>
+        field.projectTitle.toLowerCase() === filters.project!.projectTitle.toLowerCase() &&
+        field.fieldName.toLowerCase() === filters.project!.fieldName.toLowerCase() &&
+        field.value.toLowerCase() === filters.project!.value.toLowerCase(),
+    );
     if (!matched) return false;
   }
   return true;

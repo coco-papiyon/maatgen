@@ -5,9 +5,11 @@ import type {
   GitHubConcurrencyPolicy,
   GitHubItemKind,
   GitHubJobPriority,
+  GitHubMonitorFilters,
   GitHubRepositoryMonitor,
   GitHubRepositoryResolution,
   GitHubTriggerRule,
+  GitHubTriggerRuleTestResponse,
   Provider,
 } from '@maatgen/protocol';
 import { AgentApiError } from '../api';
@@ -299,6 +301,52 @@ function resetPromptPreview() {
   promptPreviewError.value = '';
 }
 
+// --- Condition test ("この条件で確認"): checks whether the form's current
+// eventKinds/filters currently match any open Issue/PR in the selected
+// repository, without saving the rule or creating a Job.
+const ruleTestResult = ref<GitHubTriggerRuleTestResponse>();
+const ruleTestError = ref('');
+const testingRule = ref(false);
+
+function buildRuleFilters(form: RuleForm): GitHubMonitorFilters {
+  const labels = parseCommaSeparated(form.labels);
+  const assignees = parseCommaSeparated(form.assignees);
+  const reviewers = parseCommaSeparated(form.reviewers);
+  return {
+    ...(labels.length ? { labels } : {}),
+    ...(assignees.length ? { assignees } : {}),
+    ...(form.eventKinds.includes('pull_request') && reviewers.length ? { reviewers } : {}),
+    ...(form.eventKinds.includes('pull_request') && form.conflicting !== '' ? { conflicting: form.conflicting === 'true' } : {}),
+    ...(form.projectTitle && form.projectField
+      ? { project: { projectTitle: form.projectTitle, fieldName: form.projectField, value: form.projectValue } }
+      : {}),
+  };
+}
+
+function resetRuleTest() {
+  ruleTestResult.value = undefined;
+  ruleTestError.value = '';
+}
+
+async function testRule() {
+  const form = editingRule.value;
+  if (!form || !form.eventKinds.length) return;
+  testingRule.value = true;
+  ruleTestError.value = '';
+  ruleTestResult.value = undefined;
+  try {
+    ruleTestResult.value = await api.testGitHubTriggerRule({
+      workspace: form.repository,
+      eventKinds: form.eventKinds,
+      filters: buildRuleFilters(form),
+    });
+  } catch (cause) {
+    ruleTestError.value = describeError(cause);
+  } finally {
+    testingRule.value = false;
+  }
+}
+
 async function previewPrompt() {
   const form = editingRule.value;
   if (!form) return;
@@ -317,11 +365,13 @@ async function previewPrompt() {
 function startCreateRule() {
   editingRule.value = blankRuleForm();
   resetPromptPreview();
+  resetRuleTest();
   focusRuleDialog();
 }
 
 function startEditRule(rule: GitHubTriggerRule) {
   resetPromptPreview();
+  resetRuleTest();
   editingRule.value = {
     id: rule.id, repository: rule.repository, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider,
@@ -340,6 +390,7 @@ function startEditRule(rule: GitHubTriggerRule) {
 function cancelEditRule() {
   editingRule.value = undefined;
   resetPromptPreview();
+  resetRuleTest();
 }
 
 async function saveRule() {
@@ -348,23 +399,12 @@ async function saveRule() {
   savingRule.value = true;
   error.value = '';
   try {
-    const labels = parseCommaSeparated(form.labels);
-    const assignees = parseCommaSeparated(form.assignees);
-    const reviewers = parseCommaSeparated(form.reviewers);
     const request = {
       workspace: form.repository,
       name: form.name,
       enabled: form.enabled,
       eventKinds: form.eventKinds,
-      filters: {
-        ...(labels.length ? { labels } : {}),
-        ...(assignees.length ? { assignees } : {}),
-        ...(form.eventKinds.includes('pull_request') && reviewers.length ? { reviewers } : {}),
-        ...(form.eventKinds.includes('pull_request') && form.conflicting !== '' ? { conflicting: form.conflicting === 'true' } : {}),
-        ...(form.projectTitle && form.projectField
-          ? { project: { projectTitle: form.projectTitle, fieldName: form.projectField, value: form.projectValue } }
-          : {}),
-      },
+      filters: buildRuleFilters(form),
       promptTemplate: form.promptTemplate,
       includeBody: form.includeBody,
       provider: form.provider,
@@ -381,6 +421,7 @@ async function saveRule() {
     }
     editingRule.value = undefined;
     resetPromptPreview();
+    resetRuleTest();
     rules.value = await api.listGitHubTriggerRules();
   } catch (cause) {
     error.value = describeError(cause);
@@ -565,6 +606,21 @@ onMounted(() => void refresh());
             <label>プロジェクト名（任意）<input v-model="editingRule.projectTitle" placeholder="Roadmap" /></label>
             <label>フィールド名<input v-model="editingRule.projectField" placeholder="Status" /></label>
             <label>値<input v-model="editingRule.projectValue" placeholder="Ready" /></label>
+          </div>
+          <div class="github-form-actions">
+            <button type="button" :disabled="testingRule || !editingRule.eventKinds.length" @click="testRule">この条件で確認</button>
+          </div>
+          <p v-if="ruleTestError" class="github-error">{{ ruleTestError }}</p>
+          <div v-else-if="ruleTestResult" class="github-rule-test-result">
+            <p class="github-meta">
+              Issue {{ ruleTestResult.issuesProcessed }}件・Pull Request {{ ruleTestResult.pullRequestsProcessed }}件を確認し、{{ ruleTestResult.matchedItems.length }}件が条件に一致しました。
+            </p>
+            <p v-if="ruleTestResult.projectsUnavailable" class="github-hint">一部の項目でProject情報を取得できませんでした。</p>
+            <ul v-if="ruleTestResult.matchedItems.length" class="github-rule-test-items">
+              <li v-for="item in ruleTestResult.matchedItems" :key="`${item.kind}-${item.number}`">
+                <a :href="item.url" target="_blank" rel="noopener noreferrer">#{{ item.number }} {{ item.title }}</a>
+              </li>
+            </ul>
           </div>
           <label>Promptテンプレート
             <textarea v-model="editingRule.promptTemplate" rows="4" required placeholder="Design {{.Title}} (#{{.Number}})"></textarea>

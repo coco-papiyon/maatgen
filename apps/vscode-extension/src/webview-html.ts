@@ -301,7 +301,11 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           const meta = document.createElement('span');
           meta.textContent = session.agent + ' · ' + session.status + ' · ' + new Date(session.createdAt).toLocaleString();
           button.append(title);
-          if (session.activeRunStatus === 'running') button.append(runningMark);
+          if (session.activeRunStatus === 'running' || session.activeRunStatus === 'queued') {
+            runningMark.textContent = session.activeRunStatus === 'queued' ? '待機中' : '実行中';
+            runningMark.title = runningMark.textContent;
+            button.append(runningMark);
+          }
           button.append(meta);
           button.addEventListener('click', () => vscode.postMessage({ type: 'session.select', sessionId: session.id }));
           historyList.append(button);
@@ -532,7 +536,7 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           sessionSection.hidden = !event.data.session;
           sessionStatus.textContent = event.data.approvals?.length
             ? 'Approval required'
-            : (event.data.activeRunId ? 'Running' : (event.data.session?.workspaceKind === 'directory' ? 'Ready · limited directory' : (event.data.session?.status ?? 'Offline')));
+            : (event.data.activeRunStatus === 'queued' ? 'Waiting for repository' : (event.data.activeRunId ? 'Running' : (event.data.session?.workspaceKind === 'directory' ? 'Ready · limited directory' : (event.data.session?.status ?? 'Offline'))));
           renderProviderOptions(event.data.providers, event.data.selectedProvider, event.data.selectedModel, event.data.selectedReasoningEffort, Boolean(event.data.session), Boolean(event.data.activeRunId));
           renderProviderUsage(event.data.providerUsage);
           newSessionButton.disabled = Boolean(event.data.activeRunId);

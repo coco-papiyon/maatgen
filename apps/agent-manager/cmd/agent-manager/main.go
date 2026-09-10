@@ -429,7 +429,11 @@ func run() error {
 // It runs once at startup, so a session left open across manager restarts
 // stops appearing in the active list and its checkpoint working copy gets
 // cleaned up the same way a manual close would. Sessions that still have an
-// active run are left alone; a future startup will retry them.
+// active run are left alone; a future startup will retry them. Sessions
+// created from a GitHub monitor Job are left alone too: closing one cascades
+// into closing its Job (session.Service.CloseSession), so auto-expiring it
+// here would silently close the Job on every manager restart instead of
+// leaving it for the user or the monitor rule itself to close.
 func closeExpiredSessions(ctx context.Context, store *storesqlite.Store, sessions *sessionservice.Service, now time.Time, maxAge time.Duration) (int, error) {
 	cutoff := now.Add(-maxAge)
 	closed := 0
@@ -443,6 +447,9 @@ func closeExpiredSessions(ctx context.Context, store *storesqlite.Store, session
 			return closed, nil
 		}
 		for _, item := range page {
+			if item.GitHubMonitorEvent != nil {
+				continue
+			}
 			if !item.CreatedAt.Before(cutoff) {
 				continue
 			}

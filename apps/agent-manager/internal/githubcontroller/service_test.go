@@ -762,6 +762,74 @@ func TestListIssuesFetchesProjectsOnlyWhenQueried(t *testing.T) {
 	}
 }
 
+func TestTestRuleMatchesOpenItemsWithoutCreatingAJob(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	monitor := protocol.GitHubRepositoryMonitor{Repository: "/repo", Host: "github.com", Owner: "octo-org", Name: "example"}
+	_ = store.CreateRepositoryMonitor(ctx, monitor)
+	client := &fakeGitHubClient{issues: []protocol.GitHubItem{
+		{Kind: protocol.GitHubItemIssue, Number: 1, Title: "bug: widget broken", Labels: []protocol.GitHubLabel{{Name: "bug"}}},
+		{Kind: protocol.GitHubItemIssue, Number: 2, Title: "feature request"},
+	}}
+	service := New(store, fakeValidator{}, "", nil, nil, func(string) (GitHubClient, error) { return client, nil }, nil)
+
+	response, err := service.TestRule(ctx, protocol.GitHubTriggerRuleTestRequest{
+		Workspace:  "/repo",
+		EventKinds: []protocol.GitHubItemKind{protocol.GitHubItemIssue},
+		Filters:    protocol.GitHubMonitorFilters{Labels: []string{"bug"}},
+	})
+	if err != nil {
+		t.Fatalf("TestRule: %v", err)
+	}
+	if response.IssuesProcessed != 2 {
+		t.Fatalf("IssuesProcessed = %d, want 2", response.IssuesProcessed)
+	}
+	if len(response.MatchedItems) != 1 || response.MatchedItems[0].Number != 1 {
+		t.Fatalf("MatchedItems = %#v, want only issue #1", response.MatchedItems)
+	}
+	if len(store.events) != 0 {
+		t.Fatalf("TestRule must never create a Job; store.events = %#v", store.events)
+	}
+}
+
+func TestTestRuleFetchesProjectsOnlyWhenFiltered(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	monitor := protocol.GitHubRepositoryMonitor{Repository: "/repo", Host: "github.com", Owner: "octo-org", Name: "example"}
+	_ = store.CreateRepositoryMonitor(ctx, monitor)
+	client := &fakeGitHubClient{issues: []protocol.GitHubItem{{Kind: protocol.GitHubItemIssue, Number: 1, Title: "t"}}}
+	service := New(store, fakeValidator{}, "", nil, nil, func(string) (GitHubClient, error) { return client, nil }, nil)
+
+	if _, err := service.TestRule(ctx, protocol.GitHubTriggerRuleTestRequest{
+		Workspace: "/repo", EventKinds: []protocol.GitHubItemKind{protocol.GitHubItemIssue},
+	}); err != nil {
+		t.Fatalf("TestRule: %v", err)
+	}
+	if client.projectFieldCalls != 0 {
+		t.Fatalf("projectFieldCalls = %d, want 0 without a Project filter", client.projectFieldCalls)
+	}
+
+	if _, err := service.TestRule(ctx, protocol.GitHubTriggerRuleTestRequest{
+		Workspace: "/repo", EventKinds: []protocol.GitHubItemKind{protocol.GitHubItemIssue},
+		Filters: protocol.GitHubMonitorFilters{Project: &protocol.GitHubProjectFilterCondition{ProjectTitle: "Roadmap", FieldName: "Status", Value: "Ready"}},
+	}); err != nil {
+		t.Fatalf("TestRule: %v", err)
+	}
+	if client.projectFieldCalls != 1 {
+		t.Fatalf("projectFieldCalls = %d, want 1 with a Project filter", client.projectFieldCalls)
+	}
+}
+
+func TestTestRuleRejectsEmptyEventKinds(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	service := New(store, fakeValidator{}, "", nil, nil, func(string) (GitHubClient, error) { return &fakeGitHubClient{}, nil }, nil)
+
+	if _, err := service.TestRule(ctx, protocol.GitHubTriggerRuleTestRequest{Workspace: "/repo"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("TestRule error = %v, want ErrInvalidRequest", err)
+	}
+}
+
 type fakeGitHubClient struct {
 	issues            []protocol.GitHubItem
 	pulls             []protocol.GitHubItem

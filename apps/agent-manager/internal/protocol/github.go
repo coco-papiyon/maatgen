@@ -416,6 +416,31 @@ type GitHubMonitorEventListResponse struct {
 	Events []GitHubMonitorEvent `json:"events"`
 }
 
+// GitHubTriggerRuleTestRequest is the input to dry-run testing a rule's
+// condition against live GitHub data, without creating a Job: it lets a user
+// check "would this rule currently find anything?" before saving it. It
+// carries only the condition fields (EventKinds/Filters), not the Prompt or
+// provider settings, so it works the same for a not-yet-saved draft rule and
+// for an existing one.
+type GitHubTriggerRuleTestRequest struct {
+	Workspace  string               `json:"workspace"`
+	EventKinds []GitHubItemKind     `json:"eventKinds"`
+	Filters    GitHubMonitorFilters `json:"filters"`
+}
+
+// GitHubTriggerRuleTestResponse reports which currently open Issues/Pull
+// Requests match a rule's condition right now. Like GitHubItemListResponse,
+// it is a live, unpersisted snapshot (ADR-007 section 2): testing a rule
+// never creates a Job, never records an observed item, and never affects a
+// future poll's change detection.
+type GitHubTriggerRuleTestResponse struct {
+	MatchedItems          []GitHubItem `json:"matchedItems"`
+	IssuesProcessed       int          `json:"issuesProcessed"`
+	PullRequestsProcessed int          `json:"pullRequestsProcessed"`
+	FetchedAt             time.Time    `json:"fetchedAt"`
+	ProjectsUnavailable   bool         `json:"projectsUnavailable,omitempty"`
+}
+
 // GitHubItemListResponse is the response to a live ("画面表示取得") Issue
 // or Pull Request list request: fetched fresh from GitHub for this
 // response only, never persisted (ADR-007 section 2). FetchedAt lets the

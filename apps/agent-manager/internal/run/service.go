@@ -64,7 +64,12 @@ type CheckpointManager interface {
 type activeRun struct {
 	sessionID  string
 	repository string
+	ctx        context.Context
 	cancel     context.CancelFunc
+	session    protocol.AgentSession
+	run        protocol.AgentRun
+	request    protocol.SendMessageRequest
+	started    bool
 }
 
 type Service struct {
@@ -77,6 +82,7 @@ type Service struct {
 	activeByRun        map[string]activeRun
 	activeBySession    map[string]string
 	activeByRepository map[string]string
+	queuedByRepository map[string][]string
 	wg                 sync.WaitGroup
 	now                func() time.Time
 	newID              func(string) (string, error)
@@ -130,6 +136,7 @@ func NewMulti(store Store, adapters []agent.Adapter, options ...Option) *Service
 		store: store, adapters: make(map[protocol.AgentName]agent.Adapter), ctx: ctx, cancel: cancel,
 		activeByRun: make(map[string]activeRun), activeBySession: make(map[string]string),
 		activeByRepository: make(map[string]string),
+		queuedByRepository: make(map[string][]string),
 		now:                time.Now, newID: generateID,
 	}
 	for _, adapter := range adapters {
@@ -177,21 +184,17 @@ func (s *Service) StartRun(ctx context.Context, sessionID string, request protoc
 		s.mu.Unlock()
 		return protocol.AgentRun{}, ErrRunActive
 	}
-	// A session with no active run of its own (just confirmed above) can
-	// only find its repository locked if a *different* session holds it.
-	if _, busy := s.activeByRepository[session.Workspace]; busy {
-		s.mu.Unlock()
-		return protocol.AgentRun{}, ErrRepositoryBusy
-	}
 	runCtx, cancel := context.WithCancel(s.ctx)
-	s.activeBySession[sessionID] = id
-	s.activeByRepository[session.Workspace] = sessionID
-	s.activeByRun[id] = activeRun{sessionID: sessionID, repository: session.Workspace, cancel: cancel}
-	s.mu.Unlock()
-
 	run := protocol.AgentRun{ID: id, SessionID: sessionID, Status: protocol.RunQueued, Prompt: message, AutoRetryOfRunID: request.AutoRetryOfRunID}
+	_, repositoryBusy := s.activeByRepository[session.Workspace]
+	s.activeBySession[sessionID] = id
+	s.activeByRun[id] = activeRun{
+		sessionID: sessionID, repository: session.Workspace, ctx: runCtx, cancel: cancel,
+		session: session, run: run, request: request,
+	}
 	if err := s.store.CreateRun(ctx, run); err != nil {
-		s.release(id, sessionID)
+		s.removeRunLocked(id, sessionID)
+		s.mu.Unlock()
 		if errors.Is(err, storage.ErrSessionClosed) {
 			return protocol.AgentRun{}, ErrSessionClosed
 		}
@@ -204,12 +207,22 @@ func (s *Service) StartRun(ctx context.Context, sessionID string, request protoc
 		run.Status = protocol.RunFailed
 		run.FinishedAt = &finishedAt
 		_ = s.store.UpdateRun(context.WithoutCancel(ctx), run)
-		s.release(id, sessionID)
+		s.removeRunLocked(id, sessionID)
+		s.mu.Unlock()
 		return protocol.AgentRun{}, err
 	}
-
-	s.wg.Add(1)
-	go s.execute(runCtx, session, run, request)
+	if repositoryBusy {
+		s.queuedByRepository[session.Workspace] = append(s.queuedByRepository[session.Workspace], id)
+		s.mu.Unlock()
+	} else {
+		s.activeByRepository[session.Workspace] = sessionID
+		active := s.activeByRun[id]
+		active.started = true
+		s.activeByRun[id] = active
+		s.wg.Add(1)
+		s.mu.Unlock()
+		go s.execute(runCtx, session, run, request)
+	}
 	return run, nil
 }
 
@@ -227,11 +240,26 @@ func (s *Service) IsRepositoryBusy(repository string) bool {
 func (s *Service) CancelRun(ctx context.Context, runID string) error {
 	s.mu.Lock()
 	active, exists := s.activeByRun[runID]
-	s.mu.Unlock()
 	if exists {
+		if !active.started {
+			s.removeRunLocked(runID, active.sessionID)
+			s.mu.Unlock()
+			active.cancel()
+			finishedAt := s.now().UTC()
+			active.run.Status = protocol.RunCancelled
+			active.run.FinishedAt = &finishedAt
+			_ = s.store.UpdateRun(context.WithoutCancel(ctx), active.run)
+			_, _ = s.appendEvent(context.WithoutCancel(ctx), active.sessionID, runID, protocol.EventSourceManager, protocol.EventTypeRunCancelled, map[string]any{"reason": "cancelled while queued"})
+			if s.terminalObserver != nil {
+				s.terminalObserver(active.run, active.repository)
+			}
+			return nil
+		}
+		s.mu.Unlock()
 		active.cancel()
 		return nil
 	}
+	s.mu.Unlock()
 	run, err := s.store.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -244,6 +272,17 @@ func (s *Service) CancelRun(ctx context.Context, runID string) error {
 
 func (s *Service) Close(ctx context.Context) error {
 	s.cancel()
+	s.mu.Lock()
+	queuedRunIDs := make([]string, 0)
+	for runID, active := range s.activeByRun {
+		if !active.started {
+			queuedRunIDs = append(queuedRunIDs, runID)
+		}
+	}
+	s.mu.Unlock()
+	for _, runID := range queuedRunIDs {
+		_ = s.CancelRun(context.WithoutCancel(ctx), runID)
+	}
 	done := make(chan struct{})
 	go func() {
 		s.wg.Wait()
@@ -665,7 +704,64 @@ func (s *Service) release(runID, sessionID string) {
 	if s.activeBySession[sessionID] == runID {
 		delete(s.activeBySession, sessionID)
 	}
+	if exists {
+		s.startNextLocked(active.repository)
+	}
 	s.mu.Unlock()
+}
+
+func (s *Service) removeRunLocked(runID, sessionID string) {
+	active, exists := s.activeByRun[runID]
+	if exists {
+		active.cancel()
+		queue := s.queuedByRepository[active.repository]
+		for index, queuedID := range queue {
+			if queuedID == runID {
+				queue = append(queue[:index], queue[index+1:]...)
+				break
+			}
+		}
+		if len(queue) == 0 {
+			delete(s.queuedByRepository, active.repository)
+		} else {
+			s.queuedByRepository[active.repository] = queue
+		}
+	}
+	delete(s.activeByRun, runID)
+	if s.activeBySession[sessionID] == runID {
+		delete(s.activeBySession, sessionID)
+	}
+}
+
+// startNextLocked transfers the repository lock to the oldest persisted Run.
+// The caller must hold s.mu and must have removed the previous owner first.
+func (s *Service) startNextLocked(repository string) {
+	select {
+	case <-s.ctx.Done():
+		return
+	default:
+	}
+	queue := s.queuedByRepository[repository]
+	for len(queue) > 0 {
+		runID := queue[0]
+		queue = queue[1:]
+		active, exists := s.activeByRun[runID]
+		if !exists {
+			continue
+		}
+		if len(queue) == 0 {
+			delete(s.queuedByRepository, repository)
+		} else {
+			s.queuedByRepository[repository] = queue
+		}
+		active.started = true
+		s.activeByRun[runID] = active
+		s.activeByRepository[repository] = active.sessionID
+		s.wg.Add(1)
+		go s.execute(active.ctx, active.session, active.run, active.request)
+		return
+	}
+	delete(s.queuedByRepository, repository)
 }
 
 func isTerminal(status protocol.RunStatus) bool {

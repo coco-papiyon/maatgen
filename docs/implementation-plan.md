@@ -73,9 +73,9 @@ interface AgentRun {
 }
 ```
 
-`activeRunStatus`は一覧取得時に現在の非終端Runがある場合だけ設定する。両UIは一覧を定期更新し、値が`running`のSessionに同等の実行中マークを表示する。
+`activeRunStatus`は一覧取得時に現在の非終端Runがある場合だけ設定する。同一リポジトリで別SessionのRunが実行中なら、新しいRunは`queued`として永続化し、リポジトリ単位のFIFO順で先行Runの終端後に自動開始する。両UIは`queued`を待機中、`running`を実行中として表示する。
 
-初期版では、実行中Sessionへの追加メッセージは許可せず、`409 Conflict`を返す。メッセージqueueingやsteeringは後続課題とする。
+同じSessionに非終端Runがある場合の追加メッセージは`409 Conflict`とする。別Sessionから同じリポジトリへ送られたメッセージはRunとしてキューイングする。
 
 ### 3.3 Adapter境界
 

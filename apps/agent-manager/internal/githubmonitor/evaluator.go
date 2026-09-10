@@ -74,7 +74,7 @@ func (e *Evaluator) EvaluateItem(ctx context.Context, monitor protocol.GitHubRep
 	if !change.Changed && previousPtr != nil {
 		evaluationAction = previousPtr.LastAction
 		if evaluationAction == "" {
-			evaluationAction = actionForCurrentState(item)
+			evaluationAction = ActionForCurrentState(item)
 		}
 	}
 	firstSyncedAt := now
@@ -165,7 +165,14 @@ func ruleVersion(rule protocol.GitHubTriggerRule) string {
 	return rule.UpdatedAt.UTC().Format(time.RFC3339Nano)
 }
 
-func actionForCurrentState(item protocol.GitHubItem) string {
+// ActionForCurrentState is the fallback "action" used when there is no
+// change history to derive a richer one from (DetectChange's "opened",
+// "updated", "closed", "reopened"): an unobserved item's current open/closed
+// state is the only signal available. Poller only ever fetches open items,
+// so in practice this is "opened" both for Evaluator's no-prior-action
+// fallback and for a rule dry-run test (githubcontroller.Service.TestRule),
+// which has no observation history at all.
+func ActionForCurrentState(item protocol.GitHubItem) string {
 	if item.State == protocol.GitHubItemClosed {
 		return "closed"
 	}

@@ -71,6 +71,7 @@ const workspace = ref('');
 const workspaceHistoryKey = 'maatgen.workspaceHistory';
 const workspaceHistoryLimit = 20;
 const workspaceHistory = ref<string[]>(loadWorkspaceHistory());
+const workspaceHistoryOpen = ref(false);
 const prompt = ref('');
 const activeRun = ref<AgentRun>();
 const busy = ref(false);
@@ -203,6 +204,7 @@ const restorableChanges = computed(() => changes.value.files.reduce((total, file
 const statusLabel = computed(() => {
   if (!selected.value) return '待機中';
   if (pendingApproval.value) return 'コマンド承認待ち';
+  if (activeRun.value?.status === 'queued') return 'リポジトリの空きを待機中';
   if (activeRun.value) return `${providerLabel.value} 実行中`;
   return selected.value.status === 'active' ? '準備完了' : '終了済み';
 });
@@ -225,20 +227,24 @@ function restoreActiveRun(items: SessionEvent[]) {
     .filter((event) => ['run_completed', 'run_failed', 'run_cancelled'].includes(event.type))
     .map((event) => event.runId)
     .filter((id): id is string => Boolean(id)));
-  const started = [...items].reverse().find((event) => event.type === 'run_started'
+  const startedWithoutTerminal = [...items].reverse().find((event) => event.type === 'run_started'
     && Boolean(event.runId)
     && !terminalRunIDs.has(event.runId!));
-  if (!started?.runId) {
+  const prompt = [...items].reverse().find((event) => event.type === 'user_prompt'
+    && Boolean(event.runId)
+    && !terminalRunIDs.has(event.runId!)) ?? startedWithoutTerminal;
+  if (!prompt?.runId) {
     if (activeRun.value && terminalRunIDs.has(activeRun.value.id)) activeRun.value = undefined;
     return;
   }
-  const userPrompt = [...items].reverse().find((event) => event.type === 'user_prompt' && event.runId === started.runId);
+  const started = items.find((event) => event.type === 'run_started' && event.runId === prompt.runId);
+  const userPrompt = items.find((event) => event.type === 'user_prompt' && event.runId === prompt.runId);
   activeRun.value = {
-    id: started.runId,
-    sessionId: started.sessionId,
-    status: 'running',
+    id: prompt.runId,
+    sessionId: prompt.sessionId,
+    status: started ? 'running' : 'queued',
     prompt: userPrompt ? eventText(userPrompt) : '',
-    startedAt: started.timestamp,
+    ...(started ? { startedAt: started.timestamp } : {}),
   };
 }
 
@@ -383,6 +389,16 @@ function loadWorkspaceHistory(): string[] {
 function rememberWorkspace(path: string) {
   workspaceHistory.value = [path, ...workspaceHistory.value.filter((item) => item !== path)].slice(0, workspaceHistoryLimit);
   localStorage.setItem(workspaceHistoryKey, JSON.stringify(workspaceHistory.value));
+}
+
+function toggleWorkspaceHistory() {
+  if (busy.value || workspaceHistory.value.length === 0) return;
+  workspaceHistoryOpen.value = !workspaceHistoryOpen.value;
+}
+
+function selectWorkspaceHistory(path: string) {
+  workspace.value = path;
+  workspaceHistoryOpen.value = false;
 }
 
 function isUnreadEvent(event: SessionEvent): boolean {
@@ -733,6 +749,7 @@ async function decideApproval(decision: ApprovalDecision) {
 async function createSession() {
   const trimmedWorkspace = workspace.value.trim();
   if (!trimmedWorkspace) return;
+  workspaceHistoryOpen.value = false;
   await act(async () => {
     const created = await api.createSession({ agent: newSessionProvider.value, workspace: trimmedWorkspace });
     rememberWorkspace(trimmedWorkspace);
@@ -1091,11 +1108,14 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           </label>
         </div>
         <label for="workspace">Workspace path</label>
-        <div class="field-row">
-          <input id="workspace" v-model="workspace" list="workspace-history" autocomplete="off" placeholder="C:/path/to/workspace" :disabled="busy" />
-          <datalist id="workspace-history">
-            <option v-for="path in workspaceHistory" :key="path" :value="path" />
-          </datalist>
+        <div class="field-row workspace-field-row">
+          <div class="workspace-combobox">
+            <input id="workspace" v-model="workspace" autocomplete="off" placeholder="C:/path/to/workspace" :disabled="busy" @keydown.esc="workspaceHistoryOpen = false" />
+            <button type="button" class="workspace-history-toggle" :disabled="busy || workspaceHistory.length === 0" aria-label="Workspace pathの履歴を表示" :aria-expanded="workspaceHistoryOpen" aria-controls="workspace-history" @click="toggleWorkspaceHistory">▼</button>
+            <ul v-if="workspaceHistoryOpen" id="workspace-history" class="workspace-history" role="listbox">
+              <li v-for="path in workspaceHistory" :key="path" role="option" :title="path" @mousedown.prevent="selectWorkspaceHistory(path)">{{ path }}</li>
+            </ul>
+          </div>
           <button type="submit" class="icon-button" :disabled="busy || !workspace.trim()" aria-label="Sessionを作成">＋</button>
         </div>
       </form>
@@ -1110,6 +1130,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
         >
           <span class="session-title">{{ session.firstPrompt ?? shortPath(session.workspace) }}</span>
           <span v-if="session.activeRunStatus === 'running'" class="running-mark" title="実行中">実行中</span>
+          <span v-else-if="session.activeRunStatus === 'queued'" class="running-mark" title="待機中">待機中</span>
           <span v-if="unreadSessionIDs.has(session.id)" class="unread-mark" title="未読">未読</span>
           <span class="session-meta">
             <span :class="['mini-dot', session.status]" />{{ directoryName(session.workspace) }} · {{ session.agent }}
@@ -1178,7 +1199,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           <div v-else class="event-body">{{ eventText(event) }}</div>
           <time>{{ new Date(event.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>
         </article>
-         <div v-if="activeRun" class="thinking"><span /><span /><span /> {{ providerLabel }} is working</div>
+         <div v-if="activeRun" class="thinking"><span /><span /><span /> {{ activeRun.status === 'queued' ? 'リポジトリの空きを待っています' : `${providerLabel} is working` }}</div>
        </section>
 
        <section v-else-if="selectedRunEntry" class="run-detail" aria-live="polite">

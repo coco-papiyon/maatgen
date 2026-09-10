@@ -440,18 +440,25 @@ describe('App with MockAgentApi', () => {
     await mounted.wrapper.find('#workspace').setValue('C:/repo/new-project');
     await mounted.wrapper.find('form.new-session').trigger('submit');
     await flushPromises();
-    const options = mounted.wrapper.findAll('#workspace-history option').map((option) => option.attributes('value'));
+    await mounted.wrapper.find('.workspace-history-toggle').trigger('click');
+    const options = mounted.wrapper.findAll('#workspace-history li').map((option) => option.text());
     expect(options).toContain('C:/repo/new-project');
     expect(JSON.parse(localStorage.getItem('maatgen.workspaceHistory') ?? '[]')).toContain('C:/repo/new-project');
   });
 
   it('offers previously used Repository paths from history while still allowing free text entry', async () => {
-    localStorage.setItem('maatgen.workspaceHistory', JSON.stringify(['C:/repo/previous-project']));
+    localStorage.setItem('maatgen.workspaceHistory', JSON.stringify(['C:/repo/previous-project', 'D:/work/another-project']));
     const mounted = await mountApp();
-    const options = mounted.wrapper.findAll('#workspace-history option').map((option) => option.attributes('value'));
-    expect(options).toEqual(['C:/repo/previous-project']);
     const input = mounted.wrapper.find('#workspace');
-    expect(input.attributes('list')).toBe('workspace-history');
+    await input.setValue('previous');
+    await mounted.wrapper.find('.workspace-history-toggle').trigger('click');
+    const options = mounted.wrapper.findAll('#workspace-history li').map((option) => option.text());
+    expect(options).toEqual(['C:/repo/previous-project', 'D:/work/another-project']);
+    const secondOption = mounted.wrapper.findAll('#workspace-history li')[1];
+    expect(secondOption).toBeDefined();
+    await secondOption!.trigger('mousedown');
+    expect((input.element as HTMLInputElement).value).toBe('D:/work/another-project');
+    expect(mounted.wrapper.find('#workspace-history').exists()).toBe(false);
     await input.setValue('C:/repo/typed-freely');
     expect((input.element as HTMLInputElement).value).toBe('C:/repo/typed-freely');
   });

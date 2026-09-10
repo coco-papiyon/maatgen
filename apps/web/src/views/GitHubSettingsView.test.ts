@@ -317,6 +317,37 @@ describe('GitHubSettingsView', () => {
     expect((wrapper.get('.github-rule-form textarea').element as HTMLTextAreaElement).value).toBe('{{.Title');
   });
 
+  it('tests a rule condition against live GitHub data without saving it or creating a job', async () => {
+    const { wrapper, api } = await mountSettings();
+    const rulesBefore = await api.listGitHubTriggerRules();
+    const eventsBefore = await api.listGitHubMonitorEvents();
+    await wrapper.get('.github-card-header button').trigger('click');
+
+    await wrapper.get('.github-rule-form input[placeholder="bug, needs-design"]').setValue('bug');
+    const testButton = wrapper.findAll('.github-form-actions button').find((button) => button.text() === 'この条件で確認')!;
+    await testButton.trigger('click');
+    await flushPromises();
+
+    const result = wrapper.get('.github-rule-test-result');
+    expect(result.text()).toContain('1件が条件に一致しました');
+    expect(result.get('.github-rule-test-items').text()).toContain('ログイン画面のバリデーションを強化する');
+    expect(await api.listGitHubTriggerRules()).toHaveLength(rulesBefore.length);
+    expect(await api.listGitHubMonitorEvents()).toHaveLength(eventsBefore.length);
+  });
+
+  it('clears the rule test result when reopening the dialog for a different rule', async () => {
+    const { wrapper } = await mountSettings();
+    await wrapper.get('.github-card-header button').trigger('click');
+    await wrapper.get('.github-rule-form input[placeholder="bug, needs-design"]').setValue('bug');
+    await wrapper.findAll('.github-form-actions button').find((button) => button.text() === 'この条件で確認')!.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.github-rule-test-result').exists()).toBe(true);
+
+    await wrapper.get('.github-modal-header button').trigger('click');
+    await wrapper.get('.github-card-header button').trigger('click');
+    expect(wrapper.find('.github-rule-test-result').exists()).toBe(false);
+  });
+
   it('deletes a repository monitor after confirmation', async () => {
     const originalConfirm = window.confirm;
     window.confirm = () => true;

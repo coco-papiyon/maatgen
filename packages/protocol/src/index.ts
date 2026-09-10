@@ -313,6 +313,24 @@ export interface GitHubTriggerRulePromptPreviewResponse {
   pullRequest: string;
 }
 
+// GitHubTriggerRuleTestRequest/Response dry-run test a rule's condition
+// against live GitHub data, without creating a Job: "would this rule
+// currently find anything?" Only the condition fields are sent, so this
+// works the same for a not-yet-saved draft rule and an existing one.
+export interface GitHubTriggerRuleTestRequest {
+  workspace: string;
+  eventKinds: GitHubItemKind[];
+  filters: GitHubMonitorFilters;
+}
+
+export interface GitHubTriggerRuleTestResponse {
+  matchedItems: GitHubItem[];
+  issuesProcessed: number;
+  pullRequestsProcessed: number;
+  fetchedAt: string;
+  projectsUnavailable?: boolean;
+}
+
 export interface GitHubTriggerRuleListResponse {
   rules: GitHubTriggerRule[];
 }

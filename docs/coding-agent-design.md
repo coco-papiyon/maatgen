@@ -418,7 +418,7 @@ export interface AgentSession {
 }
 ```
 
-Sessionの`status`は会話のライフサイクルだけを表す。実行状態はRunに属し、Session一覧では現在の非終端Runを`activeRunStatus`として参照する。Web版とVS Code版はこの値を定期更新し、`running`のときだけ一覧に実行中マークを表示する。
+Sessionの`status`は会話のライフサイクルだけを表す。実行状態はRunに属し、Session一覧では現在の非終端Runを`activeRunStatus`として参照する。同一リポジトリの別SessionでRunが実行中の場合、新しいRunはリポジトリ単位のFIFOキューに入り、先行Runの終端後に自動開始する。同じSessionへの重複投入は許可しない。Web版とVS Code版は`queued`を待機中、`running`を実行中として表示する。
 
 ---
 

@@ -23,6 +23,7 @@ type fakeGitHubMonitorController struct {
 	items      protocol.GitHubItemListResponse
 	item       protocol.GitHubItem
 	preview    protocol.GitHubTriggerRulePromptPreviewResponse
+	testResult protocol.GitHubTriggerRuleTestResponse
 	err        error
 
 	lastWorkspace        string
@@ -31,6 +32,7 @@ type fakeGitHubMonitorController struct {
 	lastRuleRequest      protocol.GitHubTriggerRuleRequest
 	lastRuleID           string
 	lastPreviewRequest   protocol.GitHubTriggerRulePromptPreviewRequest
+	lastTestRequest      protocol.GitHubTriggerRuleTestRequest
 	lastReplayEventID    string
 	lastSkipEventID      string
 	lastCloseEventID     string
@@ -91,6 +93,10 @@ func (f *fakeGitHubMonitorController) DeleteRule(ctx context.Context, id string)
 func (f *fakeGitHubMonitorController) PreviewRulePrompt(ctx context.Context, request protocol.GitHubTriggerRulePromptPreviewRequest) (protocol.GitHubTriggerRulePromptPreviewResponse, error) {
 	f.lastPreviewRequest = request
 	return f.preview, f.err
+}
+func (f *fakeGitHubMonitorController) TestRule(ctx context.Context, request protocol.GitHubTriggerRuleTestRequest) (protocol.GitHubTriggerRuleTestResponse, error) {
+	f.lastTestRequest = request
+	return f.testResult, f.err
 }
 func (f *fakeGitHubMonitorController) ListEvents(ctx context.Context, workspace string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error) {
 	f.lastWorkspace = workspace
@@ -332,6 +338,36 @@ func TestGitHubTriggerRulePromptPreviewAPI(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if response.Issue != "Design Issueタイトル" || response.PullRequest != "Design Issueタイトル" {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestGitHubTriggerRuleTestAPI(t *testing.T) {
+	controller := &fakeGitHubMonitorController{
+		testResult: protocol.GitHubTriggerRuleTestResponse{
+			MatchedItems:    []protocol.GitHubItem{{Kind: protocol.GitHubItemIssue, Number: 1, Title: "bug: widget broken"}},
+			IssuesProcessed: 3,
+		},
+	}
+	config := testConfig()
+	config.GitHubMonitorController = controller
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, jsonRequest("POST", "/api/v1/github/rules/test", `{
+		"workspace":"/repo","eventKinds":["issue"],"filters":{"labels":["bug"]}
+	}`))
+	if recorder.Code != 200 {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if controller.lastTestRequest.Workspace != "/repo" || len(controller.lastTestRequest.Filters.Labels) != 1 {
+		t.Fatalf("lastTestRequest = %#v", controller.lastTestRequest)
+	}
+	var response protocol.GitHubTriggerRuleTestResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(response.MatchedItems) != 1 || response.MatchedItems[0].Number != 1 || response.IssuesProcessed != 3 {
 		t.Fatalf("response = %#v", response)
 	}
 }
