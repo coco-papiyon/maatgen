@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -44,23 +43,19 @@ func (*Adapter) Name() protocol.AgentName { return protocol.AgentCodex }
 
 func (*Adapter) ParseLine(line string) agent.ParsedLine { return ParseLine(line) }
 
+// Check determines availability by actually attempting to run "<binaryName>
+// --version" (through the same Runner Run uses to launch the CLI for real),
+// rather than pre-checking with exec.LookPath/os.Stat first. Passing the bare
+// binaryName lets exec.Command resolve it at process-start time — the same
+// resolution a shell or a later Run call would perform — so this reports a
+// provider unavailable only when actually invoking it fails, not when a
+// separate pre-check (which can diverge from what starting the process
+// actually does, e.g. for reparse points/symlinked installs) merely looks
+// unusual.
 func (a *Adapter) Check(ctx context.Context) (agent.Info, error) {
-	path, err := exec.LookPath(a.binaryName)
-	if err != nil {
-		return agent.Info{}, fmt.Errorf("%w: executable was not found", ErrUnavailable)
-	}
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return agent.Info{}, fmt.Errorf("%w: resolve executable: %v", ErrUnavailable, err)
-	}
-	file, err := os.Stat(path)
-	if err != nil || file.IsDir() {
-		return agent.Info{}, fmt.Errorf("%w: executable path is invalid", ErrUnavailable)
-	}
-
 	var versionLines []string
 	result, err := a.runner.Run(ctx, process.Spec{
-		Path:    path,
+		Path:    a.binaryName,
 		Args:    append(append([]string{}, a.prefixArgs...), "--version"),
 		Timeout: 5 * time.Second,
 	}, func(output process.Output) error {
@@ -76,7 +71,7 @@ func (a *Adapter) Check(ctx context.Context) (agent.Info, error) {
 	if result.ExitCode != 0 || version == "" {
 		return agent.Info{}, fmt.Errorf("%w: version check exited with code %d", ErrUnavailable, result.ExitCode)
 	}
-	info := agent.Info{Name: protocol.AgentCodex, Path: path, Version: version}
+	info := agent.Info{Name: protocol.AgentCodex, Path: a.binaryName, Version: version}
 	a.mu.Lock()
 	a.info = info
 	a.mu.Unlock()
