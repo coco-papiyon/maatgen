@@ -307,6 +307,92 @@ func TestListSessionsIncludesActiveRunStatus(t *testing.T) {
 	}
 }
 
+func TestFailInterruptedRuns(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	base := time.Date(2026, 8, 15, 1, 0, 0, 0, time.UTC)
+	nonTerminal := []protocol.RunStatus{
+		protocol.RunQueued, protocol.RunStarting, protocol.RunRunning, protocol.RunWaitingForApproval,
+	}
+	for index, status := range nonTerminal {
+		session := protocol.AgentSession{
+			ID: fmt.Sprintf("session-%d", index), Agent: protocol.AgentCodex, Workspace: "C:/workspace",
+			Status: protocol.SessionActive, CreatedAt: base.Add(time.Duration(index) * time.Minute),
+		}
+		if err := store.CreateSession(ctx, session); err != nil {
+			t.Fatalf("create session for %s: %v", status, err)
+		}
+		if err := store.CreateRun(ctx, protocol.AgentRun{
+			ID: fmt.Sprintf("run-%d", index), SessionID: session.ID, Status: status, Prompt: "work",
+		}); err != nil {
+			t.Fatalf("create %s run: %v", status, err)
+		}
+	}
+	terminalSession := protocol.AgentSession{
+		ID: "session-terminal", Agent: protocol.AgentCodex, Workspace: "C:/workspace",
+		Status: protocol.SessionActive, CreatedAt: base,
+	}
+	if err := store.CreateSession(ctx, terminalSession); err != nil {
+		t.Fatalf("create terminal session: %v", err)
+	}
+	if err := store.CreateRun(ctx, protocol.AgentRun{
+		ID: "run-terminal", SessionID: terminalSession.ID, Status: protocol.RunCompleted, Prompt: "work",
+	}); err != nil {
+		t.Fatalf("create terminal run: %v", err)
+	}
+
+	finishedAt := base.Add(time.Hour)
+	interrupted, err := store.FailInterruptedRuns(ctx, finishedAt)
+	if err != nil {
+		t.Fatalf("fail interrupted runs: %v", err)
+	}
+	if len(interrupted) != len(nonTerminal) {
+		t.Fatalf("interrupted runs = %#v, want %d entries", interrupted, len(nonTerminal))
+	}
+	seen := make(map[string]string, len(interrupted))
+	for _, run := range interrupted {
+		seen[run.ID] = run.SessionID
+	}
+	for index := range nonTerminal {
+		runID, sessionID := fmt.Sprintf("run-%d", index), fmt.Sprintf("session-%d", index)
+		if seen[runID] != sessionID {
+			t.Fatalf("interrupted runs missing %s -> %s: %#v", runID, sessionID, interrupted)
+		}
+		gotRun, err := store.GetRun(ctx, runID)
+		if err != nil {
+			t.Fatalf("get run %s: %v", runID, err)
+		}
+		if gotRun.Status != protocol.RunFailed {
+			t.Fatalf("run %s status = %q, want failed", runID, gotRun.Status)
+		}
+		if gotRun.FinishedAt == nil || !gotRun.FinishedAt.Equal(finishedAt) {
+			t.Fatalf("run %s finished at = %v, want %v", runID, gotRun.FinishedAt, finishedAt)
+		}
+	}
+
+	gotTerminalRun, err := store.GetRun(ctx, "run-terminal")
+	if err != nil {
+		t.Fatalf("get terminal run: %v", err)
+	}
+	if gotTerminalRun.Status != protocol.RunCompleted {
+		t.Fatalf("terminal run status = %q, want completed (untouched)", gotTerminalRun.Status)
+	}
+
+	// A second call finds nothing left to interrupt.
+	again, err := store.FailInterruptedRuns(ctx, finishedAt.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("fail interrupted runs (second call): %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("second call interrupted = %#v, want none", again)
+	}
+}
+
 func TestMigrationsAreIdempotent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "manager.db")

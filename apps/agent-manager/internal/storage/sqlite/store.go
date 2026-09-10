@@ -112,13 +112,57 @@ func (s *Store) DeleteEmptySessions(ctx context.Context) (int64, error) {
 	return affected, nil
 }
 
-func (s *Store) FailInterruptedRuns(ctx context.Context, finishedAt time.Time) (int64, error) {
-	result, err := s.db.ExecContext(ctx, `UPDATE runs SET status = 'failed', finished_at = COALESCE(finished_at, ?)
-		WHERE status IN ('queued', 'starting', 'running', 'waiting_for_approval')`, formatTime(finishedAt))
+// InterruptedRun identifies a Run that FailInterruptedRuns moved to the
+// failed status.
+type InterruptedRun struct {
+	ID        string
+	SessionID string
+}
+
+// FailInterruptedRuns marks every Run left in a non-terminal status (queued,
+// starting, running, waiting_for_approval) as failed. Those statuses are
+// only ever set by the process that started the Run, so finding one at
+// startup means the previous process exited (crash or restart) before
+// recording a terminal state for it. It returns the affected runs so the
+// caller can also append a run_failed event to each one's Session: the Web
+// UI reconstructs whether a Session's composer should stay disabled purely
+// from event history (see restoreActiveRun in App.vue), so the status flip
+// alone would leave a stale "running" Session with no terminal event ever
+// stuck as unusable after a restart.
+func (s *Store) FailInterruptedRuns(ctx context.Context, finishedAt time.Time) ([]InterruptedRun, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("fail interrupted runs: %w", err)
+		return nil, fmt.Errorf("fail interrupted runs: begin: %w", err)
 	}
-	return result.RowsAffected()
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `SELECT id, session_id FROM runs
+		WHERE status IN ('queued', 'starting', 'running', 'waiting_for_approval')`)
+	if err != nil {
+		return nil, fmt.Errorf("list interrupted runs: %w", err)
+	}
+	var interrupted []InterruptedRun
+	for rows.Next() {
+		var run InterruptedRun
+		if err := rows.Scan(&run.ID, &run.SessionID); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan interrupted run: %w", err)
+		}
+		interrupted = append(interrupted, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list interrupted runs: %w", err)
+	}
+	if len(interrupted) > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'failed', finished_at = COALESCE(finished_at, ?)
+			WHERE status IN ('queued', 'starting', 'running', 'waiting_for_approval')`, formatTime(finishedAt)); err != nil {
+			return nil, fmt.Errorf("fail interrupted runs: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("fail interrupted runs: commit: %w", err)
+	}
+	return interrupted, nil
 }
 
 func (s *Store) migrate(ctx context.Context) error {

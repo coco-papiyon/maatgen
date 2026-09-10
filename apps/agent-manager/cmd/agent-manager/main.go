@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -142,8 +145,9 @@ func run() error {
 	}
 	if interrupted, interruptErr := store.FailInterruptedRuns(context.Background(), now); interruptErr != nil {
 		return fmt.Errorf("fail interrupted runs: %w", interruptErr)
-	} else if interrupted > 0 {
-		slog.Info("failed interrupted runs", "count", interrupted)
+	} else if len(interrupted) > 0 {
+		slog.Info("failed interrupted runs", "count", len(interrupted))
+		recordInterruptedRunFailures(context.Background(), store, interrupted, now)
 	}
 	defer store.Close()
 	pricingModels := make(map[string][]string)
@@ -423,6 +427,44 @@ func run() error {
 		}
 		return err
 	}
+}
+
+// recordInterruptedRunFailures appends a run_failed event for each Run
+// FailInterruptedRuns just moved to the failed status. The DB status update
+// alone is not enough: the Web UI reconstructs whether a Session's composer
+// should stay disabled purely from event history (restoreActiveRun in
+// App.vue looks for a run_completed/run_failed/run_cancelled event matching
+// the Run, not the Run's stored status), so without a matching event here a
+// Session interrupted mid-Run would keep showing as busy — and its chat
+// input disabled — forever after a restart.
+func recordInterruptedRunFailures(ctx context.Context, store *storesqlite.Store, runs []storesqlite.InterruptedRun, at time.Time) {
+	data, _ := json.Marshal(map[string]any{
+		"message": "マネージャーの再起動によりRunが中断されました",
+		"code":    "interrupted",
+	})
+	for _, run := range runs {
+		id, err := generateEventID()
+		if err != nil {
+			slog.Warn("failed to generate event id for interrupted run", "run", run.ID, "error", err)
+			continue
+		}
+		event := protocol.SessionEvent{
+			ID: id, SessionID: run.SessionID, RunID: &run.ID, Timestamp: at,
+			SchemaVersion: protocol.SchemaVersion, Source: protocol.EventSourceManager,
+			Type: protocol.EventTypeRunFailed, Data: data,
+		}
+		if _, err := store.AppendEvent(ctx, event); err != nil {
+			slog.Warn("failed to record run_failed event for interrupted run", "run", run.ID, "error", err)
+		}
+	}
+}
+
+func generateEventID() (string, error) {
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return "", err
+	}
+	return "event_" + hex.EncodeToString(random), nil
 }
 
 // closeExpiredSessions closes active sessions created more than maxAge ago.

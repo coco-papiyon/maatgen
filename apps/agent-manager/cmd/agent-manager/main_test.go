@@ -136,6 +136,59 @@ func TestCloseExpiredSessionsSkipsSessionsWithActiveRuns(t *testing.T) {
 	}
 }
 
+func TestRecordInterruptedRunFailuresAppendsRunFailedEvent(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	session := protocol.AgentSession{ID: "session-interrupted", Agent: protocol.AgentClaude, Workspace: "C:/repo", Status: protocol.SessionActive, CreatedAt: now.Add(-time.Hour)}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.CreateRun(ctx, protocol.AgentRun{ID: "run-interrupted", SessionID: session.ID, Status: protocol.RunRunning, Prompt: "work"}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	interrupted, err := store.FailInterruptedRuns(ctx, now)
+	if err != nil {
+		t.Fatalf("fail interrupted runs: %v", err)
+	}
+	if len(interrupted) != 1 {
+		t.Fatalf("interrupted = %#v, want 1 entry", interrupted)
+	}
+
+	recordInterruptedRunFailures(ctx, store, interrupted, now)
+
+	events, err := store.ListEventsAfter(ctx, session.ID, 0, 100)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	var found *protocol.SessionEvent
+	for i := range events {
+		if events[i].Type == protocol.EventTypeRunFailed {
+			found = &events[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("events = %#v, want a run_failed event", events)
+	}
+	if found.RunID == nil || *found.RunID != "run-interrupted" {
+		t.Fatalf("run_failed event run id = %v, want run-interrupted", found.RunID)
+	}
+	if found.Source != protocol.EventSourceManager {
+		t.Fatalf("run_failed event source = %q, want manager", found.Source)
+	}
+
+	// The session's composer-blocking status is now gone from the DB too.
+	sessions, err := store.ListSessions(ctx, 10, nil, "")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].ActiveRunStatus != nil {
+		t.Fatalf("sessions = %#v, want a single session with no active run status", sessions)
+	}
+}
+
 func TestCloseExpiredSessionsSkipsSessionsCreatedFromAJob(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
