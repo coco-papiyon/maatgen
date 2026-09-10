@@ -364,6 +364,102 @@ describe('App with MockAgentApi', () => {
     expect(timeline.scrollTop).toBe(1234);
   });
 
+  it("shows the raw/copy toolbar only on a Run's final assistant reply, not on an intermediate one", async () => {
+    const api = new MockAgentApi();
+    let pushEvent: ((event: SessionEvent) => void) | undefined;
+    wrapper = mount(App, {
+      props: {
+        agentApi: api,
+        eventStreamFactory: (options) => {
+          pushEvent = options.onEvent;
+          return { start: () => options.onState('connected'), stop: () => options.onState('disconnected') };
+        },
+      },
+    });
+    await flushPromises();
+    const base = { sessionId: 'mock-success', timestamp: new Date().toISOString(), schemaVersion: 2 as const, source: 'manager' as const, runId: 'run-x' };
+    pushEvent!({ ...base, id: 'reply-1', sequence: 10, type: 'assistant_message', data: { text: '途中経過です。' } });
+    pushEvent!({ ...base, id: 'reply-2', sequence: 11, type: 'assistant_message', data: { text: '**最終回答**です。' } });
+    await flushPromises();
+
+    const articles = wrapper.findAll('.event.assistant');
+    const intermediate = articles.find((article) => article.text().includes('途中経過'))!;
+    const final = articles.find((article) => article.text().includes('最終回答'))!;
+    expect(intermediate.find('.event-actions').exists()).toBe(false);
+    expect(final.find('.event-actions').exists()).toBe(true);
+    expect(final.findAll('.event-action-button').map((button) => button.text())).toEqual(['Raw', 'Copy']);
+  });
+
+  it('toggles a final assistant reply between rendered markdown and raw source', async () => {
+    const api = new MockAgentApi();
+    let pushEvent: ((event: SessionEvent) => void) | undefined;
+    wrapper = mount(App, {
+      props: {
+        agentApi: api,
+        eventStreamFactory: (options) => {
+          pushEvent = options.onEvent;
+          return { start: () => options.onState('connected'), stop: () => options.onState('disconnected') };
+        },
+      },
+    });
+    await flushPromises();
+    pushEvent!({
+      id: 'reply-final', sessionId: 'mock-success', sequence: 10, runId: 'run-x',
+      timestamp: new Date().toISOString(), schemaVersion: 2, source: 'manager',
+      type: 'assistant_message', data: { text: '**強調**テキストです。' },
+    });
+    await flushPromises();
+
+    const article = wrapper.findAll('.event.assistant').find((item) => item.text().includes('強調テキストです'))!;
+    expect(article.find('.markdown-body').exists()).toBe(true);
+    expect(article.find('.event-body-raw').exists()).toBe(false);
+
+    await article.get('.event-action-button').trigger('click');
+    expect(article.find('.markdown-body').exists()).toBe(false);
+    expect(article.get('.event-body-raw').text()).toBe('**強調**テキストです。');
+    expect(article.get('.event-action-button').text()).toBe('Markdown');
+
+    await article.get('.event-action-button').trigger('click');
+    expect(article.find('.markdown-body').exists()).toBe(true);
+    expect(article.find('.event-body-raw').exists()).toBe(false);
+  });
+
+  it('copies the raw text of a final assistant reply to the clipboard', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const api = new MockAgentApi();
+    let pushEvent: ((event: SessionEvent) => void) | undefined;
+    wrapper = mount(App, {
+      props: {
+        agentApi: api,
+        eventStreamFactory: (options) => {
+          pushEvent = options.onEvent;
+          return { start: () => options.onState('connected'), stop: () => options.onState('disconnected') };
+        },
+      },
+    });
+    await flushPromises();
+    pushEvent!({
+      id: 'reply-final', sessionId: 'mock-success', sequence: 10, runId: 'run-x',
+      timestamp: new Date().toISOString(), schemaVersion: 2, source: 'manager',
+      type: 'assistant_message', data: { text: 'コピー対象のテキスト' },
+    });
+    await flushPromises();
+
+    const article = wrapper.findAll('.event.assistant').find((item) => item.text().includes('コピー対象'))!;
+    const copyButton = article.findAll('.event-action-button')[1]!;
+    await copyButton.trigger('click');
+    await flushPromises();
+
+    expect(writeText).toHaveBeenCalledWith('コピー対象のテキスト');
+    expect(copyButton.text()).toBe('Copied');
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+    expect(copyButton.text()).toBe('Copy');
+  });
+
   it('hides command and file-change system messages by default and shows them when configured', async () => {
     const mounted = await mountApp();
     expect(mounted.wrapper.find('.timeline').text()).not.toContain('npm test');

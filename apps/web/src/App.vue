@@ -57,6 +57,13 @@ const sessionStatusFilter = ref<SessionStatusFilter>(
 );
 const selected = ref<AgentSession>();
 const events = ref<SessionEvent[]>([]);
+// Raw/copy toolbar (only shown on a Run's final assistant reply, never on an
+// intermediate provider message): rawViewEventIds tracks which messages are
+// currently showing their raw markdown source instead of the rendered HTML,
+// and copiedEventId briefly labels whichever Copy button was just clicked.
+const rawViewEventIds = ref<Set<string>>(new Set());
+const copiedEventId = ref('');
+let copiedEventTimer: number | undefined;
 const changes = ref<ChangeSet>(emptyChangeSet(''));
 const usage = ref<SessionUsage>(emptySessionUsage(''));
 const providerUsage = ref<ProviderUsage>();
@@ -120,6 +127,22 @@ const lastSequence = computed(() => events.value.at(-1)?.sequence ?? 0);
 const visibleEvents = computed(() => events.value
   .filter((event) => showSystemMessages.value || !['command_started', 'command_completed', 'file_change_reported'].includes(event.type))
   .filter((event) => hasVisibleEventText(event)));
+// The last assistant_message per Run is that Run's final reply to the
+// instruction; intermediate assistant_message/reasoning_summary events within
+// the same Run never get the raw/copy toolbar. Iterating in order and letting
+// each later assistant_message overwrite the map entry for its group leaves
+// only the last one per group by the time the loop finishes. An event with no
+// runId (should not happen for a real Run-generated message, but keeps this
+// safe if it ever does) falls back to grouping by its own id, so it is
+// trivially "final" rather than silently losing the toolbar.
+const finalAssistantMessageEventIds = computed(() => {
+  const lastByRun = new Map<string, string>();
+  for (const event of visibleEvents.value) {
+    if (event.type !== 'assistant_message') continue;
+    lastByRun.set(event.runId ?? event.id, event.id);
+  }
+  return new Set(lastByRun.values());
+});
 const isActive = computed(() => selected.value?.status === 'active');
 const isClosed = computed(() => selected.value?.status === 'closed');
 const isDirectoryWorkspace = computed(() => selected.value?.workspaceKind === 'directory');
@@ -355,6 +378,30 @@ function eventHtml(event: SessionEvent): string {
     return renderMarkdown(typeof data?.text === 'string' ? data.text : '');
   }
   return '';
+}
+
+function isFinalAssistantMessage(event: SessionEvent): boolean {
+  return finalAssistantMessageEventIds.value.has(event.id);
+}
+
+function toggleRawView(eventId: string) {
+  const next = new Set(rawViewEventIds.value);
+  if (next.has(eventId)) next.delete(eventId);
+  else next.add(eventId);
+  rawViewEventIds.value = next;
+}
+
+async function copyEventText(event: SessionEvent) {
+  try {
+    await navigator.clipboard.writeText(eventText(event));
+    copiedEventId.value = event.id;
+    window.clearTimeout(copiedEventTimer);
+    copiedEventTimer = window.setTimeout(() => {
+      if (copiedEventId.value === event.id) copiedEventId.value = '';
+    }, 1500);
+  } catch (cause) {
+    handleFailure(cause);
+  }
 }
 
 function shortPath(path: string): string {
@@ -613,6 +660,8 @@ async function selectSession(session: AgentSession) {
   reasoningEffort.value = '';
   autoApprove.value = false;
   events.value = [];
+  rawViewEventIds.value = new Set();
+  copiedEventId.value = '';
   changes.value = emptyChangeSet(session.id);
   usage.value = emptySessionUsage(session.id);
   providerUsage.value = undefined;
@@ -1195,8 +1244,21 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
         </div>
         <article v-for="event in visibleEvents" :key="event.id" class="event" :class="eventKind(event)">
           <div class="event-label">{{ eventKind(event) === 'assistant' ? providerLabel.toUpperCase() : eventKind(event).toUpperCase() }}</div>
-          <div v-if="event.type === 'assistant_message' || event.type === 'reasoning_summary'" class="event-body markdown-body" v-html="eventHtml(event)" />
+          <div
+            v-if="(event.type === 'assistant_message' || event.type === 'reasoning_summary') && !rawViewEventIds.has(event.id)"
+            class="event-body markdown-body"
+            v-html="eventHtml(event)"
+          />
+          <div v-else-if="event.type === 'assistant_message' || event.type === 'reasoning_summary'" class="event-body event-body-raw">{{ eventText(event) }}</div>
           <div v-else class="event-body">{{ eventText(event) }}</div>
+          <div v-if="event.type === 'assistant_message' && isFinalAssistantMessage(event)" class="event-actions">
+            <button type="button" class="event-action-button" @click="toggleRawView(event.id)">
+              {{ rawViewEventIds.has(event.id) ? 'Markdown' : 'Raw' }}
+            </button>
+            <button type="button" class="event-action-button" :class="{ copied: copiedEventId === event.id }" @click="copyEventText(event)">
+              {{ copiedEventId === event.id ? 'Copied' : 'Copy' }}
+            </button>
+          </div>
           <time>{{ new Date(event.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) }}</time>
         </article>
          <div v-if="activeRun" class="thinking"><span /><span /><span /> {{ activeRun.status === 'queued' ? 'リポジトリの空きを待っています' : `${providerLabel} is working` }}</div>
