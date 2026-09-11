@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@maatgen/protocol';
 import type { AgentApi } from './api';
+import { getApiBasePath } from './api';
 
 export type EventStreamState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -115,7 +116,10 @@ export class SessionEventStream {
 
 export function webSocketURL(sessionId: string, afterSequence: number, location?: Pick<Location, 'href'>): string {
   const source = location ?? window.location;
-  const url = new URL('/ws', source.href);
+  // getApiBasePath() is '' for the local node and "/api/nodes/{nodeId}" for
+  // a connected lower node (ADR-009 Decision 5); the reverse proxy tunnels
+  // this /ws upgrade exactly like any other proxied request (Decision 2).
+  const url = new URL(getApiBasePath() + '/ws', source.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('sessionId', sessionId);
   url.searchParams.set('afterSequence', String(afterSequence));

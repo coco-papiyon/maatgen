@@ -32,6 +32,8 @@ import type {
   UsageSummary,
   UsageModelListResponse,
   UsageProviderListResponse,
+  RelayNode,
+  RelayNodeListResponse,
 } from '@maatgen/protocol';
 
 export type UsageGranularity = 'day' | 'week' | 'month';
@@ -146,6 +148,15 @@ export interface AgentApi {
   getGitHubIssue(workspace: string, number: number): Promise<GitHubItem>;
   listGitHubPullRequests(workspace: string, query?: GitHubItemQuery): Promise<GitHubItemListResponse>;
   getGitHubPullRequest(workspace: string, number: number): Promise<GitHubItem>;
+
+  // Node relay (ADR-009). Always reachable at the top-level base path
+  // (never prefixed by setApiBasePath), since node management itself is an
+  // "upper node" concept: it lists/creates/deletes nodes relative to
+  // whichever Agent Manager the page is loaded from, regardless of which
+  // node's Sessions the operator is currently viewing.
+  listNodes(): Promise<RelayNode[]>;
+  createNode(name: string): Promise<RelayNode>;
+  deleteNode(id: string): Promise<void>;
 }
 
 interface ApiErrorEnvelope {
@@ -159,8 +170,25 @@ export class AgentApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+// basePath scopes every AgentApi call to one node (ADR-009 Decision 5): ''
+// for the upper node's own ("local") Sessions, or "/api/nodes/{nodeId}" to
+// reach a connected lower node through the upper node's reverse proxy. The
+// Web UI's node selector is the only caller of setApiBasePath; every other
+// request<T> call site is unaware a remote node is even involved, which is
+// the point of proxying the exact same API (ADR-009 Decision 2) instead of
+// inventing a parallel one.
+let basePath = '';
+
+export function setApiBasePath(path: string): void {
+  basePath = path;
+}
+
+export function getApiBasePath(): string {
+  return basePath;
+}
+
+async function requestAt<T>(prefix: string, path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(prefix + path, {
     ...init,
     headers: {
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
@@ -183,6 +211,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return requestAt<T>(basePath, path, init);
+}
+
+// requestAtRoot bypasses the active node's basePath. Node management itself
+// (list/create/delete) is always a call to the upper node the page was
+// loaded from, never proxied through a node prefix, regardless of which
+// node's Sessions are currently selected.
+function requestAtRoot<T>(path: string, init?: RequestInit): Promise<T> {
+  return requestAt<T>('', path, init);
 }
 
 export const httpAgentApi: AgentApi = {
@@ -375,6 +415,17 @@ export const httpAgentApi: AgentApi = {
   },
   getGitHubPullRequest(workspace, number) {
     return request(`/api/v1/github/pulls/${number}?workspace=${encodeURIComponent(workspace)}`);
+  },
+
+  async listNodes() {
+    const response = await requestAtRoot<RelayNodeListResponse>('/api/nodes');
+    return response.nodes;
+  },
+  createNode(name) {
+    return requestAtRoot('/api/nodes', { method: 'POST', body: JSON.stringify({ name }) });
+  },
+  deleteNode(id) {
+    return requestAtRoot(`/api/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 };
 

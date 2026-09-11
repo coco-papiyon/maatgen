@@ -42,6 +42,7 @@ type Config struct {
 	ApprovalController      ApprovalController
 	WorkspaceReader         WorkspaceReader
 	GitHubMonitorController GitHubMonitorController
+	RelayController         RelayController
 	// StaticFS serves the built Web UI. Requests outside /api and /ws fall
 	// back to index.html so client-side routes resolve on a fresh load.
 	// Static serving is disabled when nil.
@@ -558,6 +559,7 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 	}
 
 	registerGitHubMonitorRoutes(mux, config.GitHubMonitorController)
+	registerRelayRoutes(mux, config.RelayController)
 
 	static := staticHandler(config.StaticFS)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

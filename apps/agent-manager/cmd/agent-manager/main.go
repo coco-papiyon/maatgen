@@ -36,6 +36,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/pricing"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/providerusage"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/relay"
 	restoreservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/restore"
 	runservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/run"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/runtimeinfo"
@@ -78,7 +79,20 @@ func run() error {
 	configFile := flag.String("config", toolconfig.DefaultRelativePath, "tool configuration path relative to the executable")
 	staticDir := flag.String("static-dir", "", "directory of built Web UI static assets to serve; auto-detected when omitted")
 	backfillCosts := flag.Bool("backfill-costs", false, "refresh pricing and recalculate historical run costs, then exit")
+	// ADR-009: node relay. relayListen, when set, starts a second listener
+	// dedicated to /api/relay/connect only, separate from the loopback-only
+	// browser-facing listener above. upstreamURL, when set, makes this
+	// process a lower node that dials out to another Agent Manager's relay
+	// listener instead of (or in addition to) accepting its own.
+	relayListen := flag.String("relay-listen", "", "address for a dedicated /api/relay/connect listener that accepts lower-node connections (ADR-009); empty disables it. Anything other than a loopback address exposes this one endpoint outside the machine; the network path to it is the operator's responsibility (Decision 6 defers token verification)")
+	upstreamURL := flag.String("upstream-url", "", "upper node's relay endpoint to dial out to as a lower node (ADR-009), e.g. ws://upper-host:3101/api/relay/connect; empty disables the outbound connection")
+	nodeID := flag.String("node-id", "", "this node's id when connecting to an upstream node via --upstream-url (required together with it)")
+	nodeName := flag.String("node-name", "", "this node's display name when connecting to an upstream node via --upstream-url")
+	nodeToken := flag.String("node-token", "", "token to present when connecting to an upstream node via --upstream-url (currently not verified by the upstream)")
 	flag.Parse()
+	if *upstreamURL != "" && *nodeID == "" {
+		return fmt.Errorf("--node-id is required together with --upstream-url")
+	}
 	executablePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
@@ -355,6 +369,12 @@ func run() error {
 	}
 	defer listener.Close()
 
+	// ADR-009: the relay registry always exists (so /api/nodes works and a
+	// node can be pre-registered from the Web UI even before --relay-listen
+	// is turned on); only the second listener that actually accepts lower
+	// nodes is conditional on --relay-listen.
+	relayService := relay.NewService(*relayListen, slog.Default())
+
 	if err := runtimeinfo.Write(*runtimeFile, runtimeinfo.Metadata{
 		PID:           os.Getpid(),
 		Address:       listener.Addr().String(),
@@ -392,6 +412,7 @@ func run() error {
 			ApprovalController:      approvals,
 			WorkspaceReader:         sessions,
 			GitHubMonitorController: githubMonitor,
+			RelayController:         relayService,
 			StaticFS:                staticFS,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -410,12 +431,49 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// ADR-009: accept lower-node relay connections on a listener separate
+	// from the loopback-only one above, and/or dial out as a lower node.
+	// Both are opt-in (empty flag = disabled) and independent of each other.
+	var relayHTTPServer *http.Server
+	if *relayListen != "" {
+		relayListener, err := net.Listen("tcp", *relayListen)
+		if err != nil {
+			return fmt.Errorf("relay listen: %w", err)
+		}
+		defer relayListener.Close()
+		relayMux := http.NewServeMux()
+		relayMux.HandleFunc("GET /api/relay/connect", relayService.ConnectHandler())
+		relayHTTPServer = &http.Server{Handler: relayMux, ReadHeaderTimeout: 5 * time.Second}
+		slog.Warn("accepting lower-node relay connections; the network path to this listener is not authenticated and must be secured by the operator (ADR-009)", "address", relayListener.Addr().String())
+		go func() {
+			if serveErr := relayHTTPServer.Serve(relayListener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				slog.Error("relay listener stopped", "error", serveErr)
+			}
+		}()
+	}
+	if *upstreamURL != "" {
+		slog.Info("connecting to upstream relay node", "upstream", *upstreamURL, "node_id", *nodeID)
+		go relay.RunClient(ctx, relay.ClientOptions{
+			UpstreamURL: *upstreamURL,
+			NodeID:      *nodeID,
+			NodeName:    *nodeName,
+			NodeToken:   *nodeToken,
+			Handler:     httpServer.Handler,
+			Logger:      slog.Default(),
+		})
+	}
+
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := runs.Close(shutdownCtx); err != nil {
 			return fmt.Errorf("stop active runs: %w", err)
+		}
+		if relayHTTPServer != nil {
+			if err := relayHTTPServer.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("relay listener shutdown failed", "error", err)
+			}
 		}
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)

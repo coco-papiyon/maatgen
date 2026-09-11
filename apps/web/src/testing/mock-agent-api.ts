@@ -19,6 +19,7 @@ import type {
   GitHubTriggerRuleTestRequest,
   GitHubTriggerRuleTestResponse,
   ProviderUsage,
+  RelayNode,
   RestoreStatus,
   SendMessageRequest,
   SessionEvent,
@@ -48,6 +49,8 @@ export class MockAgentApi implements AgentApi {
   private readonly githubRules = new Map<string, GitHubTriggerRule>();
   private readonly githubEvents = new Map<string, GitHubMonitorEvent>();
   private readonly githubIssues: GitHubItem[] = mockGitHubIssues();
+  private readonly relayNodes = new Map<string, RelayNode>();
+  private relayNodeCounter = 0;
   private readonly githubPulls: GitHubItem[] = mockGitHubPullRequests();
 
   constructor() {
@@ -614,6 +617,37 @@ export class MockAgentApi implements AgentApi {
     const item = this.githubPulls.find((candidate) => candidate.number === itemNumber);
     if (!item) throw new AgentApiError('pull request was not found', 404, 'not_found');
     return clone(item);
+  }
+
+  // Node relay (ADR-009). The mock never transitions a node to "connected"
+  // on its own (there is no real lower node to dial in): it only exercises
+  // the Web UI's create/list/delete flow, not the relay handshake itself.
+  // Like the real GET /api/nodes (internal/server/relay.go), "local" is
+  // always the first entry and is never itself stored in relayNodes.
+  async listNodes(): Promise<RelayNode[]> {
+    const local: RelayNode = { id: 'local', name: 'Local', status: 'connected', createdAt: now };
+    return [local, ...Array.from(this.relayNodes.values()).map(clone)];
+  }
+
+  async createNode(name: string): Promise<RelayNode> {
+    this.relayNodeCounter += 1;
+    const id = `node-mock-${this.relayNodeCounter}`;
+    const node: RelayNode = {
+      id,
+      name,
+      status: 'pending',
+      createdAt: now,
+      startupCommand: `agent-manager --upstream-url ws://localhost:3101/api/relay/connect --node-id ${id} --node-name "${name}" --node-token mock-token`,
+    };
+    this.relayNodes.set(id, node);
+    return clone(node);
+  }
+
+  async deleteNode(id: string): Promise<void> {
+    const node = this.relayNodes.get(id);
+    if (!node) throw new AgentApiError('node was not found', 404, 'node_not_found');
+    if (node.status === 'connected') throw new AgentApiError('a connected node cannot be deleted', 409, 'node_connected');
+    this.relayNodes.delete(id);
   }
 }
 

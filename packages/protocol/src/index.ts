@@ -348,3 +348,26 @@ export interface GitHubItemListResponse {
   fetchedAt: string;
   projectsUnavailable?: boolean;
 }
+
+// ADR-009: node relay. RelayNode describes one lower node from the upper
+// node's point of view; the upper node's own instance is the fixed "local"
+// id and is never a RelayNode in the registry sense.
+export type RelayNodeStatus = 'pending' | 'connected' | 'disconnected';
+
+export interface RelayNode {
+  id: string;
+  name: string;
+  status: RelayNodeStatus;
+  createdAt: string;
+  connectedAt?: string;
+  lastSeenAt?: string;
+  startupCommand?: string;
+}
+
+export interface RelayNodeListResponse {
+  nodes: RelayNode[];
+}
+
+export interface CreateRelayNodeRequest {
+  name: string;
+}

@@ -8,6 +8,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/github/copilot-sdk/go v1.0.11
 	github.com/google/go-github/v69 v69.2.0
+	github.com/hashicorp/yamux v0.1.2
 	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
 	golang.org/x/sys v0.22.0
 	modernc.org/sqlite v1.34.5
