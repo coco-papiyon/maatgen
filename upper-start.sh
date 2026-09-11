@@ -7,7 +7,7 @@ set -uo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$script_dir"
 
-port="${1:-3100}"
+port="${1:-3200}"
 relay_port="${2:-$((port + 1))}"
 
 echo "=== Building Maatgen ==="

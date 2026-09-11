@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -90,5 +91,39 @@ func TestUpstreamRoutesDisabledWhenReaderOrSetterIsNil(t *testing.T) {
 	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/upstream"))
 	if recorder.Code != 404 {
 		t.Fatalf("status = %d, want 404 when UpstreamStatusReader/UpstreamConfigSetter are nil", recorder.Code)
+	}
+}
+
+func TestUpstreamProxyStripsPrefix(t *testing.T) {
+	config := testConfig()
+	config.UpstreamStatusReader = func(context.Context) protocol.UpstreamStatus { return protocol.UpstreamStatus{} }
+	config.UpstreamConfigSetter = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamProxyProvider = func() (http.Handler, bool) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(r.URL.Path))
+		}), true
+	}
+
+	recorder := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest("GET", "/api/upstream/api/v1/sessions"))
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "/api/v1/sessions" {
+		t.Fatalf("proxy response = status %d body %q", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestUpstreamProxyReturnsUnavailableWhenDisconnected(t *testing.T) {
+	config := testConfig()
+	config.UpstreamStatusReader = func(context.Context) protocol.UpstreamStatus { return protocol.UpstreamStatus{} }
+	config.UpstreamConfigSetter = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamProxyProvider = func() (http.Handler, bool) { return nil, false }
+
+	recorder := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest("GET", "/api/upstream/api/v1/sessions"))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
 	}
 }

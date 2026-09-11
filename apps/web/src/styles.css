@@ -40,6 +40,8 @@ button { color: inherit; }
   font: 11px ui-monospace, monospace; background: transparent; border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.shell-nav > .node-selector { flex: 0 0 auto; }
+.shell-nav .node-selector-list { right: 0; left: auto; }
 select.shell-repository { cursor: pointer; }
 .shell-repository.resolved { color: var(--green); }
 .shell-repository.ambiguous, .shell-repository.unavailable { color: var(--amber); }

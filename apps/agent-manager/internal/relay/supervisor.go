@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
+	"github.com/hashicorp/yamux"
 )
 
 const (
@@ -38,9 +39,10 @@ type ClientSupervisor struct {
 	now   func() time.Time
 	after func(time.Duration) <-chan time.Time
 
-	mu     sync.Mutex
-	status protocol.UpstreamStatus
-	cancel context.CancelFunc
+	mu      sync.Mutex
+	status  protocol.UpstreamStatus
+	cancel  context.CancelFunc
+	session *yamux.Session
 }
 
 func NewClientSupervisor(handler http.Handler, logger *slog.Logger) *ClientSupervisor {
@@ -78,6 +80,7 @@ func (s *ClientSupervisor) Configure(config protocol.UpstreamConfig) {
 		s.cancel()
 		s.cancel = nil
 	}
+	s.session = nil
 	if !config.Enabled || config.UpstreamURL == "" || config.NodeID == "" {
 		s.status = protocol.UpstreamStatus{Config: config, State: protocol.UpstreamStateDisabled}
 		return
@@ -117,6 +120,7 @@ func (s *ClientSupervisor) run(ctx context.Context, config protocol.UpstreamConf
 			status.LastError = ""
 		})
 
+		var connectedSession *yamux.Session
 		connected, err := dialOnce(ctx, ClientOptions{
 			UpstreamURL: config.UpstreamURL,
 			NodeID:      config.NodeID,
@@ -128,9 +132,11 @@ func (s *ClientSupervisor) run(ctx context.Context, config protocol.UpstreamConf
 			// returns once it has already ended, so "connected" state must
 			// be set from this callback (fired the moment the handshake
 			// succeeds), not from dialOnce's return value below.
-			OnConnected: func() {
+			OnConnected: func(session *yamux.Session) {
+				connectedSession = session
 				now := s.now()
 				s.update(ctx, func(status *protocol.UpstreamStatus) {
+					s.session = session
 					status.State = protocol.UpstreamStateConnected
 					status.LastConnectedAt = &now
 					status.LastError = ""
@@ -140,6 +146,11 @@ func (s *ClientSupervisor) run(ctx context.Context, config protocol.UpstreamConf
 		if ctx.Err() != nil {
 			return
 		}
+		s.mu.Lock()
+		if s.session == connectedSession {
+			s.session = nil
+		}
+		s.mu.Unlock()
 
 		if connected {
 			backoff = supervisorInitialBackoff
@@ -191,4 +202,17 @@ func (s *ClientSupervisor) run(ctx context.Context, config protocol.UpstreamConf
 			}
 		}
 	}
+}
+
+// UpstreamProxy returns a proxy to the upper Agent Manager over the live
+// bidirectional yamux session. The same connection already carries requests
+// from the upper node to this lower node; yamux permits streams in both
+// directions, so no additional network listener is required.
+func (s *ClientSupervisor) UpstreamProxy() (http.Handler, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.session == nil {
+		return nil, false
+	}
+	return NewReverseProxy(s.session), true
 }

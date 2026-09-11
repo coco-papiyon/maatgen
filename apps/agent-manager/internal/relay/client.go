@@ -29,7 +29,7 @@ type ClientOptions struct {
 	// a caller (ClientSupervisor) can mark itself "connected" the moment it
 	// actually is, rather than only after dialOnce returns once the
 	// connection has already ended.
-	OnConnected func()
+	OnConnected func(*yamux.Session)
 }
 
 // RunClient dials UpstreamURL and, once connected, serves Handler over the
@@ -100,7 +100,7 @@ func dialOnce(ctx context.Context, opts ClientOptions, logger *slog.Logger) (con
 	defer session.Close()
 	logger.Info("relay: connected to upstream", "upstream", opts.UpstreamURL, "node", opts.NodeID)
 	if opts.OnConnected != nil {
-		opts.OnConnected()
+		opts.OnConnected(session)
 	}
 
 	serveErr := make(chan error, 1)

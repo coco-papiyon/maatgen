@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { useAgentApi } from './github/useAgentApi';
 import { githubRepositoryStatus, watchGitHubRepository } from './github/repository';
 import { refreshRepositories, remoteGroups, selectRemote, selectedRemoteKey } from './github/repositories';
+import NodeSelector from './NodeSelector.vue';
 
 const route = useRoute();
 const api = useAgentApi();
@@ -43,6 +44,7 @@ function onRemoteChange(event: Event) {
         <option v-for="group in remoteGroups" :key="group.key" :value="group.key">{{ group.owner }}/{{ group.name }}</option>
       </select>
       <span v-else class="shell-repository idle">リポジトリ未登録</span>
+      <NodeSelector />
     </nav>
     <div class="shell-body">
       <RouterView />

@@ -432,10 +432,13 @@ func run() error {
 			RelayController:         relayService,
 			UpstreamStatusReader:    clientSupervisor.Status,
 			UpstreamConfigSetter:    upstreamConfigSetter,
+			UpstreamProxyProvider:   clientSupervisor.UpstreamProxy,
 			StaticFS:                staticFS,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	clientSupervisor.SetHandler(httpServer.Handler)
+	relayService.SetHandler(httpServer.Handler)
 
 	if resolvedStaticDir == "" {
 		slog.Info("no static Web UI assets found; serving API only", "static_dir", *staticDir)
@@ -474,7 +477,6 @@ func run() error {
 	// node). --upstream-url etc., when given, override whatever was saved
 	// from the Server settings screen for this run only; the saved config
 	// (toolConfig.Upstream) is what a bare restart without flags resumes.
-	clientSupervisor.SetHandler(httpServer.Handler)
 	initialUpstream := toolConfig.Upstream
 	if *upstreamURL != "" {
 		initialUpstream = protocol.UpstreamConfig{

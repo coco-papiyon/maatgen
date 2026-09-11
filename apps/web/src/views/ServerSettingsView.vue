@@ -3,6 +3,7 @@ import type { UpstreamStatus } from '@maatgen/protocol';
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { AgentApiError } from '../api';
 import { useAgentApi } from '../github/useAgentApi';
+import { setConfiguredUpstream } from '../nodes';
 
 const api = useAgentApi();
 
@@ -88,6 +89,7 @@ async function save() {
       nodeName: nodeName.value.trim(),
       nodeToken: nodeToken.value,
     });
+    setConfiguredUpstream(status.value);
     saved.value = true;
     window.setTimeout(() => { saved.value = false; }, 1500);
   } catch (cause) {

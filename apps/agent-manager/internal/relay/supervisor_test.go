@@ -77,9 +77,15 @@ func TestClientSupervisorConnectsAndReportsStatus(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	if _, ok := supervisor.UpstreamProxy(); !ok {
+		t.Fatal("expected an upstream proxy while connected")
+	}
 
 	// Reconfiguring away should stop the connection and drop it from the registry.
 	supervisor.Configure(protocol.UpstreamConfig{Enabled: false})
+	if _, ok := supervisor.UpstreamProxy(); ok {
+		t.Fatal("upstream proxy remained available after disabling")
+	}
 	deadline = time.Now().Add(5 * time.Second)
 	for {
 		if len(registry.List()) == 0 || registry.List()[0].Status == protocol.RelayNodeStatusDisconnected {

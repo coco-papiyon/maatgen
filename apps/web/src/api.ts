@@ -180,8 +180,9 @@ export class AgentApiError extends Error {
 }
 
 // basePath scopes every AgentApi call to one node (ADR-009 Decision 5): ''
-// for the upper node's own ("local") Sessions, or "/api/nodes/{nodeId}" to
-// reach a connected lower node through the upper node's reverse proxy. The
+// for the directly opened ("local") node, "/api/nodes/{nodeId}" to reach a
+// connected lower node, or "/api/upstream" to reach the configured upper
+// node over the same bidirectional relay session. The
 // Web UI's node selector is the only caller of setApiBasePath; every other
 // request<T> call site is unaware a remote node is even involved, which is
 // the point of proxying the exact same API (ADR-009 Decision 2) instead of

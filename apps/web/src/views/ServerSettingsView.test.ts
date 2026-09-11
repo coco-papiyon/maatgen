@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import ServerSettingsView from './ServerSettingsView.vue';
 import { MockAgentApi } from '../testing/mock-agent-api';
+import { nodes } from '../nodes';
 
 let wrapper: VueWrapper | undefined;
 
@@ -11,6 +12,7 @@ afterEach(() => {
 });
 
 async function mountSettings(api = new MockAgentApi()) {
+  nodes.value = await api.listNodes();
   wrapper = mount(ServerSettingsView, { global: { provide: { agentApi: api } } });
   await flushPromises();
   return { wrapper, api };
@@ -46,6 +48,22 @@ describe('ServerSettingsView (ADR-009 upstream connection)', () => {
       nodeName: 'Linux dev box',
       nodeToken: '',
     });
+    expect(nodes.value.find((node) => node.id === 'local')?.name).toBe('Local');
+    expect(nodes.value.find((node) => node.id === 'upstream')?.name).toBe('Linux dev box');
+    expect((await api.listNodes()).filter((node) => node.status === 'pending')).toHaveLength(0);
+  });
+
+  it('does not add the same Node Name more than once', async () => {
+    const { wrapper, api } = await mountSettings();
+    const nodeNameInput = wrapper.findAll('input[type="text"]')[3]!;
+    await nodeNameInput.setValue('Linux dev box');
+    await wrapper.get('.github-form-actions button').trigger('click');
+    await flushPromises();
+    await wrapper.get('.github-form-actions button').trigger('click');
+    await flushPromises();
+
+    expect(nodes.value.filter((node) => node.id === 'upstream' && node.name === 'Linux dev box')).toHaveLength(1);
+    expect((await api.listNodes()).filter((node) => node.status === 'pending')).toHaveLength(0);
   });
 
   it('disables the save button when enabled without the required fields', async () => {

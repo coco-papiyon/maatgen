@@ -2,7 +2,9 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -24,6 +26,10 @@ const (
 // --relay-listen listener, never on the loopback-only browser-facing
 // listener.
 func ConnectHandler(registry *Registry, logger *slog.Logger) http.HandlerFunc {
+	return connectHandler(registry, nil, logger)
+}
+
+func connectHandler(registry *Registry, upstreamHandler func() http.Handler, logger *slog.Logger) http.HandlerFunc {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -61,6 +67,15 @@ func ConnectHandler(registry *Registry, logger *slog.Logger) http.HandlerFunc {
 			logger.Info("relay: node disconnected", "node", nodeID)
 		}()
 
+		if upstreamHandler != nil {
+			if handler := upstreamHandler(); handler != nil {
+				go func() {
+					if err := http.Serve(session, handler); err != nil && !errors.Is(err, net.ErrClosed) {
+						logger.Debug("relay: upper API server stopped", "node", nodeID, "error", err)
+					}
+				}()
+			}
+		}
 		<-session.CloseChan()
 	}
 }

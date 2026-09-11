@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
@@ -15,7 +16,9 @@ type UpstreamStatusReader func(ctx context.Context) protocol.UpstreamStatus
 
 type UpstreamConfigSetter func(ctx context.Context, config protocol.UpstreamConfig) (protocol.UpstreamStatus, error)
 
-func registerUpstreamRoutes(mux *http.ServeMux, statusReader UpstreamStatusReader, configSetter UpstreamConfigSetter) {
+type UpstreamProxyProvider func() (http.Handler, bool)
+
+func registerUpstreamRoutes(mux *http.ServeMux, statusReader UpstreamStatusReader, configSetter UpstreamConfigSetter, proxyProvider UpstreamProxyProvider) {
 	if statusReader == nil || configSetter == nil {
 		return
 	}
@@ -41,4 +44,21 @@ func registerUpstreamRoutes(mux *http.ServeMux, statusReader UpstreamStatusReade
 		}
 		writeJSON(w, http.StatusOK, status)
 	}))
+
+	if proxyProvider != nil {
+		mux.Handle("/api/upstream/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			proxy, ok := proxyProvider()
+			if !ok {
+				writeAPIError(w, http.StatusServiceUnavailable, "upstream_disconnected", "the upstream server is not connected", nil)
+				return
+			}
+			remainder := strings.TrimPrefix(r.URL.Path, "/api/upstream")
+			if remainder == "" {
+				remainder = "/"
+			}
+			r.URL.Path = remainder
+			r.URL.RawPath = ""
+			proxy.ServeHTTP(w, r)
+		}))
+	}
 }

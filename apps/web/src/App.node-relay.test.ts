@@ -1,7 +1,9 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import App from './App.vue';
+import Shell from './Shell.vue';
+import { createAppRouter } from './router';
 import { createMockEnvironment } from './testing/mock-agent-api';
+import { nodes, selectedNodeId } from './nodes';
 
 let wrapper: VueWrapper | undefined;
 
@@ -11,12 +13,19 @@ afterEach(() => {
   localStorage.removeItem('maatgen.provider');
   localStorage.removeItem('maatgen.workspaceHistory');
   window.history.replaceState(window.history.state, '', '/');
+  nodes.value = [];
+  selectedNodeId.value = 'local';
   vi.restoreAllMocks();
 });
 
 async function mountApp() {
   const environment = createMockEnvironment();
-  wrapper = mount(App, { props: environment });
+  const router = createAppRouter();
+  await router.push('/');
+  await router.isReady();
+  wrapper = mount(Shell, {
+    global: { plugins: [router], provide: { agentApi: environment.agentApi, eventStreamFactory: environment.eventStreamFactory } },
+  });
   await flushPromises();
   return wrapper;
 }

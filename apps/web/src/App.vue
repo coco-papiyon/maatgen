@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import type { AgentRun, AgentSession, ApprovalDecision, ChangeSet, CommandApproval, Provider, ProviderUsage, RelayNode, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
+import type { AgentRun, AgentSession, ApprovalDecision, ChangeSet, CommandApproval, Provider, ProviderUsage, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { httpAgentApi, setApiBasePath, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
+import { httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
 import { reasoningEffortOptions } from './constants';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import FileTree from './FileTree.vue';
 import { githubWorkspace } from './github/workspace';
 import { renderMarkdown } from './markdown';
+import { initializeNodes, nodes, selectedNode, selectedNodeId } from './nodes';
 import UsageBarChart, { type UsageSeriesDef, type UsageStackedPeriod } from './UsageBarChart.vue';
 
 const USAGE_PROVIDER_ORDER = ['codex', 'claude', 'copilot'] as const;
@@ -48,17 +49,6 @@ const providers = ref<Provider[]>([]);
 // unchanged; only a connected lower node gets a suffixed key, since its
 // Workspace paths and installed Providers can differ entirely from the
 // upper node's own.
-const nodes = ref<RelayNode[]>([]);
-const selectedNodeId = ref('local');
-const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value));
-const nodeSelectorOpen = ref(false);
-const addNodeDialogOpen = ref(false);
-const addNodeName = ref('');
-const addNodeBusy = ref(false);
-const addNodeError = ref('');
-const addNodeResult = ref<RelayNode>();
-const addNodeCommandCopied = ref(false);
-let nodePollTimer: number | undefined;
 function providerStorageKeyFor(nodeId: string): string {
   return nodeId === 'local' ? 'maatgen.provider' : `maatgen.provider.${nodeId}`;
 }
@@ -102,6 +92,7 @@ const workspaceHistory = ref<string[]>(loadWorkspaceHistory());
 const workspaceHistoryOpen = ref(false);
 const prompt = ref('');
 const activeRun = ref<AgentRun>();
+let nodeContextReady = false;
 const busy = ref(false);
 const error = ref('');
 const streamError = ref('');
@@ -469,48 +460,7 @@ function selectWorkspaceHistory(path: string) {
   workspaceHistoryOpen.value = false;
 }
 
-// Node relay . nodeStatusIcon/nodeStatusLabel back the selector's
-// ●/◐/○ dots; the full node list (always including "local" first, per the
-// server) is refreshed on a timer so a pending node's transition to
-// connected, or a connected node dropping to disconnected, shows up without
-// the operator reloading the page.
-function nodeStatusIcon(status: RelayNode['status']): string {
-  if (status === 'connected') return '●';
-  if (status === 'pending') return '◐';
-  return '○';
-}
-
-function nodeStatusLabel(status: RelayNode['status']): string {
-  if (status === 'connected') return '接続中';
-  if (status === 'pending') return '登録待ち';
-  return '切断中';
-}
-
-async function refreshNodes() {
-  try {
-    nodes.value = await api.listNodes();
-  } catch {
-    // Node listing is best-effort background polling; a transient failure
-    // here must not disrupt whatever Session the operator is looking at.
-  }
-}
-
-function startNodePolling() {
-  nodePollTimer = window.setInterval(() => void refreshNodes(), 5_000);
-}
-
-function nodeQueryParam(): string | null {
-  return new URLSearchParams(window.location.search).get('node');
-}
-
-function syncNodeQueryParam(nodeId: string) {
-  const url = new URL(window.location.href);
-  if (nodeId === 'local') url.searchParams.delete('node');
-  else url.searchParams.set('node', nodeId);
-  window.history.replaceState(window.history.state, '', url);
-}
-
-// Shared by onMounted (first load) and selectNode (switching nodes):
+// Shared by onMounted (first load) and loadNodeContext (switching nodes):
 // fetches the Provider catalog, default Workspace path, and Session list
 // for whichever node setApiBasePath currently targets.
 async function loadWorkspaceContextForCurrentNode() {
@@ -527,15 +477,9 @@ async function loadWorkspaceContextForCurrentNode() {
   persistNewSessionProvider();
 }
 
-async function selectNode(nodeId: string) {
-  nodeSelectorOpen.value = false;
-  if (nodeId === selectedNodeId.value) return;
-
+async function loadNodeContext(nodeId: string) {
   eventStream?.stop();
   eventStream = undefined;
-  selectedNodeId.value = nodeId;
-  setApiBasePath(nodeId === 'local' ? '' : `/api/nodes/${encodeURIComponent(nodeId)}`);
-  syncNodeQueryParam(nodeId);
 
   // Everything below is Session/Workspace state scoped to the previous
   // node; selectSession() (called from loadWorkspaceContextForCurrentNode's
@@ -560,71 +504,6 @@ async function selectNode(nodeId: string) {
     if (firstActive) await selectSession(firstActive);
   });
 }
-
-function openAddNodeDialog() {
-  nodeSelectorOpen.value = false;
-  addNodeDialogOpen.value = true;
-  addNodeName.value = '';
-  addNodeError.value = '';
-  addNodeResult.value = undefined;
-  addNodeCommandCopied.value = false;
-}
-
-function closeAddNodeDialog() {
-  addNodeDialogOpen.value = false;
-}
-
-async function submitAddNode() {
-  const name = addNodeName.value.trim();
-  if (!name || addNodeBusy.value) return;
-  addNodeBusy.value = true;
-  addNodeError.value = '';
-  try {
-    const node = await api.createNode(name);
-    addNodeResult.value = node;
-    await refreshNodes();
-  } catch (cause) {
-    addNodeError.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
-    addNodeBusy.value = false;
-  }
-}
-
-async function copyAddNodeCommand() {
-  if (!addNodeResult.value?.startupCommand) return;
-  try {
-    await navigator.clipboard.writeText(addNodeResult.value.startupCommand);
-    addNodeCommandCopied.value = true;
-    window.setTimeout(() => {
-      addNodeCommandCopied.value = false;
-    }, 1500);
-  } catch (cause) {
-    handleFailure(cause);
-  }
-}
-
-async function deleteNode(nodeId: string) {
-  try {
-    await api.deleteNode(nodeId);
-    await refreshNodes();
-  } catch (cause) {
-    handleFailure(cause);
-  }
-}
-
-// While the "add node" dialog is open with a pending node's startup command
-// on screen, the periodic refreshNodes() poll above is what notices the
-// lower node actually dialing in; this watcher is what reacts to that by
-// closing the dialog and switching to the newly connected node, exactly as
-// designed in docs/decisions/009-node-relay.md Decision 3.1.
-watch(nodes, (updated) => {
-  if (!addNodeDialogOpen.value || !addNodeResult.value) return;
-  const match = updated.find((node) => node.id === addNodeResult.value?.id);
-  if (match?.status === 'connected') {
-    addNodeDialogOpen.value = false;
-    void selectNode(match.id);
-  }
-});
 
 function isUnreadEvent(event: SessionEvent): boolean {
   return ['assistant_message', 'reasoning_summary', 'run_completed', 'run_failed', 'run_cancelled', 'command_approval_requested'].includes(event.type);
@@ -1251,13 +1130,10 @@ onMounted(async () => {
   // link reopen on the same node. Fetch the node list first so an unknown
   // or offline node id falls back to the empty state below instead of
   // hitting a proxy 404 through the normal Session-loading path.
-  await refreshNodes();
-  const initialNode = nodeQueryParam();
-  if (initialNode && initialNode !== 'local' && nodes.value.some((node) => node.id === initialNode)) {
-    selectedNodeId.value = initialNode;
-    setApiBasePath(`/api/nodes/${encodeURIComponent(initialNode)}`);
+  await initializeNodes(api).catch(() => undefined);
+  if (selectedNodeId.value !== 'local') {
     workspaceHistory.value = loadWorkspaceHistory();
-    const storedProviderForNode = localStorage.getItem(providerStorageKeyFor(initialNode)) as AgentSession['agent'] | null;
+    const storedProviderForNode = localStorage.getItem(providerStorageKeyFor(selectedNodeId.value)) as AgentSession['agent'] | null;
     newSessionProvider.value = storedProviderForNode || 'codex';
   }
   const currentNode = nodes.value.find((node) => node.id === selectedNodeId.value);
@@ -1277,13 +1153,22 @@ onMounted(async () => {
     });
   }
   startSessionPolling();
-  startNodePolling();
+  nodeContextReady = true;
 });
 
 onBeforeUnmount(() => {
   eventStream?.stop();
   window.clearInterval(sessionPollTimer);
-  window.clearInterval(nodePollTimer);
+});
+
+watch(selectedNodeId, (nodeId) => {
+  if (!nodeContextReady) return;
+  void loadNodeContext(nodeId);
+});
+
+watch(() => selectedNode.value?.status, (status, previousStatus) => {
+  if (!nodeContextReady || status !== 'connected' || previousStatus === 'connected') return;
+  void loadNodeContext(selectedNodeId.value);
 });
 
 watch(usageSummaryProvider, () => {
@@ -1304,40 +1189,6 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
   <div class="app-shell">
     <header class="topbar">
       <div class="brand"><img src="/maat.png" class="brand-mark" alt="Maat"><span>maatgen</span></div>
-      <div class="node-selector">
-        <button
-          type="button"
-          class="node-selector-toggle"
-          :class="selectedNode?.status ?? 'connected'"
-          aria-haspopup="listbox"
-          :aria-expanded="nodeSelectorOpen"
-          @click="nodeSelectorOpen = !nodeSelectorOpen"
-        >
-          <span class="node-status-dot" :class="selectedNode?.status ?? 'connected'">{{ nodeStatusIcon(selectedNode?.status ?? 'connected') }}</span>
-          Node: {{ selectedNode?.name ?? 'Local' }}
-        </button>
-        <ul v-if="nodeSelectorOpen" class="node-selector-list" role="listbox">
-          <li v-for="node in nodes" :key="node.id" role="option" :aria-selected="node.id === selectedNodeId">
-            <button type="button" class="node-option" @click="selectNode(node.id)">
-              <span class="node-status-dot" :class="node.status">{{ nodeStatusIcon(node.status) }}</span>
-              <span class="node-option-name">{{ node.name }}</span>
-              <span v-if="node.status !== 'connected'" class="node-option-status">({{ nodeStatusLabel(node.status) }})</span>
-            </button>
-            <button
-              v-if="node.id !== 'local' && node.status !== 'connected'"
-              type="button"
-              class="node-option-delete"
-              title="履歴から削除"
-              aria-label="履歴から削除"
-              @click.stop="deleteNode(node.id)"
-            >×</button>
-          </li>
-          <li class="node-selector-divider" role="presentation" />
-          <li role="presentation">
-            <button type="button" class="node-option node-option-add" @click="openAddNodeDialog">＋ ノードを追加</button>
-          </li>
-        </ul>
-      </div>
       <div class="topbar-status">
         <button type="button" class="quiet-button usage-summary-button" @click="openUsageSummary">Usage Summary</button>
         <button
@@ -1848,34 +1699,4 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
     </div>
   </div>
 
-  <div v-if="addNodeDialogOpen" class="usage-summary-overlay" @click.self="closeAddNodeDialog">
-    <div class="usage-summary-modal add-node-modal" role="dialog" aria-modal="true" aria-label="ノードを追加">
-      <header class="usage-summary-modal-header">
-        <h2>ノードを追加</h2>
-        <button type="button" class="icon-button" aria-label="閉じる" @click="closeAddNodeDialog">×</button>
-      </header>
-      <template v-if="!addNodeResult">
-        <label class="add-node-name-field">
-          表示名
-          <input v-model="addNodeName" type="text" placeholder="Linux dev box" :disabled="addNodeBusy" @keydown.enter="submitAddNode" />
-        </label>
-        <div v-if="addNodeError" class="error-banner" role="alert">{{ addNodeError }}</div>
-        <div class="add-node-actions">
-          <button type="button" class="quiet-button" :disabled="addNodeBusy" @click="closeAddNodeDialog">キャンセル</button>
-          <button type="button" :disabled="addNodeBusy || !addNodeName.trim()" @click="submitAddNode">追加</button>
-        </div>
-      </template>
-      <template v-else>
-        <p>下記コマンドをこのノードの端末で実行してください。</p>
-        <div class="add-node-command-row">
-          <code class="add-node-command">{{ addNodeResult.startupCommand }}</code>
-          <button type="button" class="quiet-button" @click="copyAddNodeCommand">{{ addNodeCommandCopied ? 'Copied' : 'コピー' }}</button>
-        </div>
-        <p class="add-node-waiting">接続を待っています…（接続され次第、自動的に閉じます）</p>
-        <div class="add-node-actions">
-          <button type="button" class="quiet-button" @click="closeAddNodeDialog">閉じる</button>
-        </div>
-      </template>
-    </div>
-  </div>
 </template>

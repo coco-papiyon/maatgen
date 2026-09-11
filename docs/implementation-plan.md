@@ -911,3 +911,10 @@ docs/decisions/
 - [x] Issue／PR観測後に作成・更新された監視ルールを現在状態へ評価し、同じルール・item番号の自動イベントはactionをまたいで一度だけ作成
 - [x] イベント履歴の未実行イベントを`skipped`として手動除外し、履歴に保持
 - [x] VS Code版では監視ルール編集を提供せず、自動実行Sessionの参照に限定
+
+### Phase 12：ノードリレーUI
+
+- [x] サーバ選択プルダウンをWeb共通ナビゲーションに移し、リポジトリ選択の右側で全画面に常時表示
+- [x] ノード選択状態とSession画面のAPI base path／Session／Provider／Workspace切替を共通化
+- [x] Localは直接接続中の下位ノードとして固定し、Node Nameを別のupstream選択肢として表示
+- [x] 既存のWebSocket／yamuxセッションを双方向化し、`/api/upstream/*`から上位Agent ManagerのAPI／WebSocketへ転送

@@ -1073,6 +1073,12 @@ src/auth.ts
 src/auth.test.ts
 ```
 
+### サーバ選択
+
+Web版のサーバ選択プルダウンは共通ナビゲーション右上のリポジトリ選択プルダウン直後に配置し、Session以外の画面でも常時表示する。選択したノードIDは共通状態として保持し、Session画面は変更を検知してAPI base path、Session一覧、Provider、Workspaceを選択先へ切り替える。
+
+`Local`はブラウザが直接開いているAgent Manager（下位ノード）を常に表し、名称や接続先を変更しない。サーバ設定のNode Nameは別の`upstream`選択肢として追加する。`upstream`選択時は既存のWebSocket／yamux接続を双方向に使い、下位ノードの`/api/upstream/*`から上位サーバの通常API／WebSocketへ透過的に転送する。Node Nameと同名の過去のpending表示は重複表示しない。
+
 ### GitHub監視ルール
 
 Web版のGitHub監視設定では、監視ルールの作成・編集フォームをルール一覧上のポップアップとして表示する。Issue／PRには担当者loginを条件指定でき、PRには加えてレビュー依頼中ユーザーのloginをレビューア条件として指定できる。レビュー依頼の変更はGitHub itemの正規化状態と変更検知hashに含める。ポーラーはOpenのIssue／PRだけを取得し、リポジトリの全クローズ履歴を毎回走査しない。VS Code版は監視ルール編集画面を持たず、自動実行されたSessionの参照のみ提供する。

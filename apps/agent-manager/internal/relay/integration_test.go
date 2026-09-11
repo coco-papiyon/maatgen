@@ -61,6 +61,44 @@ func TestConnectAndProxyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConnectedLowerNodeCanProxyBackToUpper(t *testing.T) {
+	upperHandler := http.NewServeMux()
+	upperHandler.HandleFunc("/upper", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello from upper"))
+	})
+	service := NewService("", nil)
+	service.SetHandler(upperHandler)
+	upper := httptest.NewServer(service.ConnectHandler())
+	defer upper.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connected := make(chan *yamux.Session, 1)
+	go RunClient(ctx, ClientOptions{
+		UpstreamURL: "ws" + upper.URL[len("http"):] + "/api/relay/connect",
+		NodeID:      "linux-dev",
+		NodeName:    "Linux dev box",
+		Handler:     http.NewServeMux(),
+		OnConnected: func(session *yamux.Session) { connected <- session },
+	})
+
+	var session *yamux.Session
+	select {
+	case session = <-connected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for lower node connection")
+	}
+
+	proxy := NewReverseProxy(session)
+	req := httptest.NewRequest(http.MethodGet, "/upper", nil)
+	rec := httptest.NewRecorder()
+	proxy.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "hello from upper" {
+		t.Fatalf("reverse request = status %d body %q, want 200 and upper response", rec.Code, rec.Body.String())
+	}
+}
+
 // TestConnectMarksNodeDisconnectedWhenLowerNodeGoesAway checks the other
 // half of the lifecycle: once the lower node's connection drops, the
 // registry reflects it without anyone polling — ConnectHandler's own

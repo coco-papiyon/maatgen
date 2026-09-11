@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import Shell from './Shell.vue';
 import { createAppRouter } from './router';
+import { getApiBasePath } from './api';
 import { createMockEnvironment, MockAgentApi } from './testing/mock-agent-api';
 import { githubWorkspace } from './github/workspace';
 import { selectedRepository } from './github/repositories';
+import { selectedNodeId } from './nodes';
 
 let wrapper: VueWrapper | undefined;
 
@@ -55,6 +57,36 @@ describe('Shell', () => {
     expect(labels).toEqual(['Session', 'Issue', 'PR', 'Job', '設定', 'サーバ']);
     expect(wrapper.find('.shell-nav-group').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('GitHub監視');
+  });
+
+  it('always shows the server selector to the right of the repository selector', async () => {
+    const { wrapper, router } = await mountShell('/');
+    const navChildren = wrapper.find('.shell-nav').element.children;
+    const repositoryIndex = Array.from(navChildren).findIndex((element) => element.classList.contains('shell-repository'));
+    const serverIndex = Array.from(navChildren).findIndex((element) => element.classList.contains('node-selector'));
+    expect(serverIndex).toBe(repositoryIndex + 1);
+    expect(wrapper.find('.node-selector-toggle').text()).toContain('Local');
+
+    await router.push({ name: 'server-settings' });
+    await flushPromises();
+    expect(wrapper.find('.node-selector-toggle').exists()).toBe(true);
+  });
+
+  it('adds a newly saved Node Name to the server selector and allows selecting it', async () => {
+    const { wrapper } = await mountShell('/server');
+    const nodeNameInput = wrapper.findAll('input[type="text"]')[3]!;
+    await nodeNameInput.setValue('Linux dev box');
+    await wrapper.get('.github-form-actions button').trigger('click');
+    await flushPromises();
+
+    await wrapper.get('.node-selector-toggle').trigger('click');
+    const option = wrapper.findAll('.node-option').find((candidate) => candidate.text().includes('Linux dev box'))!;
+    expect(option.exists()).toBe(true);
+    await option.trigger('click');
+    expect(wrapper.get('.node-selector-toggle').text()).toContain('Linux dev box');
+    expect(selectedNodeId.value).toBe('upstream');
+    expect(getApiBasePath()).toBe('/api/upstream');
+    expect(new URLSearchParams(window.location.search).get('node')).toBe('upstream');
   });
 
   it('redirects "/github" to the event history route', async () => {

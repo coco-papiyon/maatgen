@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
@@ -16,6 +17,8 @@ type Service struct {
 	registry     *Registry
 	logger       *slog.Logger
 	relayAddress string // host:port a lower node's --upstream-url should target, e.g. "upper-host:3101"
+	mu           sync.RWMutex
+	handler      http.Handler
 }
 
 // NewService constructs a Service. relayAddress is embedded verbatim into
@@ -30,7 +33,17 @@ func NewService(relayAddress string, logger *slog.Logger) *Service {
 }
 
 func (s *Service) ConnectHandler() http.HandlerFunc {
-	return ConnectHandler(s.registry, s.logger)
+	return connectHandler(s.registry, func() http.Handler {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return s.handler
+	}, s.logger)
+}
+
+func (s *Service) SetHandler(handler http.Handler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.handler = handler
 }
 
 func (s *Service) ListNodes(_ context.Context) []protocol.RelayNode {
