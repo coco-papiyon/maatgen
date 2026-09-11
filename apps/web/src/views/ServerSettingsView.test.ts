@@ -27,8 +27,9 @@ describe('ServerSettingsView (ADR-009 upstream connection)', () => {
     const { wrapper, api } = await mountSettings();
 
     await wrapper.get('input[type="checkbox"]').setValue(true);
-    const [urlInput, nodeIdInput, nodeNameInput] = wrapper.findAll('input[type="text"]');
-    await urlInput!.setValue('ws://upper-host:3101/api/relay/connect');
+    const [hostInput, portInput, nodeIdInput, nodeNameInput] = wrapper.findAll('input[type="text"]');
+    await hostInput!.setValue('upper-host');
+    await portInput!.setValue('3101');
     await nodeIdInput!.setValue('linux-dev');
     await nodeNameInput!.setValue('Linux dev box');
     await wrapper.get('.github-form-actions button').trigger('click');

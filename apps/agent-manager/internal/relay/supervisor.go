@@ -160,7 +160,7 @@ func (s *ClientSupervisor) run(ctx context.Context, config protocol.UpstreamConf
 			if err != nil {
 				message = err.Error()
 			}
-			s.logger.Warn("relay: upstream connection attempt failed", "upstream", config.UpstreamURL, "error", err)
+			s.logger.Info("relay: upstream connection attempt failed", "upstream", config.UpstreamURL, "error", err)
 			s.update(ctx, func(status *protocol.UpstreamStatus) {
 				status.LastError = message
 			})

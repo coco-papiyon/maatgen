@@ -13,7 +13,8 @@ const saving = ref(false);
 const saved = ref(false);
 
 const enabled = ref(false);
-const upstreamUrl = ref('');
+const upstreamHost = ref('');
+const upstreamPort = ref('3101');
 const nodeId = ref('');
 const nodeName = ref('');
 const nodeToken = ref('');
@@ -22,10 +23,23 @@ let pollTimer: number | undefined;
 
 function applyStatusToForm(value: UpstreamStatus) {
   enabled.value = value.config.enabled;
-  upstreamUrl.value = value.config.upstreamUrl;
+  parseUpstreamUrl(value.config.upstreamUrl);
   nodeId.value = value.config.nodeId;
   nodeName.value = value.config.nodeName;
   nodeToken.value = value.config.nodeToken;
+}
+
+function parseUpstreamUrl(url: string) {
+  if (!url) {
+    upstreamHost.value = '';
+    upstreamPort.value = '3101';
+    return;
+  }
+  const match = url.match(/^ws:\/\/([^:]+):(\d+)/);
+  if (match) {
+    upstreamHost.value = match[1]!;
+    upstreamPort.value = match[2]!;
+  }
 }
 
 const stateLabel: Record<UpstreamStatus['state'], string> = {
@@ -66,9 +80,10 @@ async function save() {
   saved.value = false;
   error.value = '';
   try {
+    const upstreamUrl = `ws://${upstreamHost.value.trim()}:${upstreamPort.value.trim()}/api/relay/connect`;
     status.value = await api.setUpstreamConfig({
       enabled: enabled.value,
-      upstreamUrl: upstreamUrl.value.trim(),
+      upstreamUrl,
       nodeId: nodeId.value.trim(),
       nodeName: nodeName.value.trim(),
       nodeToken: nodeToken.value,
@@ -131,8 +146,11 @@ onBeforeUnmount(() => {
         </label>
       </div>
       <div class="github-form-row">
-        <label>上位サーバURL
-          <input v-model="upstreamUrl" type="text" placeholder="ws://upper-host:3101/api/relay/connect" :disabled="saving" />
+        <label>上位サーバホスト名/IPアドレス
+          <input v-model="upstreamHost" type="text" placeholder="upper-host" :disabled="saving" />
+        </label>
+        <label>ポート
+          <input v-model="upstreamPort" type="text" placeholder="3101" :disabled="saving" />
         </label>
       </div>
       <div class="github-form-row">
@@ -149,7 +167,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
       <div class="github-form-actions">
-        <button type="button" :disabled="saving || (enabled && (!upstreamUrl.trim() || !nodeId.trim()))" @click="save">保存</button>
+        <button type="button" :disabled="saving || (enabled && (!upstreamHost.trim() || !upstreamPort.trim() || !nodeId.trim()))" @click="save">保存</button>
         <span v-if="saved" class="github-hint">保存しました</span>
       </div>
     </section>
