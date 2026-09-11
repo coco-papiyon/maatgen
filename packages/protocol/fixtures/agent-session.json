@@ -2,6 +2,7 @@
   "id": "session-1",
   "agent": "copilot",
   "workspace": "C:/workspace/project",
+  "workspaceKind": "git_repository",
   "agentThreadId": "d40fc21a-7d30-4e50-9bb0-c922aae7988f",
   "status": "active",
   "triggerSource": "manual",
