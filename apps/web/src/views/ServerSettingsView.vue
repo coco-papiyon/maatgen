@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
 import type { UpstreamStatus } from '@maatgen/protocol';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { AgentApiError } from '../api';
 import { useAgentApi } from '../github/useAgentApi';
 
@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
   <div class="github-view">
     <h1 class="github-view-title">サーバ設定</h1>
     <p class="github-hint">
-      このAgent Managerを下位ノードとして、別の上位ノードへ接続します（ADR-009）。上位ノード側で`--relay-listen`が有効になっている必要があります。
+      このAgent Managerを下位ノードとして、別の上位ノードへ接続します。上位ノード側で`--relay-listen`が有効になっている必要があります。
     </p>
 
     <p v-if="error" class="github-error">{{ error }}</p>

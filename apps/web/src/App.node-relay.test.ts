@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App.vue';
 import { createMockEnvironment } from './testing/mock-agent-api';
 
@@ -24,7 +24,7 @@ async function mountApp() {
 // ADR-009: the node selector always shows at least "Local" (the upper
 // node's own instance, id "local"), and offers to add a node even before
 // any lower node has ever connected.
-describe('Node relay (ADR-009)', () => {
+describe('Node relay ', () => {
   it('shows Local as the default node and offers to add another', async () => {
     const app = await mountApp();
 

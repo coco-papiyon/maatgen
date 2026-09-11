@@ -8,7 +8,7 @@ import (
 )
 
 // UpstreamStatusReader/UpstreamConfigSetter back this (lower) node's own
-// "Server" settings screen (ADR-009): where to connect out to, and the live
+// "Server" settings screen : where to connect out to, and the live
 // state of that connection. Unlike RelayController (this node acting as an
 // upper node for others), these describe this node acting as a lower node.
 type UpstreamStatusReader func(ctx context.Context) protocol.UpstreamStatus

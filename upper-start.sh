@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts Maatgen as an upper node (ADR-009): same as start.sh, plus a
+# Starts Maatgen as an upper node: same as start.sh, plus a
 # dedicated --relay-listen so lower nodes on other machines can dial in.
 # Usage: ./upper-start.sh [port] [relay-port]
 set -uo pipefail

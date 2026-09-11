@@ -1,33 +1,33 @@
 import type {
-  AgentRun,
-  AgentSession,
-  ChangeSet,
-  CommandApproval,
-  CreateGitHubMonitorRequest,
-  CreateSessionRequest,
-  GitHubItem,
-  GitHubItemListResponse,
-  GitHubMonitorEvent,
-  GitHubRepositoryMonitor,
-  GitHubRepositoryResolution,
-  GitHubSyncResult,
-  GitHubTriggerRule,
-  GitHubMonitorFilters,
-  GitHubTriggerRulePromptPreviewRequest,
-  GitHubTriggerRulePromptPreviewResponse,
-  GitHubTriggerRuleRequest,
-  GitHubTriggerRuleTestRequest,
-  GitHubTriggerRuleTestResponse,
-  ProviderUsage,
-  RelayNode,
-  RestoreStatus,
-  SendMessageRequest,
-  SessionEvent,
-  UpdateGitHubMonitorRequest,
-  UpstreamConfig,
-  UpstreamStatus,
-  UsageSummary,
-  WsTicketResponse,
+    AgentRun,
+    AgentSession,
+    ChangeSet,
+    CommandApproval,
+    CreateGitHubMonitorRequest,
+    CreateSessionRequest,
+    GitHubItem,
+    GitHubItemListResponse,
+    GitHubMonitorEvent,
+    GitHubMonitorFilters,
+    GitHubRepositoryMonitor,
+    GitHubRepositoryResolution,
+    GitHubSyncResult,
+    GitHubTriggerRule,
+    GitHubTriggerRulePromptPreviewRequest,
+    GitHubTriggerRulePromptPreviewResponse,
+    GitHubTriggerRuleRequest,
+    GitHubTriggerRuleTestRequest,
+    GitHubTriggerRuleTestResponse,
+    ProviderUsage,
+    RelayNode,
+    RestoreStatus,
+    SendMessageRequest,
+    SessionEvent,
+    UpdateGitHubMonitorRequest,
+    UpstreamConfig,
+    UpstreamStatus,
+    UsageSummary,
+    WsTicketResponse,
 } from '@maatgen/protocol';
 import { AgentApiError, type AgentApi, type GitHubItemQuery, type JobStatusFilter, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from '../api';
 import type { EventStreamFactory } from '../event-stream';
@@ -625,7 +625,7 @@ export class MockAgentApi implements AgentApi {
     return clone(item);
   }
 
-  // Node relay (ADR-009). The mock never transitions a node to "connected"
+  // Node relay . The mock never transitions a node to "connected"
   // on its own (there is no real lower node to dial in): it only exercises
   // the Web UI's create/list/delete flow, not the relay handshake itself.
   // Like the real GET /api/nodes (internal/server/relay.go), "local" is

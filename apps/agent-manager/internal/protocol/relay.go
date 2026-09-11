@@ -3,7 +3,7 @@ package protocol
 import "time"
 
 // RelayNodeStatus is a lower node's state in the upper node's registry
-// (ADR-009). pending is a node the upper node's Web UI created ahead of the
+// . pending is a node the upper node's Web UI created ahead of the
 // lower node actually connecting; connected is a live relay session;
 // disconnected is a node with connection history that is not currently
 // connected.
@@ -65,9 +65,9 @@ const (
 )
 
 type UpstreamStatus struct {
-	Config          UpstreamConfig           `json:"config"`
-	State           UpstreamConnectionState  `json:"state"`
-	LastError       string                   `json:"lastError,omitempty"`
-	LastConnectedAt *time.Time               `json:"lastConnectedAt,omitempty"`
-	NextAttemptAt   *time.Time               `json:"nextAttemptAt,omitempty"`
+	Config          UpstreamConfig          `json:"config"`
+	State           UpstreamConnectionState `json:"state"`
+	LastError       string                  `json:"lastError,omitempty"`
+	LastConnectedAt *time.Time              `json:"lastConnectedAt,omitempty"`
+	NextAttemptAt   *time.Time              `json:"nextAttemptAt,omitempty"`
 }

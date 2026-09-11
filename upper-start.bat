@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-REM Starts Maatgen as an upper node (ADR-009): same as start.bat, plus a
+REM Starts Maatgen as an upper node: same as start.bat, plus a
 REM dedicated --relay-listen so lower nodes on other machines can dial in.
 REM Usage: upper-start.bat [port] [relay-port]
 

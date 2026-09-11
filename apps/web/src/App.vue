@@ -1,13 +1,13 @@
 <script setup lang="ts">
+import type { AgentRun, AgentSession, ApprovalDecision, ChangeSet, CommandApproval, Provider, ProviderUsage, RelayNode, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { AgentRun, AgentSession, ChangeSet, CommandApproval, Provider, ProviderUsage, RelayNode, SessionEvent, TokenUsage, ApprovalDecision, UsageSummary } from '@maatgen/protocol';
 import { httpAgentApi, setApiBasePath, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
 import { reasoningEffortOptions } from './constants';
-import { githubWorkspace } from './github/workspace';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
+import FileTree from './FileTree.vue';
+import { githubWorkspace } from './github/workspace';
 import { renderMarkdown } from './markdown';
 import UsageBarChart, { type UsageSeriesDef, type UsageStackedPeriod } from './UsageBarChart.vue';
-import FileTree from './FileTree.vue';
 
 const USAGE_PROVIDER_ORDER = ['codex', 'claude', 'copilot'] as const;
 const USAGE_PROVIDER_COLORS: Record<(typeof USAGE_PROVIDER_ORDER)[number], string> = {
@@ -469,7 +469,7 @@ function selectWorkspaceHistory(path: string) {
   workspaceHistoryOpen.value = false;
 }
 
-// Node relay (ADR-009). nodeStatusIcon/nodeStatusLabel back the selector's
+// Node relay . nodeStatusIcon/nodeStatusLabel back the selector's
 // ●/◐/○ dots; the full node list (always including "local" first, per the
 // server) is refreshed on a timer so a pending node's transition to
 // connected, or a connected node dropping to disconnected, shows up without

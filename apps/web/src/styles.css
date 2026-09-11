@@ -123,7 +123,7 @@ select.shell-repository { cursor: pointer; }
 .brand-mark img { width: 27px; height: 27px; display: block; object-fit: cover; }
 .topbar-status { display: flex; align-items: center; gap: 14px; }
 
-/* Node relay (ADR-009): header node selector. */
+/* Node relay : header node selector. */
 .node-selector { position: relative; }
 .node-selector-toggle { display: flex; align-items: center; gap: 7px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); color: #cdd6cf; font: 11px ui-monospace, monospace; cursor: pointer; }
 .node-status-dot { font-size: 10px; line-height: 1; }

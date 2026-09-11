@@ -21,11 +21,11 @@ const DefaultRelativePath = "config/providers.json"
 var defaultConfig []byte
 
 type Config struct {
-	Providers       []protocol.Provider    `json:"providers"`
-	CommandApproval CommandApprovalConfig  `json:"commandApproval"`
-	GitHub          GitHubConfig           `json:"github"`
+	Providers       []protocol.Provider   `json:"providers"`
+	CommandApproval CommandApprovalConfig `json:"commandApproval"`
+	GitHub          GitHubConfig          `json:"github"`
 	// Upstream is this node's own outbound relay connection setting
-	// (ADR-009), set from its "Server" settings screen and persisted here
+	// , set from its "Server" settings screen and persisted here
 	// so it survives restarts without needing --upstream-url etc. again.
 	Upstream protocol.UpstreamConfig `json:"upstream"`
 }

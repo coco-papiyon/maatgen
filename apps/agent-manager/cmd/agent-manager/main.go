@@ -84,8 +84,8 @@ func run() error {
 	// browser-facing listener above. upstreamURL, when set, makes this
 	// process a lower node that dials out to another Agent Manager's relay
 	// listener instead of (or in addition to) accepting its own.
-	relayListen := flag.String("relay-listen", "", "address for a dedicated /api/relay/connect listener that accepts lower-node connections (ADR-009); empty disables it. Anything other than a loopback address exposes this one endpoint outside the machine; the network path to it is the operator's responsibility (Decision 6 defers token verification)")
-	upstreamURL := flag.String("upstream-url", "", "upper node's relay endpoint to dial out to as a lower node (ADR-009), e.g. ws://upper-host:3101/api/relay/connect; empty disables the outbound connection")
+	relayListen := flag.String("relay-listen", "", "address for a dedicated /api/relay/connect listener that accepts lower-node connections ; empty disables it. Anything other than a loopback address exposes this one endpoint outside the machine; the network path to it is the operator's responsibility (Decision 6 defers token verification)")
+	upstreamURL := flag.String("upstream-url", "", "upper node's relay endpoint to dial out to as a lower node , e.g. ws://upper-host:3101/api/relay/connect; empty disables the outbound connection")
 	nodeID := flag.String("node-id", "", "this node's id when connecting to an upstream node via --upstream-url (required together with it)")
 	nodeName := flag.String("node-name", "", "this node's display name when connecting to an upstream node via --upstream-url")
 	nodeToken := flag.String("node-token", "", "token to present when connecting to an upstream node via --upstream-url (currently not verified by the upstream)")
@@ -463,7 +463,7 @@ func run() error {
 		relayMux := http.NewServeMux()
 		relayMux.HandleFunc("GET /api/relay/connect", relayService.ConnectHandler())
 		relayHTTPServer = &http.Server{Handler: relayMux, ReadHeaderTimeout: 5 * time.Second}
-		slog.Warn("accepting lower-node relay connections; the network path to this listener is not authenticated and must be secured by the operator (ADR-009)", "address", relayListener.Addr().String())
+		slog.Warn("accepting lower-node relay connections; the network path to this listener is not authenticated and must be secured by the operator ", "address", relayListener.Addr().String())
 		go func() {
 			if serveErr := relayHTTPServer.Serve(relayListener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 				slog.Error("relay listener stopped", "error", serveErr)

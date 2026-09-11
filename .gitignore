@@ -16,8 +16,11 @@ bin/
 .maatgen/
 result/
 apps/agent-manager/config/providers.json
+apps/agent-manager/agent-manager
+apps/agent-manager/agent-manager.exe
 
 # Editors and OS files
 .vscode-test/
 .DS_Store
 Thumbs.db
+
