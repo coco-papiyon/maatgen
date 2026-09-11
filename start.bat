@@ -3,6 +3,9 @@ setlocal
 
 cd /d "%~dp0"
 
+set "PORT=%~1"
+if "%PORT%"=="" set "PORT=3100"
+
 echo === Building Maatgen ===
 call corepack pnpm build
 if errorlevel 1 (
@@ -22,10 +25,11 @@ if errorlevel 1 (
 
 echo.
 echo === Starting Maatgen ===
-echo Open http://127.0.0.1:3100/ in your browser.
+echo Open http://127.0.0.1:%PORT%/ in your browser.
 "%~dp0apps\agent-manager\agent-manager.exe" ^
   --config "config\providers.json" ^
   --static-dir "%~dp0apps\web\dist" ^
-  --data-dir "%~dp0.maatgen"
+  --data-dir "%~dp0.maatgen" ^
+  --port %PORT%
 
 endlocal
