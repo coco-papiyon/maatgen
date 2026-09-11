@@ -34,6 +34,8 @@ import type {
   UsageProviderListResponse,
   RelayNode,
   RelayNodeListResponse,
+  UpstreamConfig,
+  UpstreamStatus,
 } from '@maatgen/protocol';
 
 export type UsageGranularity = 'day' | 'week' | 'month';
@@ -157,6 +159,13 @@ export interface AgentApi {
   listNodes(): Promise<RelayNode[]>;
   createNode(name: string): Promise<RelayNode>;
   deleteNode(id: string): Promise<void>;
+
+  // This node's own outbound relay connection ("Server" settings screen,
+  // ADR-009): also always at the top-level base path, for the same reason
+  // as node management above — it describes whichever Agent Manager served
+  // the page, not whichever node is currently selected.
+  getUpstreamStatus(): Promise<UpstreamStatus>;
+  setUpstreamConfig(config: UpstreamConfig): Promise<UpstreamStatus>;
 }
 
 interface ApiErrorEnvelope {
@@ -426,6 +435,13 @@ export const httpAgentApi: AgentApi = {
   },
   deleteNode(id) {
     return requestAtRoot(`/api/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  getUpstreamStatus() {
+    return requestAtRoot('/api/v1/upstream');
+  },
+  setUpstreamConfig(config) {
+    return requestAtRoot('/api/v1/upstream', { method: 'PUT', body: JSON.stringify(config) });
   },
 };
 

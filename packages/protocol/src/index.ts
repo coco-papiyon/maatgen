@@ -371,3 +371,24 @@ export interface RelayNodeListResponse {
 export interface CreateRelayNodeRequest {
   name: string;
 }
+
+// ADR-009: this node's own outbound relay connection setting ("Server"
+// settings screen), set from its own Web UI and persisted so it survives
+// restarts without CLI flags.
+export interface UpstreamConfig {
+  enabled: boolean;
+  upstreamUrl: string;
+  nodeId: string;
+  nodeName: string;
+  nodeToken: string;
+}
+
+export type UpstreamConnectionState = 'disabled' | 'connecting' | 'connected' | 'waiting';
+
+export interface UpstreamStatus {
+  config: UpstreamConfig;
+  state: UpstreamConnectionState;
+  lastError?: string;
+  lastConnectedAt?: string;
+  nextAttemptAt?: string;
+}

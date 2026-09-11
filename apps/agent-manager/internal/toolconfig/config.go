@@ -21,9 +21,13 @@ const DefaultRelativePath = "config/providers.json"
 var defaultConfig []byte
 
 type Config struct {
-	Providers       []protocol.Provider   `json:"providers"`
-	CommandApproval CommandApprovalConfig `json:"commandApproval"`
-	GitHub          GitHubConfig          `json:"github"`
+	Providers       []protocol.Provider    `json:"providers"`
+	CommandApproval CommandApprovalConfig  `json:"commandApproval"`
+	GitHub          GitHubConfig           `json:"github"`
+	// Upstream is this node's own outbound relay connection setting
+	// (ADR-009), set from its "Server" settings screen and persisted here
+	// so it survives restarts without needing --upstream-url etc. again.
+	Upstream protocol.UpstreamConfig `json:"upstream"`
 }
 
 // GitHubConfig holds the credential and host allowlist GitHub monitoring
@@ -69,6 +73,17 @@ func SaveAllowedCommand(path string, config *Config, argv []string) error {
 		}
 	}
 	config.CommandApproval.AllowedCommands = append(config.CommandApproval.AllowedCommands, AllowedCommand{Argv: normalized})
+	return writeConfigFile(path, config)
+}
+
+// SaveUpstreamConfig persists this node's outbound relay connection setting
+// (ADR-009, set from the "Server" settings screen) so the next startup
+// reconnects automatically without CLI flags.
+func SaveUpstreamConfig(path string, config *Config, upstream protocol.UpstreamConfig) error {
+	upstream.UpstreamURL = strings.TrimSpace(upstream.UpstreamURL)
+	upstream.NodeID = strings.TrimSpace(upstream.NodeID)
+	upstream.NodeName = strings.TrimSpace(upstream.NodeName)
+	config.Upstream = upstream
 	return writeConfigFile(path, config)
 }
 

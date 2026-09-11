@@ -374,6 +374,23 @@ func run() error {
 	// is turned on); only the second listener that actually accepts lower
 	// nodes is conditional on --relay-listen.
 	relayService := relay.NewService(*relayListen, slog.Default())
+	// clientSupervisor is this node acting as a lower node (its outbound
+	// connection to an upper node). Its handler is only known once
+	// server.New(...).Handler() is built below (which itself needs to
+	// close over clientSupervisor for the Server settings screen's API),
+	// so it starts with a nil handler and SetHandler is called afterward,
+	// before the first Configure.
+	clientSupervisor := relay.NewClientSupervisor(nil, slog.Default())
+	upstreamConfigSetter := func(_ context.Context, config protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		modelConfigMu.Lock()
+		saveErr := toolconfig.SaveUpstreamConfig(resolvedConfigPath, &toolConfig, config)
+		modelConfigMu.Unlock()
+		if saveErr != nil {
+			return protocol.UpstreamStatus{}, saveErr
+		}
+		clientSupervisor.Configure(config)
+		return clientSupervisor.Status(context.Background()), nil
+	}
 
 	if err := runtimeinfo.Write(*runtimeFile, runtimeinfo.Metadata{
 		PID:           os.Getpid(),
@@ -413,6 +430,8 @@ func run() error {
 			WorkspaceReader:         sessions,
 			GitHubMonitorController: githubMonitor,
 			RelayController:         relayService,
+			UpstreamStatusReader:    clientSupervisor.Status,
+			UpstreamConfigSetter:    upstreamConfigSetter,
 			StaticFS:                staticFS,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -451,17 +470,19 @@ func run() error {
 			}
 		}()
 	}
+	// ADR-009: this node's own outbound relay connection (acting as a lower
+	// node). --upstream-url etc., when given, override whatever was saved
+	// from the Server settings screen for this run only; the saved config
+	// (toolConfig.Upstream) is what a bare restart without flags resumes.
+	clientSupervisor.SetHandler(httpServer.Handler)
+	initialUpstream := toolConfig.Upstream
 	if *upstreamURL != "" {
-		slog.Info("connecting to upstream relay node", "upstream", *upstreamURL, "node_id", *nodeID)
-		go relay.RunClient(ctx, relay.ClientOptions{
-			UpstreamURL: *upstreamURL,
-			NodeID:      *nodeID,
-			NodeName:    *nodeName,
-			NodeToken:   *nodeToken,
-			Handler:     httpServer.Handler,
-			Logger:      slog.Default(),
-		})
+		initialUpstream = protocol.UpstreamConfig{
+			Enabled: true, UpstreamURL: *upstreamURL,
+			NodeID: *nodeID, NodeName: *nodeName, NodeToken: *nodeToken,
+		}
 	}
+	clientSupervisor.Configure(initialUpstream)
 
 	select {
 	case <-ctx.Done():
@@ -475,6 +496,7 @@ func run() error {
 				slog.Warn("relay listener shutdown failed", "error", err)
 			}
 		}
+		clientSupervisor.Configure(protocol.UpstreamConfig{})
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}

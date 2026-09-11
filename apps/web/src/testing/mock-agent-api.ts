@@ -24,6 +24,8 @@ import type {
   SendMessageRequest,
   SessionEvent,
   UpdateGitHubMonitorRequest,
+  UpstreamConfig,
+  UpstreamStatus,
   UsageSummary,
   WsTicketResponse,
 } from '@maatgen/protocol';
@@ -51,6 +53,10 @@ export class MockAgentApi implements AgentApi {
   private readonly githubIssues: GitHubItem[] = mockGitHubIssues();
   private readonly relayNodes = new Map<string, RelayNode>();
   private relayNodeCounter = 0;
+  private upstreamStatus: UpstreamStatus = {
+    config: { enabled: false, upstreamUrl: '', nodeId: '', nodeName: '', nodeToken: '' },
+    state: 'disabled',
+  };
   private readonly githubPulls: GitHubItem[] = mockGitHubPullRequests();
 
   constructor() {
@@ -648,6 +654,23 @@ export class MockAgentApi implements AgentApi {
     if (!node) throw new AgentApiError('node was not found', 404, 'node_not_found');
     if (node.status === 'connected') throw new AgentApiError('a connected node cannot be deleted', 409, 'node_connected');
     this.relayNodes.delete(id);
+  }
+
+  // This node's own outbound relay connection (ADR-009 "Server" settings
+  // screen). The mock never actually dials out; setUpstreamConfig just
+  // stores whatever was submitted and reports it back as "connecting" when
+  // enabled, which is enough to exercise the settings form and its status
+  // display without a real relay handshake.
+  async getUpstreamStatus(): Promise<UpstreamStatus> {
+    return clone(this.upstreamStatus);
+  }
+
+  async setUpstreamConfig(config: UpstreamConfig): Promise<UpstreamStatus> {
+    this.upstreamStatus = {
+      config: clone(config),
+      state: config.enabled && config.upstreamUrl && config.nodeId ? 'connecting' : 'disabled',
+    };
+    return clone(this.upstreamStatus);
   }
 }
 

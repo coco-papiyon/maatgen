@@ -40,6 +40,11 @@ const routes: RouteRecordRaw[] = [
     name: 'github-settings',
     component: () => import('./views/GitHubSettingsView.vue'),
   },
+  {
+    path: '/server',
+    name: 'server-settings',
+    component: () => import('./views/ServerSettingsView.vue'),
+  },
 ];
 
 export function createAppRouter() {

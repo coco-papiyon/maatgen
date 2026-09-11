@@ -30,6 +30,7 @@ function onRemoteChange(event: Event) {
       <RouterLink to="/github/pulls" class="shell-nav-link" :class="{ active: isPullsArea }">PR</RouterLink>
       <RouterLink to="/github/events" class="shell-nav-link" :class="{ active: routeName() === 'github-events' }">Job</RouterLink>
       <RouterLink to="/github/settings" class="shell-nav-link" :class="{ active: routeName() === 'github-settings' }">設定</RouterLink>
+      <RouterLink to="/server" class="shell-nav-link" :class="{ active: routeName() === 'server-settings' }">サーバ</RouterLink>
       <select
         v-if="remoteGroups.length"
         class="shell-repository"

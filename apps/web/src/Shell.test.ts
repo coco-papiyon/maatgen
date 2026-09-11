@@ -52,7 +52,7 @@ describe('Shell', () => {
   it('renders the requested top menu order without a GitHub monitoring group', async () => {
     const { wrapper } = await mountShell('/');
     const labels = wrapper.findAll('.shell-nav > .shell-nav-link').map((link) => link.text());
-    expect(labels).toEqual(['Session', 'Issue', 'PR', 'Job', '設定']);
+    expect(labels).toEqual(['Session', 'Issue', 'PR', 'Job', '設定', 'サーバ']);
     expect(wrapper.find('.shell-nav-group').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('GitHub監視');
   });
