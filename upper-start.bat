@@ -32,6 +32,24 @@ if errorlevel 1 (
 
 echo.
 echo === Starting Maatgen (upper node) ===
+set "MAATGEN_START_PORT=%PORT%"
+set "MAATGEN_RELAY_PORT=%RELAY_PORT%"
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+  "$ports = @([int]$env:MAATGEN_START_PORT, [int]$env:MAATGEN_RELAY_PORT) | Select-Object -Unique; " ^
+  "$listeners = @($ports | ForEach-Object { Get-NetTCPConnection -LocalPort $_ -State Listen -ErrorAction SilentlyContinue }); " ^
+  "$processIds = @($listeners | Select-Object -ExpandProperty OwningProcess -Unique); " ^
+  "if ($processIds.Count -gt 0) { " ^
+  "  Write-Host ('Ports {0} are in use. Stopping listener PID(s): {1}' -f ($ports -join ', '), ($processIds -join ', ')); " ^
+  "  foreach ($processId in $processIds) { Stop-Process -Id $processId -Force -ErrorAction Stop }; " ^
+  "  Start-Sleep -Milliseconds 200; " ^
+  "  foreach ($portNumber in $ports) { " ^
+  "    if (Get-NetTCPConnection -LocalPort $portNumber -State Listen -ErrorAction SilentlyContinue) { throw ('Port {0} is still in use.' -f $portNumber) } " ^
+  "  } " ^
+  "}"
+if errorlevel 1 (
+  echo Maatgen was not started because port %PORT% or %RELAY_PORT% could not be released.
+  exit /b 1
+)
 echo Open http://127.0.0.1:%PORT%/ in your browser.
 echo Lower nodes should use: --upstream-url ws://^<this-host^>:%RELAY_PORT%/api/relay/connect
 "%~dp0apps\agent-manager\agent-manager.exe" ^
