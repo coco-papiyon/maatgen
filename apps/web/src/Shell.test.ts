@@ -73,20 +73,26 @@ describe('Shell', () => {
   });
 
   it('adds a newly saved Node Name to the server selector and allows selecting it', async () => {
-    const { wrapper } = await mountShell('/server');
-    const nodeNameInput = wrapper.findAll('input[type="text"]')[3]!;
-    await nodeNameInput.setValue('Linux dev box');
+    const { wrapper, api } = await mountShell('/server');
+    const textInputs = wrapper.findAll('input[type="text"]');
+    await textInputs[0]!.setValue('upper-host');
+    await textInputs[1]!.setValue('3101');
+    await textInputs[2]!.setValue('linux-dev');
+    await textInputs[3]!.setValue('Linux dev box');
     await wrapper.get('.github-form-actions button').trigger('click');
     await flushPromises();
+
+    const [upstream] = await api.listUpstreams();
+    const nodeId = `upstream:${upstream!.config.id}`;
 
     await wrapper.get('.node-selector-toggle').trigger('click');
     const option = wrapper.findAll('.node-option').find((candidate) => candidate.text().includes('Linux dev box'))!;
     expect(option.exists()).toBe(true);
     await option.trigger('click');
     expect(wrapper.get('.node-selector-toggle').text()).toContain('Linux dev box');
-    expect(selectedNodeId.value).toBe('upstream');
-    expect(getApiBasePath()).toBe('/api/upstream');
-    expect(new URLSearchParams(window.location.search).get('node')).toBe('upstream');
+    expect(selectedNodeId.value).toBe(nodeId);
+    expect(getApiBasePath()).toBe(`/api/upstreams/${upstream!.config.id}`);
+    expect(new URLSearchParams(window.location.search).get('node')).toBe(nodeId);
   });
 
   it('redirects "/github" to the event history route', async () => {

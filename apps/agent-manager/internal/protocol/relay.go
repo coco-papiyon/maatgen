@@ -37,11 +37,15 @@ type RelayNodeListResponse struct {
 	Nodes []RelayNode `json:"nodes"`
 }
 
-// UpstreamConfig is a lower node's own outbound connection setting: which
-// upper node to dial, and under which node id/name/token. It is set from
-// the lower node's own Web UI (a "Server" settings screen) and persisted to
-// the tool config file so it survives restarts without CLI flags.
+// UpstreamConfig is one upper node this (lower) node dials out to: which
+// upper node to dial, and under which node id/name/token. A lower node may
+// have several of these configured at once (each dialed independently). It
+// is set from the lower node's own Web UI (a "Server" settings screen) and
+// persisted to the tool config file so it survives restarts without CLI
+// flags. ID is assigned by the server when the entry is created and is
+// empty on a create request.
 type UpstreamConfig struct {
+	ID          string `json:"id,omitempty"`
 	Enabled     bool   `json:"enabled"`
 	UpstreamURL string `json:"upstreamUrl"`
 	NodeID      string `json:"nodeId"`
@@ -70,4 +74,11 @@ type UpstreamStatus struct {
 	LastError       string                  `json:"lastError,omitempty"`
 	LastConnectedAt *time.Time              `json:"lastConnectedAt,omitempty"`
 	NextAttemptAt   *time.Time              `json:"nextAttemptAt,omitempty"`
+}
+
+// UpstreamStatusListResponse is GET /api/v1/upstreams's body: every upper
+// node this node is currently configured to dial out to, in no particular
+// order beyond what the server returns.
+type UpstreamStatusListResponse struct {
+	Upstreams []UpstreamStatus `json:"upstreams"`
 }

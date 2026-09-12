@@ -32,6 +32,7 @@ import type {
     UpdateGitHubMonitorRequest,
     UpstreamConfig,
     UpstreamStatus,
+    UpstreamStatusListResponse,
     UsageModelListResponse,
     UsageProviderListResponse,
     UsageSummary,
@@ -160,12 +161,15 @@ export interface AgentApi {
   createNode(name: string): Promise<RelayNode>;
   deleteNode(id: string): Promise<void>;
 
-  // This node's own outbound relay connection ("Server" settings screen,
-  // ADR-009): also always at the top-level base path, for the same reason
-  // as node management above — it describes whichever Agent Manager served
-  // the page, not whichever node is currently selected.
-  getUpstreamStatus(): Promise<UpstreamStatus>;
-  setUpstreamConfig(config: UpstreamConfig): Promise<UpstreamStatus>;
+  // This node's own outbound relay connections ("Server" settings screen,
+  // ADR-009, extended to allow several upper nodes at once): also always at
+  // the top-level base path, for the same reason as node management above —
+  // it describes whichever Agent Manager served the page, not whichever
+  // node is currently selected.
+  listUpstreams(): Promise<UpstreamStatus[]>;
+  createUpstream(config: UpstreamConfig): Promise<UpstreamStatus>;
+  updateUpstream(id: string, config: UpstreamConfig): Promise<UpstreamStatus>;
+  deleteUpstream(id: string): Promise<void>;
 }
 
 interface ApiErrorEnvelope {
@@ -181,8 +185,8 @@ export class AgentApiError extends Error {
 
 // basePath scopes every AgentApi call to one node (ADR-009 Decision 5): ''
 // for the directly opened ("local") node, "/api/nodes/{nodeId}" to reach a
-// connected lower node, or "/api/upstream" to reach the configured upper
-// node over the same bidirectional relay session. The
+// connected lower node, or "/api/upstreams/{id}" to reach one of the
+// configured upper nodes over the same bidirectional relay session. The
 // Web UI's node selector is the only caller of setApiBasePath; every other
 // request<T> call site is unaware a remote node is even involved, which is
 // the point of proxying the exact same API (ADR-009 Decision 2) instead of
@@ -438,11 +442,18 @@ export const httpAgentApi: AgentApi = {
     return requestAtRoot(`/api/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
-  getUpstreamStatus() {
-    return requestAtRoot('/api/v1/upstream');
+  async listUpstreams() {
+    const response = await requestAtRoot<UpstreamStatusListResponse>('/api/v1/upstreams');
+    return response.upstreams;
   },
-  setUpstreamConfig(config) {
-    return requestAtRoot('/api/v1/upstream', { method: 'PUT', body: JSON.stringify(config) });
+  createUpstream(config) {
+    return requestAtRoot('/api/v1/upstreams', { method: 'POST', body: JSON.stringify(config) });
+  },
+  updateUpstream(id, config) {
+    return requestAtRoot(`/api/v1/upstreams/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(config) });
+  },
+  deleteUpstream(id) {
+    return requestAtRoot(`/api/v1/upstreams/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 };
 

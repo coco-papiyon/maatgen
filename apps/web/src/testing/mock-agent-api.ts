@@ -53,10 +53,8 @@ export class MockAgentApi implements AgentApi {
   private readonly githubIssues: GitHubItem[] = mockGitHubIssues();
   private readonly relayNodes = new Map<string, RelayNode>();
   private relayNodeCounter = 0;
-  private upstreamStatus: UpstreamStatus = {
-    config: { enabled: false, upstreamUrl: '', nodeId: '', nodeName: '', nodeToken: '' },
-    state: 'disabled',
-  };
+  private readonly upstreams = new Map<string, UpstreamStatus>();
+  private upstreamCounter = 0;
   private readonly githubPulls: GitHubItem[] = mockGitHubPullRequests();
 
   constructor() {
@@ -656,21 +654,40 @@ export class MockAgentApi implements AgentApi {
     this.relayNodes.delete(id);
   }
 
-  // This node's own outbound relay connection (ADR-009 "Server" settings
-  // screen). The mock never actually dials out; setUpstreamConfig just
-  // stores whatever was submitted and reports it back as "connecting" when
-  // enabled, which is enough to exercise the settings form and its status
-  // display without a real relay handshake.
-  async getUpstreamStatus(): Promise<UpstreamStatus> {
-    return clone(this.upstreamStatus);
+  // This node's own outbound relay connections (ADR-009 "Server" settings
+  // screen, extended to allow several upper nodes at once). The mock never
+  // actually dials out; createUpstream/updateUpstream just store whatever
+  // was submitted and report it back as "connecting" when enabled, which is
+  // enough to exercise the settings screen and its status display without a
+  // real relay handshake.
+  async listUpstreams(): Promise<UpstreamStatus[]> {
+    return Array.from(this.upstreams.values()).map(clone);
   }
 
-  async setUpstreamConfig(config: UpstreamConfig): Promise<UpstreamStatus> {
-    this.upstreamStatus = {
-      config: clone(config),
+  async createUpstream(config: UpstreamConfig): Promise<UpstreamStatus> {
+    this.upstreamCounter += 1;
+    const id = `upstream-mock-${this.upstreamCounter}`;
+    const status: UpstreamStatus = {
+      config: clone({ ...config, id }),
       state: config.enabled && config.upstreamUrl && config.nodeId ? 'connecting' : 'disabled',
     };
-    return clone(this.upstreamStatus);
+    this.upstreams.set(id, status);
+    return clone(status);
+  }
+
+  async updateUpstream(id: string, config: UpstreamConfig): Promise<UpstreamStatus> {
+    if (!this.upstreams.has(id)) throw new AgentApiError('upstream was not found', 404, 'upstream_not_found');
+    const status: UpstreamStatus = {
+      config: clone({ ...config, id }),
+      state: config.enabled && config.upstreamUrl && config.nodeId ? 'connecting' : 'disabled',
+    };
+    this.upstreams.set(id, status);
+    return clone(status);
+  }
+
+  async deleteUpstream(id: string): Promise<void> {
+    if (!this.upstreams.has(id)) throw new AgentApiError('upstream was not found', 404, 'upstream_not_found');
+    this.upstreams.delete(id);
   }
 }
 

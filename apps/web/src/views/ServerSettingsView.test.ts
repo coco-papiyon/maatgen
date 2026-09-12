@@ -18,57 +18,93 @@ async function mountSettings(api = new MockAgentApi()) {
   return { wrapper, api };
 }
 
-describe('ServerSettingsView (ADR-009 upstream connection)', () => {
-  it('starts disabled with empty fields', async () => {
+function newServerInputs(wrapper: VueWrapper) {
+  const section = wrapper.findAll('.github-card').at(-1)!;
+  return {
+    checkbox: section.get('input[type="checkbox"]'),
+    textInputs: section.findAll('input[type="text"]'),
+    addButton: section.get('.github-form-actions button'),
+  };
+}
+
+describe('ServerSettingsView (ADR-009 upstream connections, multi-server)', () => {
+  it('starts with no configured servers and an empty add-server form', async () => {
     const { wrapper } = await mountSettings();
-    expect((wrapper.get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false);
-    expect(wrapper.text()).toContain('無効');
+    expect(wrapper.findAll('.github-card')).toHaveLength(1);
+    const { checkbox } = newServerInputs(wrapper);
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true);
   });
 
-  it('saves the upstream connection settings and shows the resulting state', async () => {
+  it('adds a new server and lists it with its connecting state', async () => {
     const { wrapper, api } = await mountSettings();
 
-    await wrapper.get('input[type="checkbox"]').setValue(true);
-    const [hostInput, portInput, nodeIdInput, nodeNameInput] = wrapper.findAll('input[type="text"]');
-    await hostInput!.setValue('upper-host');
-    await portInput!.setValue('3101');
-    await nodeIdInput!.setValue('linux-dev');
-    await nodeNameInput!.setValue('Linux dev box');
-    await wrapper.get('.github-form-actions button').trigger('click');
+    const { textInputs, addButton } = newServerInputs(wrapper);
+    await textInputs[0]!.setValue('upper-host');
+    await textInputs[1]!.setValue('3101');
+    await textInputs[2]!.setValue('linux-dev');
+    await textInputs[3]!.setValue('Linux dev box');
+    await addButton.trigger('click');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('保存しました');
     expect(wrapper.text()).toContain('接続試行中');
+    expect(wrapper.text()).toContain('Linux dev box');
 
-    const status = await api.getUpstreamStatus();
-    expect(status.config).toEqual({
+    const upstreams = await api.listUpstreams();
+    expect(upstreams).toHaveLength(1);
+    expect(upstreams[0]!.config).toMatchObject({
       enabled: true,
       upstreamUrl: 'ws://upper-host:3101/api/relay/connect',
       nodeId: 'linux-dev',
       nodeName: 'Linux dev box',
-      nodeToken: '',
     });
     expect(nodes.value.find((node) => node.id === 'local')?.name).toBe('Local');
-    expect(nodes.value.find((node) => node.id === 'upstream')?.name).toBe('Linux dev box');
-    expect((await api.listNodes()).filter((node) => node.status === 'pending')).toHaveLength(0);
+    expect(nodes.value.find((node) => node.name === 'Linux dev box')).toBeDefined();
   });
 
-  it('does not add the same Node Name more than once', async () => {
+  it('adding twice creates two independent servers', async () => {
     const { wrapper, api } = await mountSettings();
-    const nodeNameInput = wrapper.findAll('input[type="text"]')[3]!;
-    await nodeNameInput.setValue('Linux dev box');
-    await wrapper.get('.github-form-actions button').trigger('click');
-    await flushPromises();
-    await wrapper.get('.github-form-actions button').trigger('click');
+
+    const first = newServerInputs(wrapper);
+    await first.textInputs[2]!.setValue('node-a');
+    await first.textInputs[0]!.setValue('host-a');
+    await first.textInputs[1]!.setValue('3101');
+    await first.addButton.trigger('click');
     await flushPromises();
 
-    expect(nodes.value.filter((node) => node.id === 'upstream' && node.name === 'Linux dev box')).toHaveLength(1);
-    expect((await api.listNodes()).filter((node) => node.status === 'pending')).toHaveLength(0);
+    const second = newServerInputs(wrapper);
+    await second.textInputs[2]!.setValue('node-b');
+    await second.textInputs[0]!.setValue('host-b');
+    await second.textInputs[1]!.setValue('3101');
+    await second.addButton.trigger('click');
+    await flushPromises();
+
+    const upstreams = await api.listUpstreams();
+    expect(upstreams.map((status) => status.config.nodeId).sort()).toEqual(['node-a', 'node-b']);
+    expect(wrapper.findAll('.github-card')).toHaveLength(3); // two servers + the add-server form
   });
 
-  it('disables the save button when enabled without the required fields', async () => {
+  it('disables the add button when enabled without the required fields', async () => {
     const { wrapper } = await mountSettings();
-    await wrapper.get('input[type="checkbox"]').setValue(true);
-    expect((wrapper.get('.github-form-actions button').element as HTMLButtonElement).disabled).toBe(true);
+    const { addButton } = newServerInputs(wrapper);
+    expect((addButton.element as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('deletes a configured server', async () => {
+    const { wrapper, api } = await mountSettings();
+
+    const { textInputs, addButton } = newServerInputs(wrapper);
+    await textInputs[0]!.setValue('upper-host');
+    await textInputs[1]!.setValue('3101');
+    await textInputs[2]!.setValue('linux-dev');
+    await addButton.trigger('click');
+    await flushPromises();
+
+    expect((await api.listUpstreams())).toHaveLength(1);
+
+    await wrapper.get('.github-danger').trigger('click');
+    await flushPromises();
+
+    expect((await api.listUpstreams())).toHaveLength(0);
+    expect(wrapper.findAll('.github-card')).toHaveLength(1); // only the add-server form remains
   });
 });

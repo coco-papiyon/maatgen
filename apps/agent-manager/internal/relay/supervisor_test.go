@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -46,10 +45,10 @@ func newTestSupervisor(handler http.Handler) (*ClientSupervisor, *fakeClock) {
 
 func TestClientSupervisorDisabledConfigDoesNotConnect(t *testing.T) {
 	supervisor, _ := newTestSupervisor(http.NewServeMux())
-	supervisor.Configure(protocol.UpstreamConfig{Enabled: false, UpstreamURL: "ws://127.0.0.1:1/api/relay/connect", NodeID: "n1"})
+	supervisor.Set("u1", protocol.UpstreamConfig{Enabled: false, UpstreamURL: "ws://127.0.0.1:1/api/relay/connect", NodeID: "n1"})
 
-	status := supervisor.Status(context.Background())
-	if status.State != protocol.UpstreamStateDisabled {
+	status, ok := supervisor.Get("u1")
+	if !ok || status.State != protocol.UpstreamStateDisabled {
 		t.Fatalf("state = %q, want disabled", status.State)
 	}
 }
@@ -61,11 +60,11 @@ func TestClientSupervisorConnectsAndReportsStatus(t *testing.T) {
 	upstreamURL := "ws" + upper.URL[len("http"):] + "/api/relay/connect"
 
 	supervisor, _ := newTestSupervisor(http.NewServeMux())
-	supervisor.Configure(protocol.UpstreamConfig{Enabled: true, UpstreamURL: upstreamURL, NodeID: "linux-dev", NodeName: "Linux dev box"})
+	supervisor.Set("u1", protocol.UpstreamConfig{Enabled: true, UpstreamURL: upstreamURL, NodeID: "linux-dev", NodeName: "Linux dev box"})
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		status := supervisor.Status(context.Background())
+		status, _ := supervisor.Get("u1")
 		if status.State == protocol.UpstreamStateConnected {
 			if status.LastConnectedAt == nil {
 				t.Fatal("expected LastConnectedAt to be set once connected")
@@ -77,13 +76,13 @@ func TestClientSupervisorConnectsAndReportsStatus(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, ok := supervisor.UpstreamProxy(); !ok {
+	if _, ok := supervisor.UpstreamProxy("u1"); !ok {
 		t.Fatal("expected an upstream proxy while connected")
 	}
 
 	// Reconfiguring away should stop the connection and drop it from the registry.
-	supervisor.Configure(protocol.UpstreamConfig{Enabled: false})
-	if _, ok := supervisor.UpstreamProxy(); ok {
+	supervisor.Set("u1", protocol.UpstreamConfig{Enabled: false})
+	if _, ok := supervisor.UpstreamProxy("u1"); ok {
 		t.Fatal("upstream proxy remained available after disabling")
 	}
 	deadline = time.Now().Add(5 * time.Second)
@@ -96,8 +95,46 @@ func TestClientSupervisorConnectsAndReportsStatus(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if supervisor.Status(context.Background()).State != protocol.UpstreamStateDisabled {
-		t.Fatalf("state after disabling = %q, want disabled", supervisor.Status(context.Background()).State)
+	if status, ok := supervisor.Get("u1"); !ok || status.State != protocol.UpstreamStateDisabled {
+		t.Fatalf("state after disabling = %q, want disabled", status.State)
+	}
+}
+
+func TestClientSupervisorRunsMultipleConnectionsIndependently(t *testing.T) {
+	registryA := NewRegistry()
+	upperA := httptest.NewServer(ConnectHandler(registryA, nil))
+	defer upperA.Close()
+	registryB := NewRegistry()
+	upperB := httptest.NewServer(ConnectHandler(registryB, nil))
+	defer upperB.Close()
+
+	supervisor, _ := newTestSupervisor(http.NewServeMux())
+	supervisor.Set("a", protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws" + upperA.URL[len("http"):] + "/api/relay/connect", NodeID: "node-a"})
+	supervisor.Set("b", protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws" + upperB.URL[len("http"):] + "/api/relay/connect", NodeID: "node-b"})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		statusA, _ := supervisor.Get("a")
+		statusB, _ := supervisor.Get("b")
+		if statusA.State == protocol.UpstreamStateConnected && statusB.State == protocol.UpstreamStateConnected {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for both connections; a=%+v b=%+v", statusA, statusB)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Removing "a" must not disturb "b"'s live connection.
+	supervisor.Remove("a")
+	if _, ok := supervisor.Get("a"); ok {
+		t.Fatal("expected \"a\" to be forgotten after Remove")
+	}
+	if statusB, ok := supervisor.Get("b"); !ok || statusB.State != protocol.UpstreamStateConnected {
+		t.Fatalf("removing \"a\" affected \"b\": %+v", statusB)
+	}
+	if _, ok := supervisor.UpstreamProxy("b"); !ok {
+		t.Fatal("expected \"b\" to still have a proxy after removing \"a\"")
 	}
 }
 
@@ -111,11 +148,11 @@ func TestClientSupervisorBacksOffToQuietIntervalAfterSustainedFailure(t *testing
 	supervisor, _ := newTestSupervisor(http.NewServeMux())
 	// Port 1 on loopback refuses immediately, so dialOnce fails fast without
 	// a real timeout — the fake clock (not wall time) drives the backoff.
-	supervisor.Configure(protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws://127.0.0.1:1/api/relay/connect", NodeID: "n1"})
+	supervisor.Set("u1", protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws://127.0.0.1:1/api/relay/connect", NodeID: "n1"})
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		status := supervisor.Status(context.Background())
+		status, _ := supervisor.Get("u1")
 		if status.State == protocol.UpstreamStateWaiting {
 			break
 		}
@@ -125,7 +162,7 @@ func TestClientSupervisorBacksOffToQuietIntervalAfterSustainedFailure(t *testing
 		time.Sleep(time.Millisecond)
 	}
 
-	status := supervisor.Status(context.Background())
+	status, _ := supervisor.Get("u1")
 	if status.NextAttemptAt == nil {
 		t.Fatal("expected NextAttemptAt to be set")
 	}

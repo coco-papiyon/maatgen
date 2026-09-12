@@ -10,54 +10,102 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
 
-func TestUpstreamStatusAPI(t *testing.T) {
+func TestUpstreamListAPI(t *testing.T) {
 	config := testConfig()
-	config.UpstreamStatusReader = func(context.Context) protocol.UpstreamStatus {
-		return protocol.UpstreamStatus{
-			Config: protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws://upper:3101/api/relay/connect", NodeID: "linux-dev"},
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus {
+		return []protocol.UpstreamStatus{{
+			Config: protocol.UpstreamConfig{ID: "u1", Enabled: true, UpstreamURL: "ws://upper:3101/api/relay/connect", NodeID: "linux-dev"},
 			State:  protocol.UpstreamStateConnected,
-		}
+		}}
 	}
-	config.UpstreamConfigSetter = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
-		t.Fatal("PUT handler should not call the setter for a GET request")
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		t.Fatal("GET handler should not call the creator")
 		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		t.Fatal("GET handler should not call the updater")
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamDeleter = func(context.Context, string) error {
+		t.Fatal("GET handler should not call the deleter")
+		return nil
 	}
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/upstream"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/upstreams"))
 	if recorder.Code != 200 {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response protocol.UpstreamStatusListResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(response.Upstreams) != 1 || response.Upstreams[0].State != protocol.UpstreamStateConnected || response.Upstreams[0].Config.NodeID != "linux-dev" {
+		t.Fatalf("upstreams = %+v", response.Upstreams)
+	}
+}
+
+func TestUpstreamCreatePostAppliesAndReturnsNewStatus(t *testing.T) {
+	var lastConfig protocol.UpstreamConfig
+	config := testConfig()
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(_ context.Context, request protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		lastConfig = request
+		request.ID = "u1"
+		return protocol.UpstreamStatus{Config: request, State: protocol.UpstreamStateConnecting}, nil
+	}
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		t.Fatal("POST handler should not call the updater")
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamDeleter = func(context.Context, string) error { return nil }
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	body := `{"enabled":true,"upstreamUrl":"ws://upper:3101/api/relay/connect","nodeId":"linux-dev","nodeName":"Linux dev box","nodeToken":"t"}`
+	handler.ServeHTTP(recorder, jsonRequest("POST", "/api/v1/upstreams", body))
+	if recorder.Code != 201 {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if lastConfig.NodeID != "linux-dev" || lastConfig.UpstreamURL != "ws://upper:3101/api/relay/connect" {
+		t.Fatalf("lastConfig = %+v", lastConfig)
 	}
 	var status protocol.UpstreamStatus
 	if err := json.NewDecoder(recorder.Body).Decode(&status); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if status.State != protocol.UpstreamStateConnected || status.Config.NodeID != "linux-dev" {
+	if status.State != protocol.UpstreamStateConnecting || status.Config.ID != "u1" {
 		t.Fatalf("status = %+v", status)
 	}
 }
 
-func TestUpstreamConfigPutAppliesAndReturnsNewStatus(t *testing.T) {
+func TestUpstreamUpdatePutAppliesAndReturnsNewStatus(t *testing.T) {
+	var lastID string
 	var lastConfig protocol.UpstreamConfig
 	config := testConfig()
-	config.UpstreamStatusReader = func(context.Context) protocol.UpstreamStatus {
-		return protocol.UpstreamStatus{State: protocol.UpstreamStateDisabled}
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		t.Fatal("PUT handler should not call the creator")
+		return protocol.UpstreamStatus{}, nil
 	}
-	config.UpstreamConfigSetter = func(_ context.Context, request protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+	config.UpstreamUpdater = func(_ context.Context, id string, request protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		lastID = id
 		lastConfig = request
+		request.ID = id
 		return protocol.UpstreamStatus{Config: request, State: protocol.UpstreamStateConnecting}, nil
 	}
+	config.UpstreamDeleter = func(context.Context, string) error { return nil }
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
 	body := `{"enabled":true,"upstreamUrl":"ws://upper:3101/api/relay/connect","nodeId":"linux-dev","nodeName":"Linux dev box","nodeToken":"t"}`
-	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/upstream", body))
+	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/upstreams/u1", body))
 	if recorder.Code != 200 {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if lastConfig.NodeID != "linux-dev" || lastConfig.UpstreamURL != "ws://upper:3101/api/relay/connect" {
-		t.Fatalf("lastConfig = %+v", lastConfig)
+	if lastID != "u1" || lastConfig.NodeID != "linux-dev" {
+		t.Fatalf("lastID = %q, lastConfig = %+v", lastID, lastConfig)
 	}
 	var status protocol.UpstreamStatus
 	if err := json.NewDecoder(recorder.Body).Decode(&status); err != nil {
@@ -68,61 +116,137 @@ func TestUpstreamConfigPutAppliesAndReturnsNewStatus(t *testing.T) {
 	}
 }
 
-func TestUpstreamConfigPutRejectsEnabledWithoutRequiredFields(t *testing.T) {
+func TestUpstreamUpdatePutRejectsEnabledWithoutRequiredFields(t *testing.T) {
 	config := testConfig()
-	config.UpstreamStatusReader = func(context.Context) protocol.UpstreamStatus { return protocol.UpstreamStatus{} }
-	config.UpstreamConfigSetter = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
 		t.Fatal("setter should not be called when validation fails")
 		return protocol.UpstreamStatus{}, nil
 	}
+	config.UpstreamDeleter = func(context.Context, string) error { return nil }
 	handler := New(config, nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/upstream", `{"enabled":true}`))
+	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/upstreams/u1", `{"enabled":true}`))
 	if recorder.Code != 400 {
 		t.Fatalf("status = %d, want 400, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
 
-func TestUpstreamRoutesDisabledWhenReaderOrSetterIsNil(t *testing.T) {
+func TestUpstreamUpdatePutReturns404ForUnknownID(t *testing.T) {
+	config := testConfig()
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, ErrUpstreamNotFound
+	}
+	config.UpstreamDeleter = func(context.Context, string) error { return nil }
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/upstreams/missing", `{"enabled":false}`))
+	if recorder.Code != 404 {
+		t.Fatalf("status = %d, want 404, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestUpstreamDeleteRemovesEntry(t *testing.T) {
+	var deletedID string
+	config := testConfig()
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamDeleter = func(_ context.Context, id string) error {
+		deletedID = id
+		return nil
+	}
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, apiRequest("DELETE", "/api/v1/upstreams/u1"))
+	if recorder.Code != 204 {
+		t.Fatalf("status = %d, want 204, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if deletedID != "u1" {
+		t.Fatalf("deletedID = %q, want u1", deletedID)
+	}
+}
+
+func TestUpstreamDeleteReturns404ForUnknownID(t *testing.T) {
+	config := testConfig()
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamDeleter = func(context.Context, string) error { return ErrUpstreamNotFound }
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, apiRequest("DELETE", "/api/v1/upstreams/missing"))
+	if recorder.Code != 404 {
+		t.Fatalf("status = %d, want 404, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestUpstreamRoutesDisabledWhenAnyControllerFuncIsNil(t *testing.T) {
 	handler := New(testConfig(), nil, nil).Handler()
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/upstream"))
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/upstreams"))
 	if recorder.Code != 404 {
-		t.Fatalf("status = %d, want 404 when UpstreamStatusReader/UpstreamConfigSetter are nil", recorder.Code)
+		t.Fatalf("status = %d, want 404 when Upstream* controller functions are nil", recorder.Code)
 	}
 }
 
 func TestUpstreamProxyStripsPrefix(t *testing.T) {
 	config := testConfig()
-	config.UpstreamStatusReader = func(context.Context) protocol.UpstreamStatus { return protocol.UpstreamStatus{} }
-	config.UpstreamConfigSetter = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
 		return protocol.UpstreamStatus{}, nil
 	}
-	config.UpstreamProxyProvider = func() (http.Handler, bool) {
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamDeleter = func(context.Context, string) error { return nil }
+	config.UpstreamProxyProvider = func(id string) (http.Handler, bool) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(r.URL.Path))
+			_, _ = w.Write([]byte(id + ":" + r.URL.Path))
 		}), true
 	}
 
 	recorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest("GET", "/api/upstream/api/v1/sessions"))
-	if recorder.Code != http.StatusOK || recorder.Body.String() != "/api/v1/sessions" {
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest("GET", "/api/upstreams/u1/api/v1/sessions"))
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "u1:/api/v1/sessions" {
 		t.Fatalf("proxy response = status %d body %q", recorder.Code, recorder.Body.String())
 	}
 }
 
 func TestUpstreamProxyReturnsUnavailableWhenDisconnected(t *testing.T) {
 	config := testConfig()
-	config.UpstreamStatusReader = func(context.Context) protocol.UpstreamStatus { return protocol.UpstreamStatus{} }
-	config.UpstreamConfigSetter = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
 		return protocol.UpstreamStatus{}, nil
 	}
-	config.UpstreamProxyProvider = func() (http.Handler, bool) { return nil, false }
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamDeleter = func(context.Context, string) error { return nil }
+	config.UpstreamProxyProvider = func(id string) (http.Handler, bool) { return nil, false }
 
 	recorder := httptest.NewRecorder()
-	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest("GET", "/api/upstream/api/v1/sessions"))
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest("GET", "/api/upstreams/u1/api/v1/sessions"))
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
 	}

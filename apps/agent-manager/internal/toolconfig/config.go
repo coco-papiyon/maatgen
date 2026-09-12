@@ -24,10 +24,11 @@ type Config struct {
 	Providers       []protocol.Provider   `json:"providers"`
 	CommandApproval CommandApprovalConfig `json:"commandApproval"`
 	GitHub          GitHubConfig          `json:"github"`
-	// Upstream is this node's own outbound relay connection setting
-	// , set from its "Server" settings screen and persisted here
-	// so it survives restarts without needing --upstream-url etc. again.
-	Upstream protocol.UpstreamConfig `json:"upstream"`
+	// Upstreams are this node's own outbound relay connections
+	// (potentially several upper nodes at once), set from its "Server"
+	// settings screen and persisted here so they survive restarts without
+	// needing --upstream-url etc. again.
+	Upstreams []protocol.UpstreamConfig `json:"upstreams"`
 }
 
 // GitHubConfig holds the credential and host allowlist GitHub monitoring
@@ -76,14 +77,20 @@ func SaveAllowedCommand(path string, config *Config, argv []string) error {
 	return writeConfigFile(path, config)
 }
 
-// SaveUpstreamConfig persists this node's outbound relay connection setting
-// (ADR-009, set from the "Server" settings screen) so the next startup
-// reconnects automatically without CLI flags.
-func SaveUpstreamConfig(path string, config *Config, upstream protocol.UpstreamConfig) error {
-	upstream.UpstreamURL = strings.TrimSpace(upstream.UpstreamURL)
-	upstream.NodeID = strings.TrimSpace(upstream.NodeID)
-	upstream.NodeName = strings.TrimSpace(upstream.NodeName)
-	config.Upstream = upstream
+// SaveUpstreams persists this node's outbound relay connections (ADR-009,
+// set from the "Server" settings screen) so the next startup reconnects
+// automatically without CLI flags. The caller passes the full desired list
+// (add/update/remove is expressed by the slice's contents), matching the
+// same "replace the whole config section" pattern SaveGitHubConfig uses.
+func SaveUpstreams(path string, config *Config, upstreams []protocol.UpstreamConfig) error {
+	normalized := make([]protocol.UpstreamConfig, len(upstreams))
+	for i, upstream := range upstreams {
+		upstream.UpstreamURL = strings.TrimSpace(upstream.UpstreamURL)
+		upstream.NodeID = strings.TrimSpace(upstream.NodeID)
+		upstream.NodeName = strings.TrimSpace(upstream.NodeName)
+		normalized[i] = upstream
+	}
+	config.Upstreams = normalized
 	return writeConfigFile(path, config)
 }
 

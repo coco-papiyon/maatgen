@@ -117,8 +117,9 @@ export class SessionEventStream {
 export function webSocketURL(sessionId: string, afterSequence: number, location?: Pick<Location, 'href'>): string {
   const source = location ?? window.location;
   // getApiBasePath() is '' for the directly opened local node,
-  // "/api/nodes/{nodeId}" for a connected lower node, or "/api/upstream"
-  // for the configured upper node; the reverse proxy tunnels
+  // "/api/nodes/{nodeId}" for a connected lower node, or
+  // "/api/upstreams/{id}" for one of the configured upper nodes; the
+  // reverse proxy tunnels
   // this /ws upgrade exactly like any other proxied request (Decision 2).
   const url = new URL(getApiBasePath() + '/ws', source.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';

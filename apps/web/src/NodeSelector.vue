@@ -2,7 +2,7 @@
 import type { RelayNode } from '@maatgen/protocol';
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { useAgentApi } from './github/useAgentApi';
-import { initializeNodes, nodes, refreshNodes, selectedNode, selectedNodeId, selectNode, upstreamNodeId } from './nodes';
+import { initializeNodes, isUpstreamNodeId, nodes, refreshNodes, selectedNode, selectedNodeId, selectNode } from './nodes';
 
 const api = useAgentApi();
 const open = ref(false);
@@ -63,7 +63,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer));
           <span v-if="node.status !== 'connected'" class="node-option-status">({{ nodeStatusLabel(node.status) }})</span>
         </button>
         <button
-          v-if="node.id !== 'local' && node.id !== upstreamNodeId && node.status !== 'connected'"
+          v-if="node.id !== 'local' && !isUpstreamNodeId(node.id) && node.status !== 'connected'"
           type="button"
           class="node-option-delete"
           title="履歴から削除"

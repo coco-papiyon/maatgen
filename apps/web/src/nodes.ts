@@ -5,21 +5,45 @@ import { setApiBasePath, type AgentApi } from './api';
 export const nodes = ref<RelayNode[]>([]);
 export const selectedNodeId = ref('local');
 export const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value));
-export const upstreamNodeId = 'upstream';
-let configuredUpstream: UpstreamStatus | undefined;
+
+// Each configured upstream (ADR-009, extended to allow several upper nodes
+// at once) is presented in the selector as its own virtual RelayNode, keyed
+// by this prefix plus the upstream's own id so it never collides with a
+// downstream node id from /api/nodes.
+const upstreamNodePrefix = 'upstream:';
+
+export function upstreamNodeId(upstreamId: string): string {
+  return upstreamNodePrefix + upstreamId;
+}
+
+export function isUpstreamNodeId(nodeId: string): boolean {
+  return nodeId.startsWith(upstreamNodePrefix);
+}
+
+export function upstreamIdFromNodeId(nodeId: string): string {
+  return nodeId.slice(upstreamNodePrefix.length);
+}
+
+let configuredUpstreams: UpstreamStatus[] = [];
 
 function presentNodes(listedNodes: RelayNode[]): RelayNode[] {
-  const upstreamName = configuredUpstream?.config.nodeName.trim();
+  const upstreamNames = new Set(
+    configuredUpstreams.map((upstream) => upstream.config.nodeName.trim()).filter((name) => name !== ''),
+  );
   const presented = listedNodes.filter((node) => (
-    node.id !== upstreamNodeId && (!upstreamName || node.id === 'local' || node.name !== upstreamName || node.status !== 'pending')
+    !isUpstreamNodeId(node.id) && (node.id === 'local' || node.status !== 'pending' || !upstreamNames.has(node.name))
   ));
-  if (upstreamName) {
+  for (const upstream of configuredUpstreams) {
+    const id = upstream.config.id;
+    if (!id) continue;
+    const name = upstream.config.nodeName.trim() || upstream.config.nodeId.trim();
+    if (!name) continue;
     presented.push({
-      id: upstreamNodeId,
-      name: upstreamName,
-      status: configuredUpstream?.state === 'connected' ? 'connected' : 'disconnected',
+      id: upstreamNodeId(id),
+      name,
+      status: upstream.state === 'connected' ? 'connected' : 'disconnected',
       createdAt: '',
-      ...(configuredUpstream?.lastConnectedAt ? { connectedAt: configuredUpstream.lastConnectedAt } : {}),
+      ...(upstream.lastConnectedAt ? { connectedAt: upstream.lastConnectedAt } : {}),
     });
   }
   return presented;
@@ -28,7 +52,7 @@ function presentNodes(listedNodes: RelayNode[]): RelayNode[] {
 export async function refreshNodes(api: AgentApi): Promise<void> {
   const listedNodes = await api.listNodes();
   try {
-    configuredUpstream = await api.getUpstreamStatus();
+    configuredUpstreams = await api.listUpstreams();
   } catch {
     // Keep the last known upstream state while its status endpoint is transiently unavailable.
   }
@@ -55,16 +79,8 @@ export function selectNode(nodeId: string): void {
   window.history.replaceState(window.history.state, '', url);
 }
 
-export function setConfiguredUpstream(status: UpstreamStatus): void {
-  configuredUpstream = status;
-  nodes.value = presentNodes(nodes.value);
-  if (nodes.value.length > 0 && !nodes.value.some((node) => node.id === selectedNodeId.value)) {
-    selectNode('local');
-  }
-}
-
 function nodeApiBasePath(nodeId: string): string {
   if (nodeId === 'local') return '';
-  if (nodeId === upstreamNodeId) return '/api/upstream';
+  if (isUpstreamNodeId(nodeId)) return `/api/upstreams/${encodeURIComponent(upstreamIdFromNodeId(nodeId))}`;
   return `/api/nodes/${encodeURIComponent(nodeId)}`;
 }

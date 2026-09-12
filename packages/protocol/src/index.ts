@@ -372,10 +372,13 @@ export interface CreateRelayNodeRequest {
   name: string;
 }
 
-// ADR-009: this node's own outbound relay connection setting ("Server"
-// settings screen), set from its own Web UI and persisted so it survives
-// restarts without CLI flags.
+// ADR-009: one upper node this (lower) node dials out to ("Server" settings
+// screen). A lower node may configure several of these at once. Set from
+// its own Web UI and persisted so it survives restarts without CLI flags.
+// id is assigned by the server when the entry is created and is absent on a
+// create request.
 export interface UpstreamConfig {
+  id?: string;
   enabled: boolean;
   upstreamUrl: string;
   nodeId: string;
@@ -391,4 +394,8 @@ export interface UpstreamStatus {
   lastError?: string;
   lastConnectedAt?: string;
   nextAttemptAt?: string;
+}
+
+export interface UpstreamStatusListResponse {
+  upstreams: UpstreamStatus[];
 }

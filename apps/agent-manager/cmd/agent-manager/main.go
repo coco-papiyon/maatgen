@@ -55,6 +55,12 @@ var version = "dev"
 // closed automatically at the next manager startup.
 const sessionAutoCloseAge = 24 * time.Hour
 
+// cliFlagUpstreamID identifies the upstream connection started from
+// --upstream-url/--node-id/etc, if given. It is a fixed id (never
+// generated, never persisted to toolConfig.Upstreams) because that flag
+// bootstraps at most one connection per process lifetime, for this run only.
+const cliFlagUpstreamID = "cli-flag"
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("agent manager stopped", "error", err)
@@ -381,15 +387,75 @@ func run() error {
 	// so it starts with a nil handler and SetHandler is called afterward,
 	// before the first Configure.
 	clientSupervisor := relay.NewClientSupervisor(nil, slog.Default())
-	upstreamConfigSetter := func(_ context.Context, config protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+	// upstreamCreator/upstreamUpdater/upstreamDeleter back the "Server"
+	// settings screen's CRUD over this node's own outbound relay
+	// connections (ADR-009, extended to allow several upper nodes at
+	// once): each mutates toolConfig.Upstreams and persists the whole list,
+	// then tells clientSupervisor to (re)configure just the affected id.
+	upstreamCreator := func(_ context.Context, config protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		id, err := relay.GenerateID()
+		if err != nil {
+			return protocol.UpstreamStatus{}, err
+		}
+		config.ID = id
 		modelConfigMu.Lock()
-		saveErr := toolconfig.SaveUpstreamConfig(resolvedConfigPath, &toolConfig, config)
+		upstreams := append(append([]protocol.UpstreamConfig(nil), toolConfig.Upstreams...), config)
+		saveErr := toolconfig.SaveUpstreams(resolvedConfigPath, &toolConfig, upstreams)
 		modelConfigMu.Unlock()
 		if saveErr != nil {
 			return protocol.UpstreamStatus{}, saveErr
 		}
-		clientSupervisor.Configure(config)
-		return clientSupervisor.Status(context.Background()), nil
+		clientSupervisor.Set(id, config)
+		status, _ := clientSupervisor.Get(id)
+		return status, nil
+	}
+	upstreamUpdater := func(_ context.Context, id string, config protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		config.ID = id
+		modelConfigMu.Lock()
+		upstreams := append([]protocol.UpstreamConfig(nil), toolConfig.Upstreams...)
+		index := -1
+		for i, existing := range upstreams {
+			if existing.ID == id {
+				index = i
+				break
+			}
+		}
+		if index == -1 {
+			modelConfigMu.Unlock()
+			return protocol.UpstreamStatus{}, server.ErrUpstreamNotFound
+		}
+		upstreams[index] = config
+		saveErr := toolconfig.SaveUpstreams(resolvedConfigPath, &toolConfig, upstreams)
+		modelConfigMu.Unlock()
+		if saveErr != nil {
+			return protocol.UpstreamStatus{}, saveErr
+		}
+		clientSupervisor.Set(id, config)
+		status, _ := clientSupervisor.Get(id)
+		return status, nil
+	}
+	upstreamDeleter := func(_ context.Context, id string) error {
+		modelConfigMu.Lock()
+		upstreams := make([]protocol.UpstreamConfig, 0, len(toolConfig.Upstreams))
+		found := false
+		for _, existing := range toolConfig.Upstreams {
+			if existing.ID == id {
+				found = true
+				continue
+			}
+			upstreams = append(upstreams, existing)
+		}
+		if !found {
+			modelConfigMu.Unlock()
+			return server.ErrUpstreamNotFound
+		}
+		saveErr := toolconfig.SaveUpstreams(resolvedConfigPath, &toolConfig, upstreams)
+		modelConfigMu.Unlock()
+		if saveErr != nil {
+			return saveErr
+		}
+		clientSupervisor.Remove(id)
+		return nil
 	}
 
 	if err := runtimeinfo.Write(*runtimeFile, runtimeinfo.Metadata{
@@ -430,10 +496,14 @@ func run() error {
 			WorkspaceReader:         sessions,
 			GitHubMonitorController: githubMonitor,
 			RelayController:         relayService,
-			UpstreamStatusReader:    clientSupervisor.Status,
-			UpstreamConfigSetter:    upstreamConfigSetter,
-			UpstreamProxyProvider:   clientSupervisor.UpstreamProxy,
-			StaticFS:                staticFS,
+			UpstreamLister: func(context.Context) []protocol.UpstreamStatus {
+				return clientSupervisor.List()
+			},
+			UpstreamCreator:       upstreamCreator,
+			UpstreamUpdater:       upstreamUpdater,
+			UpstreamDeleter:       upstreamDeleter,
+			UpstreamProxyProvider: clientSupervisor.UpstreamProxy,
+			StaticFS:              staticFS,
 		}, store, store).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -473,18 +543,20 @@ func run() error {
 			}
 		}()
 	}
-	// ADR-009: this node's own outbound relay connection (acting as a lower
-	// node). --upstream-url etc., when given, override whatever was saved
-	// from the Server settings screen for this run only; the saved config
-	// (toolConfig.Upstream) is what a bare restart without flags resumes.
-	initialUpstream := toolConfig.Upstream
-	if *upstreamURL != "" {
-		initialUpstream = protocol.UpstreamConfig{
-			Enabled: true, UpstreamURL: *upstreamURL,
-			NodeID: *nodeID, NodeName: *nodeName, NodeToken: *nodeToken,
-		}
+	// ADR-009: this node's own outbound relay connections (acting as a lower
+	// node), now possibly to several upper nodes at once. The saved list
+	// (toolConfig.Upstreams) is what a bare restart without flags resumes.
+	// --upstream-url etc., when given, additionally dials one more upstream
+	// for this run only, under a fixed id that is never persisted.
+	for _, config := range toolConfig.Upstreams {
+		clientSupervisor.Set(config.ID, config)
 	}
-	clientSupervisor.Configure(initialUpstream)
+	if *upstreamURL != "" {
+		clientSupervisor.Set(cliFlagUpstreamID, protocol.UpstreamConfig{
+			ID: cliFlagUpstreamID, Enabled: true, UpstreamURL: *upstreamURL,
+			NodeID: *nodeID, NodeName: *nodeName, NodeToken: *nodeToken,
+		})
+	}
 
 	select {
 	case <-ctx.Done():
@@ -498,7 +570,7 @@ func run() error {
 				slog.Warn("relay listener shutdown failed", "error", err)
 			}
 		}
-		clientSupervisor.Configure(protocol.UpstreamConfig{})
+		clientSupervisor.Close()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}

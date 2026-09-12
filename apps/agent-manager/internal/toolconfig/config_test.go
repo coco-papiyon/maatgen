@@ -104,23 +104,27 @@ func TestSaveGitHubConfigNormalizesAndPersists(t *testing.T) {
 	}
 }
 
-func TestSaveUpstreamConfigTrimsAndPersists(t *testing.T) {
+func TestSaveUpstreamsTrimsAndPersists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config", "providers.json")
 	config := Config{Providers: []protocol.Provider{{ID: protocol.AgentCodex, Label: "Codex", Models: []string{"model-a"}}}}
-	upstream := protocol.UpstreamConfig{
-		Enabled: true, UpstreamURL: "  ws://upper-host:3101/api/relay/connect  ",
+	upstreams := []protocol.UpstreamConfig{{
+		ID: "upstream-1", Enabled: true, UpstreamURL: "  ws://upper-host:3101/api/relay/connect  ",
 		NodeID: " linux-dev ", NodeName: "  Linux dev box  ", NodeToken: "secret-token",
-	}
-	if err := SaveUpstreamConfig(path, &config, upstream); err != nil {
+	}}
+	if err := SaveUpstreams(path, &config, upstreams); err != nil {
 		t.Fatal(err)
 	}
 	loaded, _, err := Load(filepath.Join(dir, "agent-manager.exe"), DefaultRelativePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded.Upstream.Enabled || loaded.Upstream.UpstreamURL != "ws://upper-host:3101/api/relay/connect" || loaded.Upstream.NodeID != "linux-dev" || loaded.Upstream.NodeName != "Linux dev box" || loaded.Upstream.NodeToken != "secret-token" {
-		t.Fatalf("loaded.Upstream = %#v", loaded.Upstream)
+	if len(loaded.Upstreams) != 1 {
+		t.Fatalf("loaded.Upstreams = %#v", loaded.Upstreams)
+	}
+	got := loaded.Upstreams[0]
+	if got.ID != "upstream-1" || !got.Enabled || got.UpstreamURL != "ws://upper-host:3101/api/relay/connect" || got.NodeID != "linux-dev" || got.NodeName != "Linux dev box" || got.NodeToken != "secret-token" {
+		t.Fatalf("loaded.Upstreams[0] = %#v", got)
 	}
 }
 
