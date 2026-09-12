@@ -30,7 +30,7 @@ import type {
     UsageSummary,
     WsTicketResponse,
 } from '@maatgen/protocol';
-import { AgentApiError, type AgentApi, type GitHubItemQuery, type JobStatusFilter, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from '../api';
+import { AgentApiError, type AgentApi, type GitHubItemQuery, type GitStatus, type JobStatusFilter, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from '../api';
 import type { EventStreamFactory } from '../event-stream';
 
 const GITHUB_DEMO_WORKSPACE = 'C:/demo/current-repository';
@@ -446,6 +446,18 @@ export class MockAgentApi implements AgentApi {
 
   async searchWorkspaceFiles(): Promise<string[]> {
     return [];
+  }
+
+  async getGitStatus(sessionId: string): Promise<GitStatus> {
+    return { sessionId, branch: 'main', upstream: 'origin/main', remoteName: 'origin', remoteUrl: 'https://github.com/example/maatgen.git', ahead: 1, behind: 0, files: [{ path: 'README.md', worktreeStatus: 'M' }] };
+  }
+
+  async commitGitChanges(sessionId: string, _message: string): Promise<GitStatus> {
+    return { ...(await this.getGitStatus(sessionId)), ahead: 2, files: [] };
+  }
+
+  async pushGitChanges(sessionId: string): Promise<GitStatus> {
+    return { ...(await this.getGitStatus(sessionId)), ahead: 0 };
   }
 
   async getWorkspaceFileTree(id: string, path = ''): Promise<WorkspaceFileNode[]> {

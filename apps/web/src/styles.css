@@ -153,12 +153,31 @@ select.shell-repository { cursor: pointer; }
 .sidebar, .changes-panel { min-height: 0; background: var(--panel); }
 .sidebar { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
 .changes-panel { border-left: 1px solid var(--line); overflow: auto; }
-.side-panel-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); background: #0f1610; }
+.side-panel-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--line); background: #0f1610; }
 .side-panel-tabs button { padding: 14px 6px 11px; border: 0; border-bottom: 2px solid transparent; color: #77847a; background: transparent; font: 700 10px ui-monospace, monospace; cursor: pointer; }
 .side-panel-tabs button:hover { color: #c7d4c9; background: #151e16; }
 .side-panel-tabs button.selected { border-bottom-color: var(--green); color: var(--green); }
 .tab-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 2px 4px; border-radius: 8px; color: #aab8ac; background: #263229; font-size: 9px; }
 .side-panel-tabs button.selected .tab-count { color: #102014; background: var(--green); }
+.side-panel-tabs button:disabled { opacity: .4; cursor: default; }
+.git-heading { justify-content: space-between; }
+.git-refresh { padding: 3px 7px; border: 1px solid #344337; border-radius: 4px; color: #9bab9e; background: transparent; font: 9px ui-monospace, monospace; cursor: pointer; }
+.git-branch-card { display: grid; gap: 5px; margin: 10px; padding: 10px; border: 1px solid #29362c; border-radius: 6px; background: #121a14; }
+.git-branch-card > strong { color: var(--green); font: 600 13px ui-monospace, monospace; }
+.git-branch-card > span, .git-branch-card small { overflow: hidden; color: #77847a; font: 10px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.git-branch-card div { display: flex; gap: 12px; color: #bdc9bf; font: 10px ui-monospace, monospace; }
+.git-commit { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 5px; margin: 10px; }
+.git-commit input { min-width: 0; padding: 7px; border: 1px solid #344337; border-radius: 4px; color: #d8e7da; background: #0f1610; }
+.git-commit button { padding: 6px 8px; border: 1px solid #3e5944; border-radius: 4px; color: #d8e7da; background: #17241a; cursor: pointer; }
+.git-commit button:disabled { opacity: .45; cursor: default; }
+.git-file-list { display: grid; margin: 0 10px 10px; border-top: 1px solid #29362c; }
+.git-file-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 7px; align-items: center; padding: 8px 2px; border-bottom: 1px solid #202b22; }
+.git-file-kind { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 3px; color: #102014; background: #d7b868; font: 700 9px ui-monospace, monospace; }
+.git-file-kind.U { background: #57d47b; }
+.git-file-row strong, .git-file-row small { display: block; overflow-wrap: anywhere; font: 10px ui-monospace, monospace; }
+.git-file-row small, .git-file-state { color: #77847a; }
+.git-file-state { display: grid; gap: 2px; text-align: right; font: 8px ui-monospace, monospace; }
+.git-file-state em { font-style: normal; }
 .usage-section { border-bottom: 1px solid var(--line); }
 .usage-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 10px; border: 1px solid #29362c; border-radius: 6px; overflow: hidden; background: #29362c; }
 .usage-summary > div { display: flex; flex-direction: column; gap: 4px; padding: 8px; background: #121a14; }
@@ -175,6 +194,7 @@ select.shell-repository { cursor: pointer; }
 .usage-run p { margin: 5px 0; overflow: hidden; color: #b8c5ba; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .usage-run-values { display: flex; gap: 8px; color: #7e8d81; font: 9px ui-monospace, monospace; }.usage-empty { padding: 10px 12px 14px; color: #667168; font-size: 10px; }
 .section-heading { height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); color: #b8c4ba; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.session-section-heading { justify-content: flex-end; }
 .session-filter { display: flex; align-items: center; gap: 8px; }
 .session-filter select { width: auto; padding: 5px 22px 5px 8px; font-size: 9px; text-transform: none; letter-spacing: normal; }
 .all-servers-toggle { display: flex; align-items: center; gap: 4px; color: #7f8c81; font: 9px ui-monospace, monospace; text-transform: none; letter-spacing: normal; cursor: pointer; }
@@ -188,7 +208,7 @@ select.shell-repository { cursor: pointer; }
 
 .new-session { padding: 15px; border-bottom: 1px solid var(--line); }
 .new-session label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 11px; }
-.provider-fields { margin-bottom: 10px; }
+.provider-fields { display: grid; gap: 10px; margin-bottom: 10px; }
 .provider-fields label { margin: 0; }
 .field-row { display: flex; gap: 7px; }
 .workspace-field-row { align-items: flex-start; }
@@ -246,6 +266,10 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .file-view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 24px max(24px, 7vw) 30px; }
 .file-view-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .file-view-header h2 { margin: 0; overflow-wrap: anywhere; color: #e1ebe2; font: 14px ui-monospace, monospace; }
+.file-view-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.file-view-action-button { padding: 7px 10px; border: 1px solid #334036; border-radius: 6px; background: transparent; color: #aab6ac; font-size: 11px; cursor: pointer; }
+.file-view-action-button:hover { color: #d8e1d9; border-color: #45664c; }
+.file-view-action-button.copied { color: var(--green); border-color: #45664c; }
 .file-view-body { min-height: 0; overflow: auto; padding-top: 18px; }
 .file-view-source { margin: 0; padding: 14px; border: 1px solid #29382d; border-radius: 8px; background: #0a100b; color: #c5d2c7; font: 12px/1.6 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .file-view-markdown { padding: 4px 2px; }

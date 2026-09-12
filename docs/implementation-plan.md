@@ -154,6 +154,8 @@ tracked fileとuntrackedかつnon-ignored fileを対象とする。ignored file�
 
 `directory`ではAgent実行、同一Sessionのresume、Event／Usage保存、ファイル参照を提供する一方、Gitに依存するCheckpoint／ChangeSet／RestoreとGitHub連携は行わない。Runの成功・失敗はCheckpointの有無に左右されず、Session close時のprivate ref cleanupも省略する。Web版とVS Code版は制限付きDirectory Sessionであることを表示し、Changes／Restore操作を無効化する。
 
+Git repository Sessionには、Run前後ChangeSetとは別にrepository全体のGit状態APIを提供する。Web版はUsage／Changes／Source／Files／Gitの5 Tabを1行に配置する。Files Tabから開いたMarkdownファイルはrendered／Raw表示を切り替えられ、表示対象のテキストをclipboardへコピーできる。Git TabからWorking Tree、upstreamとのahead／behindを確認してCommit all／Pushを実行できる。VS Code版も同じAPIと概念でGit Panelを提供する。状態参照は暗黙にfetchせずremote-tracking refを使い、commit／pushはRun実行中に拒否する。
+
 ### 3.6 ChangeSet
 
 Hunkだけでなく、新規、削除、rename、binary、file mode変更を表現できるようにする。
@@ -915,6 +917,8 @@ docs/decisions/
 ### Phase 12：ノードリレーUI
 
 - [x] サーバ選択プルダウンをWeb共通ナビゲーションに移し、リポジトリ選択の右側で全画面に常時表示
+- [x] Session作成フォームのProvider直下に一覧フィルタとは独立したHostname選択を表示し、作成先ProviderとWorkspaceデフォルト値だけを切り替え
+- [x] Session一覧の「全サーバ」をデフォルトONとし、明示的なOFF設定は保持
 - [x] ノード選択状態とSession画面のAPI base path／Session／Provider／Workspace切替を共通化
 - [x] Issue／PR／Job／GitHub監視設定を選択サーバーのAPI base pathへ追従させ、サーバー変更時に表示データを再取得
 - [x] Localは直接接続中の下位ノードとして固定し、Node Nameを別のupstream選択肢として表示

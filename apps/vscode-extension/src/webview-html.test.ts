@@ -87,6 +87,15 @@ describe('renderWebviewHtml', () => {
     expect(html).not.toContain("window.name + ' ' + window.usedPercent + '%'");
   });
 
+  it('renders Git status with commit, push, and refresh actions', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain('id="git-result"');
+    expect(html).toContain('id="git-message"');
+    expect(html).toContain("type: 'git.commit'");
+    expect(html).toContain("type: 'git.push'");
+    expect(html).toContain('renderGitStatus(event.data.gitStatus, event.data.activeRunId)');
+  });
+
   it('keeps the generated webview script syntactically valid', () => {
     const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
     const script = html.match(/<script nonce="n">([\s\S]*)<\/script>/)?.[1];

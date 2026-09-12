@@ -12,6 +12,7 @@ afterEach(() => {
   wrapper = undefined;
   localStorage.removeItem('maatgen.provider');
   localStorage.removeItem('maatgen.workspaceHistory');
+  localStorage.removeItem('maatgen.sessionHost');
   window.history.replaceState(window.history.state, '', '/');
   nodes.value = [];
   selectedNodeId.value = 'local';

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AgentRun, AgentSession, ApprovalDecision, ChangeSet, CommandApproval, NodeScopedSession, Provider, ProviderUsage, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
+import { httpAgentApi, type AgentApi, type GitStatus, type GitStatusFile, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
 import { reasoningEffortOptions } from './constants';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import FileTree from './FileTree.vue';
@@ -44,6 +44,7 @@ const unreadSessionIDs = ref<Set<string>>(new Set());
 const sessionReadSequenceKey = 'maatgen.sessionReadSequences';
 const sessionReadSequences = loadSessionReadSequences();
 const providers = ref<Provider[]>([]);
+const creationProviders = ref<Provider[]>([]);
 // Node relay (ADR-009 Decision 5): every per-node preference below is keyed
 // by node id, but the "local" node keeps the exact same key it always had
 // (no ".local" suffix) so existing localStorage data and tests survive
@@ -55,6 +56,9 @@ function providerStorageKeyFor(nodeId: string): string {
 }
 const storedProvider = localStorage.getItem(providerStorageKeyFor(selectedNodeId.value)) as AgentSession['agent'] | null;
 const newSessionProvider = ref<AgentSession['agent']>(storedProvider || 'codex');
+const sessionHostKey = 'maatgen.sessionHost';
+const storedSessionHost = localStorage.getItem(sessionHostKey);
+const sessionHostId = ref(storedSessionHost || selectedNodeId.value);
 const selectedModel = ref('');
 const reasoningEffort = ref<ReasoningEffort | ''>('');
 const autoApprove = ref(false);
@@ -71,7 +75,7 @@ const sessionStatusFilter = ref<SessionStatusFilter>(
 // single-node Chat/Diff/Usage machinery below, which still always operates
 // on whichever one node selectedNodeId names.
 const showAllServersKey = 'maatgen.showAllServers';
-const showAllServers = ref(localStorage.getItem(showAllServersKey) === '1');
+const showAllServers = ref(localStorage.getItem(showAllServersKey) !== '0');
 const allServerSessions = ref<NodeScopedSession[]>([]);
 // Set by openSessionListItem just before switching to a different node so
 // that loadNodeContext's watcher-driven reload opens this specific Session
@@ -114,7 +118,7 @@ function workspaceHistoryKeyFor(nodeId: string): string {
   return nodeId === 'local' ? 'maatgen.workspaceHistory' : `maatgen.workspaceHistory.${nodeId}`;
 }
 const workspaceHistoryLimit = 20;
-const workspaceHistory = ref<string[]>(loadWorkspaceHistory());
+const workspaceHistory = ref<string[]>(loadWorkspaceHistory(sessionHostId.value));
 const workspaceHistoryOpen = ref(false);
 const prompt = ref('');
 const activeRun = ref<AgentRun>();
@@ -126,11 +130,15 @@ const streamState = ref<EventStreamState>('disconnected');
 const diagnostic = ref<{ kind: 'manager' | 'codex' | 'claude' | 'copilot'; title: string; message: string }>();
 const selectedChangeId = ref('');
 const selectedRunId = ref('');
-type SidePanel = 'usage' | 'changes' | 'sourceStats' | 'files';
+type SidePanel = 'usage' | 'changes' | 'sourceStats' | 'files' | 'git';
 const storedSidePanel = localStorage.getItem('maatgen.sidePanel');
 const activeSidePanel = ref<SidePanel>(
-  storedSidePanel === 'usage' || storedSidePanel === 'sourceStats' || storedSidePanel === 'files' ? storedSidePanel : 'changes',
+  storedSidePanel === 'usage' || storedSidePanel === 'sourceStats' || storedSidePanel === 'files' || storedSidePanel === 'git' ? storedSidePanel : 'changes',
 );
+const gitStatus = ref<GitStatus>(emptyGitStatus(''));
+const gitLoading = ref(false);
+const gitError = ref('');
+const commitMessage = ref('');
 const fileTree = ref<WorkspaceFileNode[]>([]);
 const fileTreeSessionId = ref('');
 const fileTreeLoading = ref(false);
@@ -139,6 +147,9 @@ const viewingFilePath = ref('');
 const viewingFileContent = ref<WorkspaceFileContent>();
 const viewingFileLoading = ref(false);
 const viewingFileError = ref('');
+const viewingFileRaw = ref(false);
+const viewingFileCopied = ref(false);
+let viewingFileCopiedTimer: number | undefined;
 const showSystemMessages = ref(localStorage.getItem('maatgen.showSystemMessages') === 'true');
 const usageSummaryOpen = ref(false);
 const usageSummaryGranularity = ref<UsageGranularity>('day');
@@ -251,6 +262,7 @@ const selectedRunCommands = computed(() => {
   return [...commands.values()];
 });
 const activeProvider = computed(() => selected.value?.agent ?? newSessionProvider.value);
+const selectedSessionHost = computed(() => nodes.value.find((node) => node.id === sessionHostId.value));
 const pendingApproval = computed(() => approvals.value.find((approval) => approval.status === 'pending'));
 const availableModels = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.models ?? []);
 const providerLabel = computed(() => providers.value.find((provider) => provider.id === activeProvider.value)?.label ?? activeProvider.value);
@@ -317,6 +329,20 @@ async function selectSidePanel(panel: SidePanel) {
   activeSidePanel.value = panel;
   localStorage.setItem('maatgen.sidePanel', panel);
   if (panel === 'files') await loadFileTree();
+  if (panel === 'git') await loadGitStatus();
+}
+
+async function loadGitStatus() {
+  if (!selected.value || isDirectoryWorkspace.value) return;
+  gitLoading.value = true;
+  gitError.value = '';
+  try {
+    gitStatus.value = await api.getGitStatus(selected.value.id);
+  } catch (cause) {
+    gitError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    gitLoading.value = false;
+  }
 }
 
 async function loadFileTree() {
@@ -346,6 +372,9 @@ async function openWorkspaceFile(path: string) {
   viewingFilePath.value = path;
   viewingFileContent.value = undefined;
   viewingFileError.value = '';
+  viewingFileRaw.value = false;
+  viewingFileCopied.value = false;
+  window.clearTimeout(viewingFileCopiedTimer);
   viewingFileLoading.value = true;
   try {
     viewingFileContent.value = await api.readWorkspaceFile(selected.value.id, path);
@@ -360,6 +389,23 @@ function closeFileView() {
   viewingFilePath.value = '';
   viewingFileContent.value = undefined;
   viewingFileError.value = '';
+  viewingFileRaw.value = false;
+  viewingFileCopied.value = false;
+  window.clearTimeout(viewingFileCopiedTimer);
+}
+
+async function copyViewingFile() {
+  if (!viewingFileContent.value || viewingFileContent.value.binary) return;
+  try {
+    await navigator.clipboard.writeText(viewingFileContent.value.content);
+    viewingFileCopied.value = true;
+    window.clearTimeout(viewingFileCopiedTimer);
+    viewingFileCopiedTimer = window.setTimeout(() => {
+      viewingFileCopied.value = false;
+    }, 1500);
+  } catch (cause) {
+    handleFailure(cause);
+  }
 }
 
 function selectRun(runId: string) {
@@ -371,7 +417,16 @@ function closeRunDetail() {
 }
 
 function persistNewSessionProvider() {
-  localStorage.setItem(providerStorageKeyFor(selectedNodeId.value), newSessionProvider.value);
+  localStorage.setItem(providerStorageKeyFor(sessionHostId.value), newSessionProvider.value);
+}
+
+async function selectSessionHost(event: Event) {
+  const nodeId = (event.target as HTMLSelectElement).value;
+  if (!nodeId || nodeId === sessionHostId.value) return;
+  workspaceHistoryOpen.value = false;
+  sessionHostId.value = nodeId;
+  localStorage.setItem(sessionHostKey, nodeId);
+  await act(() => loadSessionCreationContext(nodeId));
 }
 
 function eventText(event: SessionEvent): string {
@@ -462,9 +517,9 @@ function loadSessionReadSequences(): Record<string, number> {
   }
 }
 
-function loadWorkspaceHistory(): string[] {
+function loadWorkspaceHistory(nodeId: string): string[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem(workspaceHistoryKeyFor(selectedNodeId.value)) ?? '[]') as unknown;
+    const parsed = JSON.parse(localStorage.getItem(workspaceHistoryKeyFor(nodeId)) ?? '[]') as unknown;
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
   } catch {
     return [];
@@ -473,7 +528,7 @@ function loadWorkspaceHistory(): string[] {
 
 function rememberWorkspace(path: string) {
   workspaceHistory.value = [path, ...workspaceHistory.value.filter((item) => item !== path)].slice(0, workspaceHistoryLimit);
-  localStorage.setItem(workspaceHistoryKeyFor(selectedNodeId.value), JSON.stringify(workspaceHistory.value));
+  localStorage.setItem(workspaceHistoryKeyFor(sessionHostId.value), JSON.stringify(workspaceHistory.value));
 }
 
 function toggleWorkspaceHistory() {
@@ -486,21 +541,32 @@ function selectWorkspaceHistory(path: string) {
   workspaceHistoryOpen.value = false;
 }
 
-// Shared by onMounted (first load) and loadNodeContext (switching nodes):
-// fetches the Provider catalog, default Workspace path, and Session list
-// for whichever node setApiBasePath currently targets.
-async function loadWorkspaceContextForCurrentNode() {
+async function loadSessionCreationContext(nodeId: string) {
   const [catalog, defaultWorkspace] = await Promise.all([
-    api.listProviders(),
-    api.getDefaultWorkspace(),
-    refreshSessions(true),
+    api.listProviders(nodeId),
+    api.getDefaultWorkspace(nodeId),
   ]);
+  if (sessionHostId.value !== nodeId) return;
+  creationProviders.value = catalog.providers;
   workspace.value = defaultWorkspace;
-  providers.value = catalog.providers;
-  if (!providers.value.some((provider) => provider.id === newSessionProvider.value) && providers.value[0]) {
-    newSessionProvider.value = providers.value[0].id;
+  workspaceHistory.value = loadWorkspaceHistory(nodeId);
+  const storedProviderForHost = localStorage.getItem(providerStorageKeyFor(nodeId)) as AgentSession['agent'] | null;
+  newSessionProvider.value = storedProviderForHost || newSessionProvider.value;
+  if (!creationProviders.value.some((provider) => provider.id === newSessionProvider.value) && creationProviders.value[0]) {
+    newSessionProvider.value = creationProviders.value[0].id;
   }
   persistNewSessionProvider();
+}
+
+// Shared by onMounted (first load) and loadNodeContext (switching nodes):
+// fetches the Provider catalog and Session list for the node selected by
+// the top-right server filter. Session creation has its own host context.
+async function loadWorkspaceContextForCurrentNode() {
+  const [catalog] = await Promise.all([
+    api.listProviders(),
+    refreshSessions(true),
+  ]);
+  providers.value = catalog.providers;
 }
 
 async function loadNodeContext(nodeId: string) {
@@ -513,9 +579,6 @@ async function loadNodeContext(nodeId: string) {
   selected.value = undefined;
   sessions.value = [];
   nextSessionCursor.value = '';
-  workspaceHistory.value = loadWorkspaceHistory();
-  const storedProviderForNode = localStorage.getItem(providerStorageKeyFor(nodeId)) as AgentSession['agent'] | null;
-  newSessionProvider.value = storedProviderForNode || 'codex';
 
   const node = nodes.value.find((item) => item.id === nodeId);
   if (node && node.status !== 'connected') {
@@ -557,6 +620,15 @@ function emptySessionUsage(sessionId: string): SessionUsage {
 
 function emptySourceStats(sessionId: string): SourceStats {
   return { sessionId, languages: [], total: { language: '', files: 0, blank: 0, comment: 0, code: 0 } };
+}
+
+function emptyGitStatus(sessionId: string): GitStatus {
+  return { sessionId, ahead: 0, behind: 0, files: [] };
+}
+
+function gitFileStatus(file: GitStatusFile): string {
+  if (file.indexStatus === '?' || file.worktreeStatus === '?') return 'U';
+  return file.worktreeStatus || file.indexStatus || 'M';
 }
 
 function formatTokens(value?: number): string {
@@ -683,6 +755,7 @@ async function refreshSessions(reset = false) {
     selected.value = sessions.value.find((item) => item.id === selected.value?.id) ?? selected.value;
   }
   await refreshUnreadSessions(sessions.value);
+  if (nodeContextReady && showAllServers.value) await refreshAllServerSessions();
 }
 
 // ADR-009 Decision 5.1: refreshes the cross-server aggregate list. Kept
@@ -778,6 +851,10 @@ async function selectSession(session: AgentSession) {
   eventStream?.stop();
   eventStream = undefined;
   selected.value = session;
+  if (session.workspaceKind === 'directory' && activeSidePanel.value === 'git') {
+    activeSidePanel.value = 'files';
+    localStorage.setItem('maatgen.sidePanel', 'files');
+  }
   selectedRunId.value = '';
   // The GitHub monitoring area (see Shell.vue/github/repository.ts) tracks
   // whichever repository the selected Session is backed by, so switching
@@ -796,6 +873,9 @@ async function selectSession(session: AgentSession) {
   usage.value = emptySessionUsage(session.id);
   providerUsage.value = undefined;
   sourceStats.value = emptySourceStats(session.id);
+  gitStatus.value = emptyGitStatus(session.id);
+  gitError.value = '';
+  commitMessage.value = '';
   approvals.value = [];
   approvalRule.value = '';
   activeRun.value = undefined;
@@ -818,6 +898,7 @@ async function selectSession(session: AgentSession) {
     startEventStream(session.id);
   }
   if (activeSidePanel.value === 'files') await loadFileTree();
+  if (activeSidePanel.value === 'git') await loadGitStatus();
 }
 
 async function persistSelectedModel() {
@@ -872,6 +953,7 @@ async function refreshSelectedState(sessionId: string) {
   }
   await refreshSessions();
   void refreshProviderUsage(sessionId);
+  if (activeSidePanel.value === 'git') await loadGitStatus();
 }
 
 async function refreshProviderUsage(sessionId: string) {
@@ -930,11 +1012,14 @@ async function createSession() {
   if (!trimmedWorkspace) return;
   workspaceHistoryOpen.value = false;
   await act(async () => {
-    const created = await api.createSession({ agent: newSessionProvider.value, workspace: trimmedWorkspace });
+    const created = await api.createSession({ agent: newSessionProvider.value, workspace: trimmedWorkspace }, sessionHostId.value);
     rememberWorkspace(trimmedWorkspace);
     // Keep the workspace input value so the Repository path remains after creating a session.
-    await refreshSessions(true);
-    await selectSession(created);
+    if (sessionHostId.value === selectedNodeId.value) {
+      await refreshSessions(true);
+      await selectSession(created);
+    }
+    if (showAllServers.value) await refreshAllServerSessions();
   });
 }
 
@@ -1086,6 +1171,22 @@ async function restoreAll() {
   });
 }
 
+async function commitGitChanges() {
+  if (!selected.value || !commitMessage.value.trim()) return;
+  await act(async () => {
+    gitStatus.value = await api.commitGitChanges(selected.value!.id, commitMessage.value.trim());
+    commitMessage.value = '';
+    await refreshSelectedState(selected.value!.id);
+  });
+}
+
+async function pushGitChanges() {
+  if (!selected.value) return;
+  await act(async () => {
+    gitStatus.value = await api.pushGitChanges(selected.value!.id);
+  });
+}
+
 async function openUsageSummary() {
   usageSummaryOpen.value = true;
   usageSummaryProvider.value = '';
@@ -1205,11 +1306,11 @@ onMounted(async () => {
   // or offline node id falls back to the empty state below instead of
   // hitting a proxy 404 through the normal Session-loading path.
   await initializeNodes(api).catch(() => undefined);
-  if (selectedNodeId.value !== 'local') {
-    workspaceHistory.value = loadWorkspaceHistory();
-    const storedProviderForNode = localStorage.getItem(providerStorageKeyFor(selectedNodeId.value)) as AgentSession['agent'] | null;
-    newSessionProvider.value = storedProviderForNode || 'codex';
+  if (!storedSessionHost || !nodes.value.some((node) => node.id === sessionHostId.value && node.status === 'connected')) {
+    sessionHostId.value = selectedNodeId.value;
+    localStorage.setItem(sessionHostKey, sessionHostId.value);
   }
+  await act(() => loadSessionCreationContext(sessionHostId.value));
   const currentNode = nodes.value.find((node) => node.id === selectedNodeId.value);
   if (!currentNode || currentNode.status === 'connected') {
     await act(async () => {
@@ -1236,6 +1337,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   eventStream?.stop();
   window.clearInterval(sessionPollTimer);
+  window.clearTimeout(copiedEventTimer);
+  window.clearTimeout(viewingFileCopiedTimer);
 });
 
 watch(selectedNodeId, (nodeId) => {
@@ -1285,8 +1388,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
     </header>
 
     <aside class="sidebar">
-      <div class="section-heading">
-        <span>Sessions</span>
+      <div class="section-heading session-section-heading">
         <div class="session-filter">
           <label class="all-servers-toggle" title="複数サーバのSessionをまとめて表示">
             <input v-model="showAllServers" type="checkbox" :disabled="busy" @change="toggleShowAllServers" />
@@ -1303,8 +1405,13 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
       <form class="new-session" @submit.prevent="createSession">
         <div class="provider-fields">
           <label>Provider
-            <select v-model="newSessionProvider" :disabled="busy || providers.length < 2" @change="persistNewSessionProvider">
-              <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+            <select v-model="newSessionProvider" :disabled="busy || creationProviders.length < 2" @change="persistNewSessionProvider">
+              <option v-for="provider in creationProviders" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+            </select>
+          </label>
+          <label>Hostname
+            <select aria-label="Hostname" :value="sessionHostId" :disabled="busy || nodes.length < 2" @change="selectSessionHost">
+              <option v-for="node in nodes" :key="node.id" :value="node.id" :disabled="node.status !== 'connected'">{{ node.name }}</option>
             </select>
           </label>
         </div>
@@ -1317,7 +1424,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
               <li v-for="path in workspaceHistory" :key="path" role="option" :title="path" @mousedown.prevent="selectWorkspaceHistory(path)">{{ path }}</li>
             </ul>
           </div>
-          <button type="submit" class="icon-button" :disabled="busy || !workspace.trim() || (!!selectedNode && selectedNode.status !== 'connected')" aria-label="Sessionを作成">＋</button>
+          <button type="submit" class="icon-button" :disabled="busy || !workspace.trim() || selectedSessionHost?.status !== 'connected'" aria-label="Sessionを作成">＋</button>
         </div>
       </form>
       <nav class="session-list" aria-label="Session history">
@@ -1369,7 +1476,26 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
              <p class="eyebrow">FILE</p>
              <h2>{{ viewingFilePath }}</h2>
            </div>
-           <button type="button" class="quiet-button" @click="closeFileView">チャットに戻る</button>
+           <div class="file-view-actions">
+             <button
+               v-if="viewingFileContent && !viewingFileContent.binary && viewingFileIsMarkdown"
+               type="button"
+               class="file-view-action-button"
+               @click="viewingFileRaw = !viewingFileRaw"
+             >
+               {{ viewingFileRaw ? 'Markdown' : 'Raw' }}
+             </button>
+             <button
+               v-if="viewingFileContent && !viewingFileContent.binary"
+               type="button"
+               class="file-view-action-button"
+               :class="{ copied: viewingFileCopied }"
+               @click="copyViewingFile"
+             >
+               {{ viewingFileCopied ? 'Copied' : 'Copy' }}
+             </button>
+             <button type="button" class="quiet-button" @click="closeFileView">チャットに戻る</button>
+           </div>
          </header>
          <div class="file-view-body">
            <div v-if="viewingFileLoading" class="empty-state compact">
@@ -1381,7 +1507,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
              <span class="empty-symbol">◇</span>
              <p>バイナリファイルは表示できません</p>
            </div>
-           <div v-else-if="viewingFileIsMarkdown" class="markdown-body file-view-markdown" v-html="viewingFileHtml" />
+           <div v-else-if="viewingFileIsMarkdown && !viewingFileRaw" class="markdown-body file-view-markdown" v-html="viewingFileHtml" />
            <pre v-else class="file-view-source">{{ viewingFileContent?.content }}</pre>
            <p v-if="viewingFileContent?.truncated" class="file-view-truncated">ファイルサイズが大きいため、一部のみ表示しています。</p>
          </div>
@@ -1519,10 +1645,13 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           Changes <span class="tab-count">{{ changes.files.length }}</span>
         </button>
         <button id="source-stats-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'sourceStats'" :class="{ selected: activeSidePanel === 'sourceStats' }" @click="selectSidePanel('sourceStats')">
-          Source <span class="tab-count">{{ sourceStats.total.files }}</span>
+          Source
         </button>
         <button id="files-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'files'" :class="{ selected: activeSidePanel === 'files' }" @click="selectSidePanel('files')">
-          Files <span class="tab-count">{{ fileTree.length }}</span>
+          Files
+        </button>
+        <button id="git-tab" type="button" role="tab" :aria-selected="activeSidePanel === 'git'" :class="{ selected: activeSidePanel === 'git' }" :disabled="isDirectoryWorkspace" @click="selectSidePanel('git')">
+          Git
         </button>
       </div>
       <div v-if="activeSidePanel === 'usage'" id="usage-panel" class="usage-section" role="tabpanel" aria-labelledby="usage-tab">
@@ -1610,7 +1739,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
         </div>
         <div v-else class="no-changes"><span>◇</span><p>Source stats have not been measured yet</p><small>Files tracked by Git are not counted, or cloc is not installed, or measurement is still in progress.</small></div>
       </div>
-      <div v-else id="files-panel" class="files-section" role="tabpanel" aria-labelledby="files-tab">
+      <div v-else-if="activeSidePanel === 'files'" id="files-panel" class="files-section" role="tabpanel" aria-labelledby="files-tab">
         <div class="section-heading">
           <span>Files</span><span class="count accent">{{ fileTree.length }}</span>
         </div>
@@ -1618,6 +1747,37 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
         <div v-else-if="fileTreeError" class="error-banner" role="alert">{{ fileTreeError }}</div>
         <FileTree v-else-if="fileTree.length" :nodes="fileTree" :selected-path="viewingFilePath" :load-children="loadWorkspaceDirectory" @select="openWorkspaceFile" />
         <div v-else class="no-changes"><span>◇</span><p>ファイルがありません</p></div>
+      </div>
+      <div v-else id="git-panel" class="git-section" role="tabpanel" aria-labelledby="git-tab">
+        <div class="section-heading git-heading">
+          <span>Git</span>
+          <button type="button" class="git-refresh" :disabled="gitLoading || busy" @click="loadGitStatus">Refresh</button>
+        </div>
+        <div v-if="gitLoading" class="no-changes"><span>◇</span><p>Gitの状態を読み込み中…</p></div>
+        <div v-else-if="gitError" class="error-banner" role="alert">{{ gitError }}</div>
+        <div v-else class="git-panel-content">
+          <div class="git-branch-card">
+            <strong>{{ gitStatus.branch || 'Detached HEAD' }}</strong>
+            <span v-if="gitStatus.upstream">{{ gitStatus.upstream }}</span>
+            <span v-else-if="gitStatus.remoteName">{{ gitStatus.remoteName }}（未追跡）</span>
+            <span v-else>remoteなし</span>
+            <div><span>↑ {{ gitStatus.ahead }} ahead</span><span>↓ {{ gitStatus.behind }} behind</span></div>
+            <small v-if="gitStatus.remoteUrl" :title="gitStatus.remoteUrl">{{ gitStatus.remoteUrl }}</small>
+          </div>
+          <form class="git-commit" @submit.prevent="commitGitChanges">
+            <input v-model="commitMessage" type="text" maxlength="500" placeholder="Commit message" aria-label="Commit message" :disabled="busy || !!activeRun" />
+            <button type="submit" :disabled="busy || !!activeRun || !commitMessage.trim() || !gitStatus.files.length">Commit all</button>
+            <button type="button" :disabled="busy || !!activeRun || !gitStatus.branch || !gitStatus.remoteName" @click="pushGitChanges">Push</button>
+          </form>
+          <div v-if="gitStatus.files.length" class="git-file-list">
+            <div v-for="file in gitStatus.files" :key="file.path" class="git-file-row">
+              <span :class="['git-file-kind', gitFileStatus(file)]">{{ gitFileStatus(file) }}</span>
+              <span><strong>{{ file.path }}</strong><small v-if="file.originalPath">from {{ file.originalPath }}</small></span>
+              <span class="git-file-state"><em v-if="file.indexStatus">staged {{ file.indexStatus }}</em><em v-if="file.worktreeStatus">working {{ file.worktreeStatus }}</em></span>
+            </div>
+          </div>
+          <div v-else class="no-changes"><span>◇</span><p>Working Treeはクリーンです</p><small>remoteとの差分は上のahead / behindで確認できます。</small></div>
+        </div>
       </div>
     </aside>
 

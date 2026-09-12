@@ -14,6 +14,24 @@ describe('httpAgentApi', () => {
     expect(fetch).toHaveBeenCalledWith('/api/v1/runtime-config', expect.any(Object));
   });
 
+  it('targets a specific node when loading creation defaults and creating a Session', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ defaultWorkspace: '/srv/project' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ providers: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'session-remote' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+
+    await httpAgentApi.getDefaultWorkspace('linux-dev');
+    await httpAgentApi.listProviders('upstream:upper-main');
+    await httpAgentApi.createSession({ agent: 'codex', workspace: '/srv/project' }, 'linux-dev');
+
+    expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+      '/api/nodes/linux-dev/api/v1/runtime-config',
+      '/api/upstreams/upper-main/api/v1/providers',
+      '/api/nodes/linux-dev/api/v1/sessions',
+    ]);
+  });
+
   it('requests an opaque session cursor and returns the next page cursor', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       sessions: [],

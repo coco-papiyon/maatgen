@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/checkpoint"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitops"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 	restoreservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/restore"
 	runservice "github.com/coco-papiyon/maatgen/apps/agent-manager/internal/run"
@@ -41,6 +42,7 @@ type Config struct {
 	SourceStatsReader       SourceStatsReader
 	ApprovalController      ApprovalController
 	WorkspaceReader         WorkspaceReader
+	GitController           GitController
 	GitHubMonitorController GitHubMonitorController
 	RelayController         RelayController
 	UpstreamLister          UpstreamLister
@@ -92,6 +94,12 @@ type WorkspaceReader interface {
 	SearchWorkspaceFiles(ctx context.Context, sessionID string, query string) ([]string, error)
 	GetWorkspaceFileTree(ctx context.Context, sessionID string, path string) ([]protocol.WorkspaceFileNode, error)
 	ReadWorkspaceFile(ctx context.Context, sessionID string, path string) (protocol.WorkspaceFileContent, error)
+}
+
+type GitController interface {
+	GetStatus(ctx context.Context, sessionID string) (protocol.GitStatus, error)
+	Commit(ctx context.Context, sessionID, message string) (protocol.GitStatus, error)
+	Push(ctx context.Context, sessionID string) (protocol.GitStatus, error)
 }
 
 type RunController interface {
@@ -424,6 +432,37 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 			writeJSON(w, http.StatusOK, content)
 		}))
 	}
+	if config.GitController != nil {
+		mux.Handle("GET /api/v1/sessions/{id}/git", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			status, err := config.GitController.GetStatus(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeGitOperationError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, status)
+		}))
+		mux.Handle("POST /api/v1/sessions/{id}/git/commit", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request protocol.GitCommitRequest
+			if err := readJSON(w, r, &request); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON", nil)
+				return
+			}
+			status, err := config.GitController.Commit(r.Context(), r.PathValue("id"), request.Message)
+			if err != nil {
+				writeGitOperationError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, status)
+		}))
+		mux.Handle("POST /api/v1/sessions/{id}/git/push", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			status, err := config.GitController.Push(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeGitOperationError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, status)
+		}))
+	}
 	if sessions != nil && config.UsageReader != nil {
 		mux.Handle("GET /api/v1/sessions/{id}/usage", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, err := sessions.GetSession(r.Context(), r.PathValue("id")); err != nil {
@@ -752,6 +791,23 @@ func writeRestoreError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusUnprocessableEntity, "not_restorable", "change cannot be restored", nil)
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "restore_failed", "restore operation failed", nil)
+	}
+}
+
+func writeGitOperationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, storage.ErrNotFound):
+		writeAPIError(w, http.StatusNotFound, "not_found", "session was not found", nil)
+	case errors.Is(err, gitops.ErrNotRepository):
+		writeAPIError(w, http.StatusUnprocessableEntity, "not_git_repository", err.Error(), nil)
+	case errors.Is(err, gitops.ErrRunActive):
+		writeAPIError(w, http.StatusConflict, "run_already_active", err.Error(), nil)
+	case errors.Is(err, gitops.ErrEmptyMessage):
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
+	case errors.Is(err, gitops.ErrNoChanges), errors.Is(err, gitops.ErrNoUpstream), errors.Is(err, gitops.ErrDetachedHEAD):
+		writeAPIError(w, http.StatusConflict, "git_conflict", err.Error(), nil)
+	default:
+		writeAPIError(w, http.StatusInternalServerError, "git_operation_failed", err.Error(), nil)
 	}
 }
 

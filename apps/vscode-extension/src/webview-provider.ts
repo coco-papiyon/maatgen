@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { createNonce } from './nonce.js';
 import { renderWebviewHtml } from './webview-html.js';
-import { AgentManagerClient, AgentManagerError, type AgentProvider, type ReasoningEffort, type SessionUsage } from './agent-manager-client.js';
+import { AgentManagerClient, AgentManagerError, type AgentProvider, type GitStatus, type ReasoningEffort, type SessionUsage } from './agent-manager-client.js';
 import type { AgentSession, ChangeFile, ChangeSet, CommandApproval, SessionEvent } from './agent-manager-client.js';
 import { CheckpointDocumentProvider } from './checkpoint-document-provider.js';
 import { AgentResponseDocumentProvider } from './agent-response-document-provider.js';
@@ -39,7 +39,10 @@ type WebviewMessage =
   | { type: 'response.open'; eventId: string }
   | { type: 'response.save'; eventId: string }
   | { type: 'workspace.searchFiles'; query: string; requestId: string }
-  | { type: 'provider-usage.requestAll' };
+  | { type: 'provider-usage.requestAll' }
+  | { type: 'git.refresh' }
+  | { type: 'git.commit'; message: string }
+  | { type: 'git.push' };
 
 const FILE_SEARCH_EXCLUDE = '**/{node_modules,.git,dist,out,build,.next,coverage,.venv,__pycache__}/**';
 const FILE_SEARCH_MAX_CANDIDATES = 2000;
@@ -67,6 +70,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   private lastChangeRefreshSequence = 0;
   private approvals: CommandApproval[] = [];
   private providerUsage: import('./agent-manager-client.js').ProviderUsage | undefined;
+  private gitStatus: GitStatus | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -132,6 +136,12 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
           });
         } else if (message.type === 'provider-usage.requestAll') {
           void this.requestAllProviderUsage();
+        } else if (message.type === 'git.refresh' && this.session) {
+          void this.refreshGitStatus(this.session.id);
+        } else if (message.type === 'git.commit' && this.session) {
+          void this.commitGitChanges(message.message);
+        } else if (message.type === 'git.push' && this.session) {
+          void this.pushGitChanges();
         } else if (message.type === 'session.close' && this.session) {
           void this.manager.closeSession(this.session.id).then(async () => {
             this.stopPolling();
@@ -140,6 +150,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
             this.events = [];
             this.activeRunId = undefined;
             this.changes = undefined;
+            this.gitStatus = undefined;
             this.lastChangeRefreshSequence = 0;
             this.approvals = [];
             await this.postState(undefined, [], undefined, undefined);
@@ -172,6 +183,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         this.lastChangeRefreshSequence = 0;
         this.approvals = [];
         this.providerUsage = undefined;
+        this.gitStatus = undefined;
         await this.postState(undefined, [], undefined, undefined);
         return;
       }
@@ -203,6 +215,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         this.lastChangeRefreshSequence = 0;
         this.approvals = [];
         this.providerUsage = undefined;
+        this.gitStatus = undefined;
         await this.postState(undefined, [], undefined, undefined);
         return;
       }
@@ -243,6 +256,8 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
 		if (this.session.workspaceKind !== 'directory') this.checkpointDocuments.updateChangeSet(this.changes);
         this.lastChangeRefreshSequence = latestChangeRefreshSequence;
       }
+      if (this.session.workspaceKind === 'directory') this.gitStatus = undefined;
+      else if (sessionChanged || runFinished || !this.gitStatus) this.gitStatus = await this.manager.getGitStatus(this.session.id);
       await this.postState(session, events, usage, this.changes);
       this.startPolling();
       if (sessionChanged || (previousActiveRunId && !this.activeRunId)) void this.refreshProviderUsage(session.id);
@@ -315,6 +330,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
       this.events = [];
       this.activeRunId = undefined;
       this.changes = undefined;
+      this.gitStatus = undefined;
       this.lastChangeRefreshSequence = 0;
       this.approvals = [];
       await this.syncSession();
@@ -333,6 +349,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
     this.events = [];
     this.activeRunId = undefined;
     this.changes = undefined;
+    this.gitStatus = undefined;
     this.lastChangeRefreshSequence = 0;
     this.approvals = [];
     await this.createSessionForSelectedProvider();
@@ -493,12 +510,42 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
     await this.view?.webview.postMessage({ type: 'manager.error', message });
   }
 
+  private async refreshGitStatus(sessionId: string): Promise<void> {
+    try {
+      this.gitStatus = await this.manager.getGitStatus(sessionId);
+      await this.view?.webview.postMessage({ type: 'git.status', status: this.gitStatus });
+    } catch (error) {
+      await this.view?.webview.postMessage({ type: 'manager.error', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async commitGitChanges(message: string): Promise<void> {
+    if (!this.session || this.activeRunId) return;
+    try {
+      this.gitStatus = await this.manager.commitGitChanges(this.session.id, message);
+      await this.syncSession();
+      await this.view?.webview.postMessage({ type: 'git.status', status: this.gitStatus });
+    } catch (error) {
+      await vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async pushGitChanges(): Promise<void> {
+    if (!this.session || this.activeRunId) return;
+    try {
+      this.gitStatus = await this.manager.pushGitChanges(this.session.id);
+      await this.view?.webview.postMessage({ type: 'git.status', status: this.gitStatus });
+    } catch (error) {
+      await vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   private async postState(session: AgentSession | undefined, events: SessionEvent[], usage: SessionUsage | undefined, changes: ChangeSet | undefined): Promise<void> {
     const renderedEvents = events.map((event) => event.type === 'assistant_message'
       ? { ...event, renderedHtml: renderMarkdown(typeof event.data?.text === 'string' ? event.data.text : '') }
       : event);
     await this.view?.webview.postMessage({
-      type: 'session.state', workspace: this.getWorkspaceState(), sessions: this.sessions, session, events: renderedEvents, usage, changes, activeRunId: this.activeRunId,
+      type: 'session.state', workspace: this.getWorkspaceState(), sessions: this.sessions, session, events: renderedEvents, usage, changes, gitStatus: this.gitStatus, activeRunId: this.activeRunId,
       activeRunStatus: this.findActiveRunStatus(events),
       providerUsage: this.providerUsage, approvals: this.approvals, providers: this.providers, selectedProvider: this.selectedProvider, selectedModel: this.selectedModel, selectedReasoningEffort: this.selectedReasoningEffort,
     });

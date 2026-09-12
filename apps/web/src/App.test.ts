@@ -19,6 +19,7 @@ afterEach(() => {
   localStorage.removeItem('maatgen.sidePanel');
   localStorage.removeItem('maatgen.sessionStatusFilter');
   localStorage.removeItem('maatgen.workspaceHistory');
+  localStorage.removeItem('maatgen.sessionHost');
   localStorage.removeItem('maatgen.showAllServers');
   nodes.value = [];
   selectedNodeId.value = 'local';
@@ -43,6 +44,48 @@ describe('App with MockAgentApi', () => {
     const mounted = await mountApp();
     expect((mounted.wrapper.find('#workspace').element as HTMLInputElement).value)
       .toBe('C:/demo/current-repository');
+  });
+
+  it('uses Hostname only as the new Session target and keeps the Session list filter unchanged', async () => {
+    class MultiHostApi extends MockAgentApi {
+      override async listNodes() {
+        return [
+          { id: 'local', name: 'Local host', status: 'connected' as const, createdAt: '2026-08-15T00:00:00Z' },
+          { id: 'linux-dev', name: 'Linux dev box', status: 'connected' as const, createdAt: '2026-08-15T00:00:00Z' },
+        ];
+      }
+
+      override async getDefaultWorkspace(nodeId?: string) {
+        return nodeId === 'linux-dev' ? '/home/dev/maatgen' : 'C:/demo/current-repository';
+      }
+    }
+
+    const api = new MultiHostApi();
+    const createSession = vi.spyOn(api, 'createSession');
+    const mounted = await mountApp(api);
+    const labels = mounted.wrapper.findAll('form.new-session label');
+    expect(labels[0]?.text()).toContain('Provider');
+    expect(labels[1]?.text()).toContain('Hostname');
+    const sessionCount = mounted.wrapper.findAll('.session-item').length;
+
+    await mounted.wrapper.get('select[aria-label="Hostname"]').setValue('linux-dev');
+    await flushPromises();
+
+    expect(selectedNodeId.value).toBe('local');
+    expect(mounted.wrapper.findAll('.session-item')).toHaveLength(sessionCount);
+    expect((mounted.wrapper.get('#workspace').element as HTMLInputElement).value).toBe('/home/dev/maatgen');
+
+    await mounted.wrapper.get('form.new-session').trigger('submit');
+    await flushPromises();
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ workspace: '/home/dev/maatgen' }), 'linux-dev');
+    expect(selectedNodeId.value).toBe('local');
+    expect(mounted.wrapper.findAll('.session-item')).toHaveLength(sessionCount + 1);
+  });
+
+  it('does not show a Sessions label beside the all-server filter', async () => {
+    const mounted = await mountApp();
+    expect(mounted.wrapper.get('.session-section-heading').text()).not.toContain('Sessions');
+    expect(mounted.wrapper.get('.session-section-heading').text()).toContain('全サーバ');
   });
 
   it('renders session history, timeline events, changes, and live state', async () => {
@@ -85,6 +128,7 @@ describe('App with MockAgentApi', () => {
       }
     }
     const api = new RunningSessionApi();
+    localStorage.setItem('maatgen.showAllServers', '0');
     wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
     await flushPromises();
 
@@ -260,6 +304,33 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('#usage-tab').attributes('aria-selected')).toBe('true');
   });
 
+  it('shows Git status with commit and push actions in a five-tab row', async () => {
+    const api = new MockAgentApi();
+    const commit = vi.spyOn(api, 'commitGitChanges');
+    const push = vi.spyOn(api, 'pushGitChanges');
+    const mounted = await mountApp(api);
+
+    expect(mounted.wrapper.findAll('.side-panel-tabs button')).toHaveLength(5);
+    expect(mounted.wrapper.find('#source-stats-tab .tab-count').exists()).toBe(false);
+    expect(mounted.wrapper.find('#files-tab .tab-count').exists()).toBe(false);
+    expect(mounted.wrapper.find('#git-tab .tab-count').exists()).toBe(false);
+
+    await mounted.wrapper.find('#git-tab').trigger('click');
+    await flushPromises();
+    expect(mounted.wrapper.find('#git-panel').text()).toContain('origin/main');
+    expect(mounted.wrapper.find('#git-panel').text()).toContain('README.md');
+
+    await mounted.wrapper.findAll('.git-commit button')[1]!.trigger('click');
+    await flushPromises();
+    expect(push).toHaveBeenCalled();
+
+    await mounted.wrapper.find<HTMLInputElement>('.git-commit input').setValue('Commit from Git tab');
+    await mounted.wrapper.find('.git-commit').trigger('submit');
+    await flushPromises();
+    await flushPromises();
+    expect(commit).toHaveBeenCalledWith(expect.any(String), 'Commit from Git tab');
+  });
+
   it('shows source line counts by language in the コード数 tab', async () => {
     const mounted = await mountApp();
     await mounted.wrapper.find('#source-stats-tab').trigger('click');
@@ -307,6 +378,47 @@ describe('App with MockAgentApi', () => {
 
     expect(mounted.wrapper.find('.file-view-markdown').exists()).toBe(false);
     expect(mounted.wrapper.find('.file-view-source').text()).toContain('export const enabled = true;');
+  });
+
+  it('toggles a markdown file between rendered and raw views', async () => {
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#files-tab').trigger('click');
+    await flushPromises();
+    const readmeButton = mounted.wrapper.findAll('.file-tree-file').find((item) => item.text().includes('README.md'))!;
+    await readmeButton.trigger('click');
+    await flushPromises();
+
+    const rawButton = mounted.wrapper.findAll('.file-view-action-button').find((button) => button.text() === 'Raw')!;
+    expect(mounted.wrapper.find('.file-view-markdown').exists()).toBe(true);
+    await rawButton.trigger('click');
+
+    expect(mounted.wrapper.find('.file-view-markdown').exists()).toBe(false);
+    expect(mounted.wrapper.get('.file-view-source').text()).toContain('# Mock Repository');
+    expect(rawButton.text()).toBe('Markdown');
+
+    await rawButton.trigger('click');
+    expect(mounted.wrapper.find('.file-view-markdown').exists()).toBe(true);
+  });
+
+  it('copies the displayed file content to the clipboard', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const mounted = await mountApp();
+    await mounted.wrapper.find('#files-tab').trigger('click');
+    await flushPromises();
+    const readmeButton = mounted.wrapper.findAll('.file-tree-file').find((item) => item.text().includes('README.md'))!;
+    await readmeButton.trigger('click');
+    await flushPromises();
+
+    const copyButton = mounted.wrapper.findAll('.file-view-action-button').find((button) => button.text() === 'Copy')!;
+    await copyButton.trigger('click');
+
+    expect(writeText).toHaveBeenCalledWith('# Mock Repository\n\nこれはWeb版のFileタブ用のモックデータです。\n\n- ツリー表示\n- Markdown変換表示\n');
+    expect(copyButton.text()).toBe('Copied');
+    vi.advanceTimersByTime(1500);
+    await mounted.wrapper.vm.$nextTick();
+    expect(copyButton.text()).toBe('Copy');
   });
 
   it('opens Run details in the central pane and returns to the chat', async () => {
@@ -682,6 +794,7 @@ describe('App with MockAgentApi', () => {
       }
     }
     const api = new PagedMockApi();
+    localStorage.setItem('maatgen.showAllServers', '0');
     wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
     await flushPromises();
     expect(wrapper.findAll('.session-item')).toHaveLength(2);
@@ -753,18 +866,22 @@ describe('App with MockAgentApi', () => {
       status: 'active', triggerSource: 'manual', createdAt: '2026-08-15T00:00:00Z', nodeId: 'local', nodeName: 'Local',
     };
 
-    it('is off by default and shows only this node’s own sessions', async () => {
+    it('is on by default and shows sessions from every server', async () => {
       const mounted = await mountApp();
-      expect((mounted.wrapper.get('.all-servers-toggle input').element as HTMLInputElement).checked).toBe(false);
+      expect((mounted.wrapper.get('.all-servers-toggle input').element as HTMLInputElement).checked).toBe(true);
       expect(mounted.wrapper.findAll('.session-item')).toHaveLength(6);
     });
 
-    it('lists sessions from every connected server with a node label when enabled', async () => {
-      const { wrapper, api } = await mountApp();
-      api.setAggregateSessions([remoteSession, localSession]);
+    it('keeps an explicitly disabled all-server filter off', async () => {
+      localStorage.setItem('maatgen.showAllServers', '0');
+      const mounted = await mountApp();
+      expect((mounted.wrapper.get('.all-servers-toggle input').element as HTMLInputElement).checked).toBe(false);
+    });
 
-      await wrapper.get('.all-servers-toggle input').setValue(true);
-      await flushPromises();
+    it('lists sessions from every connected server with a node label when enabled', async () => {
+      const api = new MockAgentApi();
+      api.setAggregateSessions([remoteSession, localSession]);
+      const { wrapper } = await mountApp(api);
 
       const items = wrapper.findAll('.session-item');
       expect(items).toHaveLength(2);
@@ -773,14 +890,12 @@ describe('App with MockAgentApi', () => {
     });
 
     it('colors the active-session dot by its server, and turns off the color for a closed session', async () => {
-      const { wrapper, api } = await mountApp();
+      const api = new MockAgentApi();
       api.setAggregateSessions([
         remoteSession,
         { ...localSession, id: 'agg-local-closed', status: 'closed' },
       ]);
-
-      await wrapper.get('.all-servers-toggle input').setValue(true);
-      await flushPromises();
+      const { wrapper } = await mountApp(api);
 
       const items = wrapper.findAll('.session-item');
       const activeDot = items[0]!.get('.mini-dot');
@@ -790,12 +905,10 @@ describe('App with MockAgentApi', () => {
     });
 
     it('switches to a session’s own server when it is opened from the aggregate list', async () => {
-      const { wrapper, api } = await mountApp();
-      nodes.value = [...nodes.value, { id: 'linux-dev', name: 'Linux dev box', status: 'connected', createdAt: '2026-08-15T00:00:00Z' }];
+      const api = new MockAgentApi();
       api.setAggregateSessions([remoteSession]);
-
-      await wrapper.get('.all-servers-toggle input').setValue(true);
-      await flushPromises();
+      const { wrapper } = await mountApp(api);
+      nodes.value = [...nodes.value, { id: 'linux-dev', name: 'Linux dev box', status: 'connected', createdAt: '2026-08-15T00:00:00Z' }];
       await wrapper.get('.session-item').trigger('click');
       await flushPromises();
 
@@ -803,11 +916,9 @@ describe('App with MockAgentApi', () => {
     });
 
     it('opens the session directly, without switching nodes, when it already belongs to the current node', async () => {
-      const { wrapper, api } = await mountApp();
+      const api = new MockAgentApi();
       api.setAggregateSessions([localSession]);
-
-      await wrapper.get('.all-servers-toggle input').setValue(true);
-      await flushPromises();
+      const { wrapper } = await mountApp(api);
       const item = wrapper.get('.session-item');
       await item.trigger('click');
       await flushPromises();

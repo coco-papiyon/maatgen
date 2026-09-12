@@ -85,6 +85,24 @@ export interface WorkspaceFileContent {
   truncated: boolean;
 }
 
+export interface GitStatusFile {
+  path: string;
+  originalPath?: string;
+  indexStatus?: string;
+  worktreeStatus?: string;
+}
+
+export interface GitStatus {
+  sessionId: string;
+  branch?: string;
+  upstream?: string;
+  remoteName?: string;
+  remoteUrl?: string;
+  ahead: number;
+  behind: number;
+  files: GitStatusFile[];
+}
+
 export interface GitHubItemQuery {
   state?: 'open' | 'closed' | 'all';
   assignee?: string;
@@ -96,8 +114,8 @@ export interface GitHubItemQuery {
 }
 
 export interface AgentApi {
-  getDefaultWorkspace(): Promise<string>;
-  listProviders(): Promise<ProviderListResponse>;
+  getDefaultWorkspace(nodeId?: string): Promise<string>;
+  listProviders(nodeId?: string): Promise<ProviderListResponse>;
   setProviderModel(provider: string, model: string): Promise<void>;
   listSessions(cursor?: string, limit?: number, status?: SessionStatusFilter): Promise<SessionListResponse>;
   // ADR-009 Decision 5.1: sessions from every reachable node (this node
@@ -106,7 +124,7 @@ export interface AgentApi {
   // for the same reason as node management: it fans out across nodes
   // itself rather than describing whichever node is currently selected.
   listAllSessions(limit?: number, status?: SessionStatusFilter): Promise<NodeScopedSessionListResponse>;
-  createSession(request: CreateSessionRequest): Promise<AgentSession>;
+  createSession(request: CreateSessionRequest, nodeId?: string): Promise<AgentSession>;
   getSession(id: string): Promise<AgentSession>;
   closeSession(id: string): Promise<AgentSession>;
   reopenSession(id: string): Promise<AgentSession>;
@@ -130,6 +148,9 @@ export interface AgentApi {
   searchWorkspaceFiles(sessionId: string, query: string): Promise<string[]>;
   getWorkspaceFileTree(sessionId: string, path?: string): Promise<WorkspaceFileNode[]>;
   readWorkspaceFile(sessionId: string, path: string): Promise<WorkspaceFileContent>;
+  getGitStatus(sessionId: string): Promise<GitStatus>;
+  commitGitChanges(sessionId: string, message: string): Promise<GitStatus>;
+  pushGitChanges(sessionId: string): Promise<GitStatus>;
 
   // GitHub monitoring (ADR-007).
   resolveGitHubRepository(workspace: string): Promise<GitHubRepositoryResolution>;
@@ -238,6 +259,19 @@ function request<T>(path: string, init?: RequestInit): Promise<T> {
   return requestAt<T>(basePath, path, init);
 }
 
+function nodeApiBasePath(nodeId?: string): string {
+  if (!nodeId || nodeId === 'local') return '';
+  const upstreamPrefix = 'upstream:';
+  if (nodeId.startsWith(upstreamPrefix)) {
+    return `/api/upstreams/${encodeURIComponent(nodeId.slice(upstreamPrefix.length))}`;
+  }
+  return `/api/nodes/${encodeURIComponent(nodeId)}`;
+}
+
+function requestForNode<T>(nodeId: string | undefined, path: string, init?: RequestInit): Promise<T> {
+  return nodeId === undefined ? request(path, init) : requestAt<T>(nodeApiBasePath(nodeId), path, init);
+}
+
 // requestAtRoot bypasses the active node's basePath. Node management itself
 // (list/create/delete) is always a call to the upper node the page was
 // loaded from, never proxied through a node prefix, regardless of which
@@ -247,12 +281,12 @@ function requestAtRoot<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const httpAgentApi: AgentApi = {
-  async getDefaultWorkspace() {
-    const config = await request<{ defaultWorkspace: string }>('/api/v1/runtime-config');
+  async getDefaultWorkspace(nodeId) {
+    const config = await requestForNode<{ defaultWorkspace: string }>(nodeId, '/api/v1/runtime-config');
     return config.defaultWorkspace;
   },
-  listProviders() {
-    return request('/api/v1/providers');
+  listProviders(nodeId) {
+    return requestForNode(nodeId, '/api/v1/providers');
   },
   setProviderModel(provider, model) {
     return request(`/api/v1/providers/${encodeURIComponent(provider)}/model`, {
@@ -269,8 +303,8 @@ export const httpAgentApi: AgentApi = {
     const query = new URLSearchParams({ limit: String(limit), status });
     return requestAtRoot(`/api/sessions/all?${query}`);
   },
-  createSession(requestBody) {
-    return request('/api/v1/sessions', { method: 'POST', body: JSON.stringify(requestBody) });
+  createSession(requestBody, nodeId) {
+    return requestForNode(nodeId, '/api/v1/sessions', { method: 'POST', body: JSON.stringify(requestBody) });
   },
   getSession(id) {
     return request(`/api/v1/sessions/${encodeURIComponent(id)}`);
@@ -366,6 +400,17 @@ export const httpAgentApi: AgentApi = {
   },
   readWorkspaceFile(sessionId, path) {
     return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/workspace-file?path=${encodeURIComponent(path)}`);
+  },
+  getGitStatus(sessionId) {
+    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/git`);
+  },
+  commitGitChanges(sessionId, message) {
+    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/git/commit`, {
+      method: 'POST', body: JSON.stringify({ message }),
+    });
+  },
+  pushGitChanges(sessionId) {
+    return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/git/push`, { method: 'POST' });
   },
 
   resolveGitHubRepository(workspace) {

@@ -32,6 +32,7 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubcontroller"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githubmonitor"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/githuboutbox"
+	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitops"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/gitworktree"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/pricing"
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
@@ -280,6 +281,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	gitOperations := gitops.New(store, "git")
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -494,6 +496,7 @@ func run() error {
 			SourceStatsReader:       store,
 			ApprovalController:      approvals,
 			WorkspaceReader:         sessions,
+			GitController:           gitOperations,
 			GitHubMonitorController: githubMonitor,
 			RelayController:         relayService,
 			UpstreamLister: func(context.Context) []protocol.UpstreamStatus {

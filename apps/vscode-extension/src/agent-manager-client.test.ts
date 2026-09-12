@@ -66,6 +66,21 @@ describe('AgentManagerClient session integration', () => {
     expect(fetch).toHaveBeenNthCalledWith(3, 'http://127.0.0.1:3100/api/v1/sessions/session-1/checkpoints/checkpoint-1/restore', expect.objectContaining({ method: 'POST' }));
   });
 
+  it('reads Git status and sends commit and push actions through the Manager', async () => {
+    const status = { sessionId: 'session-1', branch: 'main', ahead: 1, behind: 0, files: [] };
+    const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify(status), { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const client = new AgentManagerClient('http://127.0.0.1:3100');
+
+    await client.getGitStatus('session-1');
+    await client.commitGitChanges('session-1', 'ship it');
+    await client.pushGitChanges('session-1');
+
+    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:3100/api/v1/sessions/session-1/git', expect.any(Object));
+    expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:3100/api/v1/sessions/session-1/git/commit', expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: 'ship it' }) }));
+    expect(fetch).toHaveBeenNthCalledWith(3, 'http://127.0.0.1:3100/api/v1/sessions/session-1/git/push', expect.objectContaining({ method: 'POST' }));
+  });
+
   it('retains the Manager error code for restore conflicts', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       error: { code: 'checkpoint_conflict', message: 'current content changed' },

@@ -605,6 +605,10 @@ git diff <before-tree> <after-tree>
 
 実際の実装では`GIT_INDEX_FILE`にManager管理の一時indexを指定し、ユーザーのindex用`git write-tree`とWorking Tree snapshot用`git write-tree`を分離する。
 
+Web版の右ペインにはUsage／Changes／Source／Filesと並ぶGit Tabを置く。Files Tabから開いたMarkdownファイルはrendered／Raw表示を切り替えられ、表示対象のテキストをclipboardへコピーできる。Git TabはRun単位のChangeSetとは分離し、リポジトリ全体のWorking Tree（staged／unstaged／untracked）、現在branch、追跡upstream、ahead／behind、remote URLを表示する。Source／Files／Git TabはTabラベル内に件数を表示せず、5 Tabを1行に収める。VS Code版も同じGit状態と操作を折りたたみPanelで提供する。
+
+Git操作はExtensionやWebブラウザーから直接CLIを起動せず、Agent ManagerのSession単位APIへ集約する。Commit allは`git add -A`の後に利用者が入力したmessageでcommitし、Pushは既存upstreamへpushする。upstreamが未設定の場合は`origin`、または唯一のremoteへ現在branchを`--set-upstream`でpushする。Run実行中と通常Directory Sessionではcommit／pushを許可しない。ahead／behindはローカルのremote-tracking refとの比較であり、状態取得時に暗黙のfetchは行わない。
+
 ---
 
 ## 15. Source Change Tracking
@@ -1075,7 +1079,7 @@ src/auth.test.ts
 
 ### サーバ選択
 
-Web版のサーバ選択プルダウンは共通ナビゲーション右上のリポジトリ選択プルダウン直後に配置し、Session以外の画面でも常時表示する。選択したノードIDは共通状態として保持し、Session画面は変更を検知してAPI base path、Session一覧、Provider、Workspaceを選択先へ切り替える。Issue／PRの一覧・詳細、Job、GitHub監視設定も同じ選択変更を検知し、選択先サーバーのリポジトリ、ルール、イベント、Providerを再取得する。画面遷移とJob／Issue／PRからSessionへのリンクは`node` queryを保持し、再読み込み後も同じサーバーを選択する。
+Web版のサーバ選択プルダウンは共通ナビゲーション右上のリポジトリ選択プルダウン直後に配置し、Session以外の画面でも常時表示する。右上で選択したノードIDはSession一覧のフィルタ条件として共通状態に保持し、Session画面は変更を検知してAPI base path、Session一覧、Providerを選択先へ切り替える。Session作成フォームにはProviderの直下に独立したHostnameプルダウンを表示し、新規Sessionの作成先、作成先で利用可能なProvider、およびWorkspaceのデフォルト値だけを切り替える。Hostnameを変更しても表示中のSession一覧と右上のサーバ選択は変更しない。「全サーバ」は保存設定がない場合にデフォルトで有効とし、有効な間は右上の選択にかかわらず接続可能な全サーバのSessionを一覧表示する。ユーザーが無効にした設定は次回表示にも保持する。Issue／PRの一覧・詳細、Job、GitHub監視設定も右上の選択変更を検知し、選択先サーバーのリポジトリ、ルール、イベント、Providerを再取得する。画面遷移とJob／Issue／PRからSessionへのリンクは`node` queryを保持し、再読み込み後も同じサーバーを選択する。
 
 `Local`はブラウザが直接開いているAgent Manager（下位ノード）を常に表し、名称や接続先を変更しない。サーバ設定画面で追加した上位ノードはそれぞれ`upstream:{id}`選択肢として追加される（ADR-009 Decision 3.2、複数の上位ノードを同時設定可能）。いずれかを選択すると、対応する上位ノードとの既存のWebSocket／yamux接続を双方向に使い、下位ノードの`/api/upstreams/{id}/*`から上位サーバの通常API／WebSocketへ透過的に転送する。Node Nameと同名の過去のpending表示は重複表示しない。
 

@@ -511,6 +511,31 @@ func TestGetChangeSetAPI(t *testing.T) {
 	}
 }
 
+func TestGitStatusCommitAndPushAPI(t *testing.T) {
+	controller := &fakeGitController{status: protocol.GitStatus{SessionID: "session-1", Branch: "main", Files: []protocol.GitStatusFile{{Path: "file.txt", WorktreeStatus: "M"}}}}
+	config := testConfig()
+	config.GitController = controller
+	handler := New(config, nil, nil).Handler()
+
+	statusRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(statusRecorder, apiRequest(http.MethodGet, "/api/v1/sessions/session-1/git"))
+	if statusRecorder.Code != http.StatusOK || controller.operation != "status" {
+		t.Fatalf("status response = %d, operation = %q", statusRecorder.Code, controller.operation)
+	}
+
+	commitRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(commitRecorder, jsonRequest(http.MethodPost, "/api/v1/sessions/session-1/git/commit", `{"message":"ship it"}`))
+	if commitRecorder.Code != http.StatusOK || controller.operation != "commit" || controller.message != "ship it" {
+		t.Fatalf("commit response = %d, operation = %q, message = %q", commitRecorder.Code, controller.operation, controller.message)
+	}
+
+	pushRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(pushRecorder, apiRequest(http.MethodPost, "/api/v1/sessions/session-1/git/push"))
+	if pushRecorder.Code != http.StatusOK || controller.operation != "push" {
+		t.Fatalf("push response = %d, operation = %q", pushRecorder.Code, controller.operation)
+	}
+}
+
 func TestGetSourceStatsAPI(t *testing.T) {
 	session := protocol.AgentSession{ID: "session-1", Agent: protocol.AgentCodex, Workspace: "C:/repo", Status: protocol.SessionActive, CreatedAt: time.Now()}
 	sessions := &fakeSessionReader{sessions: []protocol.AgentSession{session}}
@@ -935,6 +960,31 @@ func (f *fakeRestoreController) RestoreAll(_ context.Context, sessionID, checkpo
 }
 
 var _ RestoreController = (*fakeRestoreController)(nil)
+
+type fakeGitController struct {
+	operation string
+	sessionID string
+	message   string
+	status    protocol.GitStatus
+	err       error
+}
+
+func (f *fakeGitController) GetStatus(_ context.Context, sessionID string) (protocol.GitStatus, error) {
+	f.operation, f.sessionID = "status", sessionID
+	return f.status, f.err
+}
+
+func (f *fakeGitController) Commit(_ context.Context, sessionID, message string) (protocol.GitStatus, error) {
+	f.operation, f.sessionID, f.message = "commit", sessionID, message
+	return f.status, f.err
+}
+
+func (f *fakeGitController) Push(_ context.Context, sessionID string) (protocol.GitStatus, error) {
+	f.operation, f.sessionID = "push", sessionID
+	return f.status, f.err
+}
+
+var _ GitController = (*fakeGitController)(nil)
 
 type fakeApprovalController struct {
 	sessionID   string

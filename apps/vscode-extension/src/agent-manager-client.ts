@@ -46,6 +46,8 @@ export interface SessionUsage {
 }
 export interface ProviderUsageWindow { name: string; usedPercent: number; remainingPercent: number; resetLabel?: string; }
 export interface ProviderUsage { provider: string; windows: ProviderUsageWindow[]; fetchedAt: string; }
+export interface GitStatusFile { path: string; originalPath?: string; indexStatus?: string; worktreeStatus?: string; }
+export interface GitStatus { sessionId: string; branch?: string; upstream?: string; remoteName?: string; remoteUrl?: string; ahead: number; behind: number; files: GitStatusFile[]; }
 
 export class AgentManagerError extends Error {
   constructor(message: string, readonly status: number, readonly code?: string) {
@@ -119,6 +121,20 @@ export class AgentManagerClient {
     return this.request<{ providers: ProviderUsage[] }>(
       `/api/v1/sessions/${encodeURIComponent(id)}/provider-usage/all`,
     ).then((response) => response.providers);
+  }
+
+  getGitStatus(id: string): Promise<GitStatus> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/git`);
+  }
+
+  commitGitChanges(id: string, message: string): Promise<GitStatus> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/git/commit`, {
+      method: 'POST', body: JSON.stringify({ message }),
+    });
+  }
+
+  pushGitChanges(id: string): Promise<GitStatus> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/git/push`, { method: 'POST' });
   }
 
   listApprovals(id: string): Promise<CommandApproval[]> {

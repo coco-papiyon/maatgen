@@ -59,6 +59,31 @@ const (
 	WorkspaceDirectory     WorkspaceKind = "directory"
 )
 
+// GitStatus describes the repository-wide Working Tree and its relationship
+// to the current branch's upstream. It is intentionally separate from a
+// Run's checkpoint ChangeSet.
+type GitStatus struct {
+	SessionID  string          `json:"sessionId"`
+	Branch     string          `json:"branch,omitempty"`
+	Upstream   string          `json:"upstream,omitempty"`
+	RemoteName string          `json:"remoteName,omitempty"`
+	RemoteURL  string          `json:"remoteUrl,omitempty"`
+	Ahead      int             `json:"ahead"`
+	Behind     int             `json:"behind"`
+	Files      []GitStatusFile `json:"files"`
+}
+
+type GitStatusFile struct {
+	Path           string `json:"path"`
+	OriginalPath   string `json:"originalPath,omitempty"`
+	IndexStatus    string `json:"indexStatus,omitempty"`
+	WorktreeStatus string `json:"worktreeStatus,omitempty"`
+}
+
+type GitCommitRequest struct {
+	Message string `json:"message"`
+}
+
 type RunStatus string
 
 const (

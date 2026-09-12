@@ -58,6 +58,14 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           <summary><span>CHANGES</span><span id="changes-count" class="panel-count">0 files</span><span class="panel-chevron" aria-hidden="true">⌄</span></summary>
           <div class="changes-content"><div id="changes-list" class="changes-list"></div></div>
         </details>
+        <details id="git-result" class="git-result">
+          <summary><span>GIT</span><span id="git-branch" class="panel-count">—</span><span class="panel-chevron" aria-hidden="true">⌄</span></summary>
+          <div class="git-content">
+            <div class="git-remote"><span id="git-upstream">remoteなし</span><span><b id="git-ahead">0</b> ahead · <b id="git-behind">0</b> behind</span></div>
+            <div class="git-actions"><input id="git-message" type="text" maxlength="500" placeholder="Commit message" aria-label="Commit message"><button id="git-commit" type="button">Commit all</button><button id="git-push" type="button">Push</button><button id="git-refresh" type="button" title="Refresh Git status">↻</button></div>
+            <div id="git-files" class="git-files"></div>
+          </div>
+        </details>
       </div>
       <section class="chat-area">
         <section class="empty-state" id="empty-state">
@@ -151,6 +159,16 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
       };
       const changesCount = document.getElementById('changes-count');
       const changesList = document.getElementById('changes-list');
+      const gitBranch = document.getElementById('git-branch');
+      const gitUpstream = document.getElementById('git-upstream');
+      const gitAhead = document.getElementById('git-ahead');
+      const gitBehind = document.getElementById('git-behind');
+      const gitMessage = document.getElementById('git-message');
+      const gitCommit = document.getElementById('git-commit');
+      const gitPush = document.getElementById('git-push');
+      const gitRefresh = document.getElementById('git-refresh');
+      const gitFiles = document.getElementById('git-files');
+      const gitResult = document.getElementById('git-result');
       let followLatestEvent = true;
       let pendingApprovalId = '';
       let canRestoreChanges = false;
@@ -349,6 +367,38 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           changesList.append(item);
         });
       };
+      let latestGitStatus;
+      let gitRunActive = false;
+      const updateGitActions = () => {
+        gitCommit.disabled = gitRunActive || !(latestGitStatus?.files || []).length || !gitMessage.value.trim();
+        gitPush.disabled = gitRunActive || !latestGitStatus?.branch || !latestGitStatus?.remoteName;
+      };
+      const renderGitStatus = (status, activeRunId) => {
+        latestGitStatus = status;
+        gitRunActive = Boolean(activeRunId);
+        const files = status?.files || [];
+        gitBranch.textContent = status?.branch || 'Detached HEAD';
+        gitUpstream.textContent = status?.upstream || (status?.remoteName ? status.remoteName + '（未追跡）' : 'remoteなし');
+        gitUpstream.title = status?.remoteUrl || '';
+        gitAhead.textContent = String(status?.ahead || 0);
+        gitBehind.textContent = String(status?.behind || 0);
+        gitFiles.replaceChildren();
+        files.forEach((file) => {
+          const row = document.createElement('div'); row.className = 'git-file';
+          const kind = document.createElement('span'); kind.className = 'git-file-kind'; kind.textContent = file.worktreeStatus || file.indexStatus || 'M';
+          const filePath = document.createElement('span'); filePath.textContent = file.path;
+          const state = document.createElement('small'); state.textContent = [file.indexStatus ? 'staged ' + file.indexStatus : '', file.worktreeStatus ? 'working ' + file.worktreeStatus : ''].filter(Boolean).join(' · ');
+          row.append(kind, filePath, state); gitFiles.appendChild(row);
+        });
+        if (!files.length) {
+          const empty = document.createElement('p'); empty.className = 'git-empty'; empty.textContent = 'Working Tree is clean'; gitFiles.appendChild(empty);
+        }
+        updateGitActions();
+      };
+      gitMessage.addEventListener('input', updateGitActions);
+      gitCommit.addEventListener('click', () => { const message = gitMessage.value.trim(); if (message) vscode.postMessage({ type: 'git.commit', message }); });
+      gitPush.addEventListener('click', () => vscode.postMessage({ type: 'git.push' }));
+      gitRefresh.addEventListener('click', () => vscode.postMessage({ type: 'git.refresh' }));
       const renderProviderOptions = (providers, selectedProvider, selectedModel, selectedReasoningEffort, hasSession, activeRun) => {
         providerSelect.replaceChildren();
         (providers || []).forEach((provider) => {
@@ -544,9 +594,11 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           cancelButton.hidden = !event.data.activeRunId;
           closeSessionButton.disabled = Boolean(event.data.activeRunId);
           canRestoreChanges = event.data.session?.workspaceKind !== 'directory' && event.data.session?.status === 'active' && !event.data.activeRunId;
+          gitResult.hidden = event.data.session?.workspaceKind === 'directory';
           renderEvents(event.data.events || []);
           renderApproval(event.data.approvals || []);
           renderChanges(event.data.changes);
+          renderGitStatus(event.data.gitStatus, event.data.activeRunId);
           if (event.data.usage?.summary) {
             renderUsage(event.data.usage.summary, event.data.selectedProvider);
           } else {
@@ -557,6 +609,11 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         }
         if (event.data?.type === 'changes.state') {
           renderChanges(event.data.changes);
+          return;
+        }
+        if (event.data?.type === 'git.status') {
+          gitMessage.value = '';
+          renderGitStatus(event.data.status, null);
           return;
         }
         if (event.data?.type === 'manager.error') {

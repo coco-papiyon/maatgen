@@ -105,7 +105,7 @@ button { font: inherit; }
 .response-actions { display: flex; gap: 5px; margin-top: 7px; }
 .response-actions button { padding: 3px 6px; border: 1px solid var(--line); border-radius: 3px; color: var(--vscode-foreground); background: transparent; font-size: 9px; cursor: pointer; }
 .response-actions button:hover { color: var(--vscode-textLink-foreground); background: var(--vscode-list-hoverBackground); }
-.usage-content, .changes-content { padding: 0 8px 8px; }
+.usage-content, .changes-content, .git-content { padding: 0 8px 8px; }
 .usage-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; color: var(--muted); font: 9px var(--vscode-editor-font-family); text-transform: uppercase; }
 .usage-grid [hidden] { display: none; }
 .usage-grid strong { display: block; margin-top: 3px; color: var(--vscode-foreground); font-size: 12px; }
@@ -120,3 +120,4 @@ button { font: inherit; }
 .change-open { display: grid; gap: 2px; min-width: 0; padding: 2px; color: var(--vscode-foreground); text-align: left; background: transparent; border: 0; cursor: pointer; }
 .change-open:hover strong { color: var(--vscode-textLink-foreground); }
 .change-item strong { overflow-wrap: anywhere; font: 11px var(--vscode-editor-font-family); }.change-item span { color: var(--muted); font-size: 10px; }
+.git-remote { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; color: var(--muted); font: 9px var(--vscode-editor-font-family); }.git-remote > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.git-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 4px; }.git-actions input { min-width: 0; padding: 4px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--line)); }.git-actions button { padding: 3px 5px; border: 1px solid var(--line); border-radius: 3px; color: var(--vscode-foreground); background: transparent; font-size: 9px; cursor: pointer; }.git-actions button:disabled { opacity: .45; cursor: default; }.git-files { display: grid; margin-top: 6px; }.git-file { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 5px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font: 10px var(--vscode-editor-font-family); }.git-file-kind { color: var(--green); font-weight: 700; }.git-file small { color: var(--muted); }.git-empty { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
