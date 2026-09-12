@@ -3,11 +3,16 @@ import { computed, toRef } from 'vue';
 import { useGitHubItemDetail } from '../github/useGitHubItemDetail';
 import { selectedRepository } from '../github/repositories';
 import { renderMarkdown } from '../markdown';
+import { selectedNodeId } from '../nodes';
 
 const props = defineProps<{ number: number }>();
 const numberRef = toRef(props, 'number');
 const { item, relatedEvents, loading, error } = useGitHubItemDetail('pull_request', () => numberRef.value);
 const bodyHtml = computed(() => renderMarkdown(item.value?.body ?? ''));
+
+function sessionTarget(sessionId: string) {
+  return { path: '/', query: { session: sessionId, ...(selectedNodeId.value === 'local' ? {} : { node: selectedNodeId.value }) } };
+}
 </script>
 
 <template>
@@ -38,7 +43,7 @@ const bodyHtml = computed(() => renderMarkdown(item.value?.body ?? ''));
               <span class="github-badge" :class="`status-${event.status}`">{{ event.status }}</span>
               <span class="github-meta">{{ event.action }} / {{ event.createdAt }}</span>
             </div>
-            <RouterLink v-if="event.sessionId" :to="`/?session=${event.sessionId}`">Sessionを見る</RouterLink>
+            <RouterLink v-if="event.sessionId" :to="sessionTarget(event.sessionId)">Sessionを見る</RouterLink>
           </li>
         </ul>
       </section>

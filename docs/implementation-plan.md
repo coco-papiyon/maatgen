@@ -916,6 +916,7 @@ docs/decisions/
 
 - [x] サーバ選択プルダウンをWeb共通ナビゲーションに移し、リポジトリ選択の右側で全画面に常時表示
 - [x] ノード選択状態とSession画面のAPI base path／Session／Provider／Workspace切替を共通化
+- [x] Issue／PR／Job／GitHub監視設定を選択サーバーのAPI base pathへ追従させ、サーバー変更時に表示データを再取得
 - [x] Localは直接接続中の下位ノードとして固定し、Node Nameを別のupstream選択肢として表示
 - [x] 既存のWebSocket／yamuxセッションを双方向化し、`/api/upstream/*`から上位Agent ManagerのAPI／WebSocketへ転送
 - [x] 右上のサーバ選択プルダウンからノード追加操作と追加ダイアログを削除

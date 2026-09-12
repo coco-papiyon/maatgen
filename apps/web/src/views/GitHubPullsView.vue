@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { useGitHubItemList } from '../github/useGitHubItemList';
 import { selectedRepository } from '../github/repositories';
+import { selectedNodeId } from '../nodes';
 
 const { items, loading, error, fetchedAt, state, assignee, author, labelsText, text, refresh } = useGitHubItemList('pull_request');
+
+function detailTarget(number: number) {
+  return { path: `/github/pulls/${number}`, query: selectedNodeId.value === 'local' ? {} : { node: selectedNodeId.value } };
+}
 </script>
 
 <template>
@@ -46,7 +51,7 @@ const { items, loading, error, fetchedAt, state, assignee, author, labelsText, t
           <tbody>
             <tr v-for="item in items" :key="item.number">
               <td>
-                <RouterLink :to="`/github/pulls/${item.number}`">#{{ item.number }}</RouterLink>
+                <RouterLink :to="detailTarget(item.number)">#{{ item.number }}</RouterLink>
               </td>
               <td>{{ item.title }}</td>
               <td>{{ item.state }}</td>

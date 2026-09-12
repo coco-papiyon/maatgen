@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { GitHubMonitorEvent, GitHubRepositoryMonitor, GitHubTriggerRule, Provider } from '@maatgen/protocol';
 import { AgentApiError, type JobStatusFilter } from '../api';
 import { useAgentApi } from '../github/useAgentApi';
 import { priorityLabel } from '../github/priority';
+import { selectedNodeId } from '../nodes';
 
 const api = useAgentApi();
 
@@ -16,6 +17,13 @@ const error = ref('');
 const replayingId = ref('');
 const skippingId = ref('');
 const closingId = ref('');
+let refreshSequence = 0;
+
+const sessionNodeQuery = computed(() => (selectedNodeId.value === 'local' ? {} : { node: selectedNodeId.value }));
+
+function sessionTarget(sessionId: string) {
+  return { path: '/', query: { session: sessionId, ...sessionNodeQuery.value } };
+}
 
 const JOB_STATUS_FILTER_KEY = 'maatgen.jobStatusFilter';
 const statusFilter = ref<JobStatusFilter>((localStorage.getItem(JOB_STATUS_FILTER_KEY) as JobStatusFilter | null) ?? 'open');
@@ -68,6 +76,8 @@ function changeStatusFilter() {
 }
 
 async function refresh() {
+  const sequence = ++refreshSequence;
+  const nodeId = selectedNodeId.value;
   loading.value = true;
   error.value = '';
   try {
@@ -77,14 +87,16 @@ async function refresh() {
       api.listGitHubMonitors().catch(() => []),
       api.listProviders().catch(() => ({ providers: [] })),
     ]);
+    if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
     events.value = eventList;
     rules.value = ruleList;
     monitors.value = monitorList;
     providers.value = providerList.providers;
   } catch (cause) {
+    if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
     error.value = describeError(cause);
   } finally {
-    loading.value = false;
+    if (sequence === refreshSequence) loading.value = false;
   }
 }
 
@@ -132,7 +144,13 @@ function describeError(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-onMounted(() => void refresh());
+watch(selectedNodeId, () => {
+  events.value = [];
+  rules.value = [];
+  monitors.value = [];
+  providers.value = [];
+  void refresh();
+}, { immediate: true });
 </script>
 
 <template>
@@ -185,7 +203,7 @@ onMounted(() => void refresh());
           <td>{{ ruleProvider(event.ruleId) }}</td>
           <td>{{ rulePriority(event.ruleId) }}</td>
           <td>
-            <RouterLink v-if="event.sessionId" :to="`/?session=${event.sessionId}`">Sessionを見る</RouterLink>
+            <RouterLink v-if="event.sessionId" :to="sessionTarget(event.sessionId)">Sessionを見る</RouterLink>
             <span v-else class="github-meta">—</span>
           </td>
           <td>

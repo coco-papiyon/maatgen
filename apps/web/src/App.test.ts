@@ -5,7 +5,9 @@ import App from './App.vue';
 import { AgentApiError } from './api';
 import type { EventStreamFactory } from './event-stream';
 import { createMockEnvironment, MockAgentApi } from './testing/mock-agent-api';
-import type { ApprovalDecisionRequest, CommandApproval, SessionEvent } from '@maatgen/protocol';
+import type { ApprovalDecisionRequest, CommandApproval, NodeScopedSession, SessionEvent } from '@maatgen/protocol';
+import { colorForNode } from './nodeColors';
+import { nodes, selectedNodeId } from './nodes';
 
 let wrapper: VueWrapper | undefined;
 
@@ -17,15 +19,18 @@ afterEach(() => {
   localStorage.removeItem('maatgen.sidePanel');
   localStorage.removeItem('maatgen.sessionStatusFilter');
   localStorage.removeItem('maatgen.workspaceHistory');
+  localStorage.removeItem('maatgen.showAllServers');
+  nodes.value = [];
+  selectedNodeId.value = 'local';
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-async function mountApp() {
-  const environment = createMockEnvironment();
+async function mountApp(api = new MockAgentApi()) {
+  const environment = createMockEnvironment(api);
   wrapper = mount(App, { props: environment });
   await flushPromises();
-  return { wrapper, environment };
+  return { wrapper, environment, api };
 }
 
 const passiveEventStream: EventStreamFactory = (options) => ({
@@ -736,5 +741,79 @@ describe('App with MockAgentApi', () => {
     expect(panel).toContain('1,200');
     expect(panel).toContain('$0.250000');
     expect(panel).not.toContain('AI credits');
+  });
+
+  describe('cross-server aggregate Session list (ADR-009 Decision 5.1)', () => {
+    const remoteSession: NodeScopedSession = {
+      id: 'agg-remote', agent: 'claude', workspace: '/tmp/remote-workspace', workspaceKind: 'git_repository',
+      status: 'active', triggerSource: 'manual', createdAt: '2026-08-15T01:00:00Z', nodeId: 'linux-dev', nodeName: 'Linux dev box',
+    };
+    const localSession: NodeScopedSession = {
+      id: 'agg-local', agent: 'codex', workspace: '/tmp/local-workspace', workspaceKind: 'git_repository',
+      status: 'active', triggerSource: 'manual', createdAt: '2026-08-15T00:00:00Z', nodeId: 'local', nodeName: 'Local',
+    };
+
+    it('is off by default and shows only this node’s own sessions', async () => {
+      const mounted = await mountApp();
+      expect((mounted.wrapper.get('.all-servers-toggle input').element as HTMLInputElement).checked).toBe(false);
+      expect(mounted.wrapper.findAll('.session-item')).toHaveLength(6);
+    });
+
+    it('lists sessions from every connected server with a node label when enabled', async () => {
+      const { wrapper, api } = await mountApp();
+      api.setAggregateSessions([remoteSession, localSession]);
+
+      await wrapper.get('.all-servers-toggle input').setValue(true);
+      await flushPromises();
+
+      const items = wrapper.findAll('.session-item');
+      expect(items).toHaveLength(2);
+      expect(wrapper.text()).toContain('Linux dev box');
+      expect(wrapper.text()).toContain('Local');
+    });
+
+    it('colors the active-session dot by its server, and turns off the color for a closed session', async () => {
+      const { wrapper, api } = await mountApp();
+      api.setAggregateSessions([
+        remoteSession,
+        { ...localSession, id: 'agg-local-closed', status: 'closed' },
+      ]);
+
+      await wrapper.get('.all-servers-toggle input').setValue(true);
+      await flushPromises();
+
+      const items = wrapper.findAll('.session-item');
+      const activeDot = items[0]!.get('.mini-dot');
+      expect((activeDot.attributes('style') ?? '')).toContain(colorForNode('linux-dev'));
+      const closedDot = items[1]!.get('.mini-dot');
+      expect(closedDot.attributes('style')).toBeUndefined();
+    });
+
+    it('switches to a session’s own server when it is opened from the aggregate list', async () => {
+      const { wrapper, api } = await mountApp();
+      nodes.value = [...nodes.value, { id: 'linux-dev', name: 'Linux dev box', status: 'connected', createdAt: '2026-08-15T00:00:00Z' }];
+      api.setAggregateSessions([remoteSession]);
+
+      await wrapper.get('.all-servers-toggle input').setValue(true);
+      await flushPromises();
+      await wrapper.get('.session-item').trigger('click');
+      await flushPromises();
+
+      expect(selectedNodeId.value).toBe('linux-dev');
+    });
+
+    it('opens the session directly, without switching nodes, when it already belongs to the current node', async () => {
+      const { wrapper, api } = await mountApp();
+      api.setAggregateSessions([localSession]);
+
+      await wrapper.get('.all-servers-toggle input').setValue(true);
+      await flushPromises();
+      const item = wrapper.get('.session-item');
+      await item.trigger('click');
+      await flushPromises();
+
+      expect(selectedNodeId.value).toBe('local');
+      expect(item.classes()).toContain('selected');
+    });
   });
 });

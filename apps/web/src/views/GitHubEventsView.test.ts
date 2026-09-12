@@ -4,6 +4,7 @@ import { createRouter, createMemoryHistory } from 'vue-router';
 import GitHubEventsView from './GitHubEventsView.vue';
 import { MockAgentApi } from '../testing/mock-agent-api';
 import { selectedRepository } from '../github/repositories';
+import { selectedNodeId } from '../nodes';
 
 let wrapper: VueWrapper | undefined;
 
@@ -11,6 +12,7 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
   selectedRepository.value = '';
+  selectedNodeId.value = 'local';
 });
 
 async function mountEvents(api = new MockAgentApi()) {
@@ -96,5 +98,29 @@ describe('GitHubEventsView', () => {
     await select.setValue('open');
     await flushPromises();
     expect(wrapper.text()).not.toContain('ダークモードのコントラストを改善する');
+  });
+
+  it('re-fetches jobs when the selected server changes', async () => {
+    const api = new MockAgentApi();
+    let calls = 0;
+    const original = api.listGitHubMonitorEvents.bind(api);
+    api.listGitHubMonitorEvents = (workspace, limit, status) => {
+      calls++;
+      return original(workspace, limit, status);
+    };
+    await mountEvents(api);
+    const callsBeforeSwitch = calls;
+
+    selectedNodeId.value = 'remote-dev';
+    await flushPromises();
+
+    expect(calls).toBeGreaterThan(callsBeforeSwitch);
+  });
+
+  it('keeps the selected server in links from a job to its session', async () => {
+    selectedNodeId.value = 'remote-dev';
+    const { wrapper } = await mountEvents();
+    const link = wrapper.findAll('a').find((candidate) => candidate.text() === 'Sessionを見る');
+    expect(link?.attributes('href')).toContain('node=remote-dev');
   });
 });

@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue';
 import type { GitHubRepositoryMonitor } from '@maatgen/protocol';
 import type { AgentApi } from '../api';
+import { selectedNodeId } from '../nodes';
 
 // The full multi-repository registry (Settings screen's table) and the one
 // repository currently selected for the GitHub views that can only show one
@@ -10,9 +11,22 @@ import type { AgentApi } from '../api';
 // common navigation stay in sync without prop drilling.
 export const repositories = ref<GitHubRepositoryMonitor[]>([]);
 export const selectedRepository = ref('');
+let refreshSequence = 0;
+
+export function clearRepositories(): void {
+  refreshSequence++;
+  repositories.value = [];
+  selectedRepository.value = '';
+}
 
 export async function refreshRepositories(api: AgentApi): Promise<void> {
-  repositories.value = await api.listGitHubMonitors();
+  const sequence = ++refreshSequence;
+  const nodeId = selectedNodeId.value;
+  const monitors = await api.listGitHubMonitors();
+  // The API base path is mutable. Ignore a response that was started for a
+  // server which is no longer selected, or was superseded by a newer load.
+  if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
+  repositories.value = monitors;
   if (selectedRepository.value && !repositories.value.some((monitor) => monitor.repository === selectedRepository.value)) {
     selectedRepository.value = '';
   }

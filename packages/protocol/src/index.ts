@@ -399,3 +399,17 @@ export interface UpstreamStatus {
 export interface UpstreamStatusListResponse {
   upstreams: UpstreamStatus[];
 }
+
+// ADR-009 Decision 5.1: GET /api/sessions/all fans the per-node
+// GET /api/v1/sessions out to every reachable node and merges the results.
+// This wrapper exists only on that aggregate response; every other
+// endpoint keeps returning plain AgentSession.
+export interface NodeScopedSession extends AgentSession {
+  nodeId: string;
+  nodeName: string;
+}
+
+export interface NodeScopedSessionListResponse {
+  sessions: NodeScopedSession[];
+  unavailableNodes?: string[];
+}

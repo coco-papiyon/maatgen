@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useGitHubItemList } from '../github/useGitHubItemList';
 import { selectedRepository } from '../github/repositories';
+import { selectedNodeId } from '../nodes';
 
 const { items, loading, error, projectsUnavailable, fetchedAt, state, assignee, author, labelsText, text, project, status, refresh } =
   useGitHubItemList('issue');
@@ -8,6 +9,10 @@ const { items, loading, error, projectsUnavailable, fetchedAt, state, assignee, 
 function statusValue(item: (typeof items.value)[number]): string {
   const field = (item.projectFields ?? []).find((candidate) => candidate.fieldName.toLowerCase() === 'status');
   return field?.value ?? (item.projectsError ? '（取得不可）' : '—');
+}
+
+function detailTarget(number: number) {
+  return { path: `/github/issues/${number}`, query: selectedNodeId.value === 'local' ? {} : { node: selectedNodeId.value } };
 }
 </script>
 
@@ -55,7 +60,7 @@ function statusValue(item: (typeof items.value)[number]): string {
           <tbody>
             <tr v-for="item in items" :key="item.number">
               <td>
-                <RouterLink :to="`/github/issues/${item.number}`">#{{ item.number }}</RouterLink>
+                <RouterLink :to="detailTarget(item.number)">#{{ item.number }}</RouterLink>
               </td>
               <td>{{ item.title }}</td>
               <td>{{ item.state }}</td>

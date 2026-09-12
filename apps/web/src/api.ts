@@ -22,6 +22,7 @@ import type {
     GitHubTriggerRuleRequest,
     GitHubTriggerRuleTestRequest,
     GitHubTriggerRuleTestResponse,
+    NodeScopedSessionListResponse,
     ProviderListResponse,
     ProviderUsage,
     RelayNode,
@@ -99,6 +100,12 @@ export interface AgentApi {
   listProviders(): Promise<ProviderListResponse>;
   setProviderModel(provider: string, model: string): Promise<void>;
   listSessions(cursor?: string, limit?: number, status?: SessionStatusFilter): Promise<SessionListResponse>;
+  // ADR-009 Decision 5.1: sessions from every reachable node (this node
+  // plus every connected downstream/upstream node) merged by createdAt.
+  // Always at the top-level base path (never prefixed by setApiBasePath)
+  // for the same reason as node management: it fans out across nodes
+  // itself rather than describing whichever node is currently selected.
+  listAllSessions(limit?: number, status?: SessionStatusFilter): Promise<NodeScopedSessionListResponse>;
   createSession(request: CreateSessionRequest): Promise<AgentSession>;
   getSession(id: string): Promise<AgentSession>;
   closeSession(id: string): Promise<AgentSession>;
@@ -257,6 +264,10 @@ export const httpAgentApi: AgentApi = {
     const query = new URLSearchParams({ limit: String(limit), status });
     if (cursor) query.set('cursor', cursor);
     return request(`/api/v1/sessions?${query}`);
+  },
+  listAllSessions(limit = 100, status = 'active') {
+    const query = new URLSearchParams({ limit: String(limit), status });
+    return requestAtRoot(`/api/sessions/all?${query}`);
   },
   createSession(requestBody) {
     return request('/api/v1/sessions', { method: 'POST', body: JSON.stringify(requestBody) });

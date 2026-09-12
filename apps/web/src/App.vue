@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AgentRun, AgentSession, ApprovalDecision, ChangeSet, CommandApproval, Provider, ProviderUsage, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
+import type { AgentRun, AgentSession, ApprovalDecision, ChangeSet, CommandApproval, NodeScopedSession, Provider, ProviderUsage, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { httpAgentApi, type AgentApi, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
 import { reasoningEffortOptions } from './constants';
@@ -7,7 +7,8 @@ import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type
 import FileTree from './FileTree.vue';
 import { githubWorkspace } from './github/workspace';
 import { renderMarkdown } from './markdown';
-import { initializeNodes, nodes, selectedNode, selectedNodeId } from './nodes';
+import { colorForNode } from './nodeColors';
+import { initializeNodes, nodes, selectNode, selectedNode, selectedNodeId } from './nodes';
 import UsageBarChart, { type UsageSeriesDef, type UsageStackedPeriod } from './UsageBarChart.vue';
 
 const USAGE_PROVIDER_ORDER = ['codex', 'claude', 'copilot'] as const;
@@ -64,6 +65,31 @@ const storedSessionStatusFilter = localStorage.getItem(sessionStatusFilterKey) a
 const sessionStatusFilter = ref<SessionStatusFilter>(
   storedSessionStatusFilter === 'closed' || storedSessionStatusFilter === 'all' ? storedSessionStatusFilter : 'active',
 );
+// Cross-server aggregate view (ADR-009 Decision 5.1): showAllServers swaps
+// the sidebar's session source from this node's own sessions.value to
+// allServerSessions.value (GET /api/sessions/all), without touching the
+// single-node Chat/Diff/Usage machinery below, which still always operates
+// on whichever one node selectedNodeId names.
+const showAllServersKey = 'maatgen.showAllServers';
+const showAllServers = ref(localStorage.getItem(showAllServersKey) === '1');
+const allServerSessions = ref<NodeScopedSession[]>([]);
+// Set by openSessionListItem just before switching to a different node so
+// that loadNodeContext's watcher-driven reload opens this specific Session
+// instead of falling back to "first active" — the watcher fires
+// asynchronously, so this is the only way to pass along "and select this
+// one" across that gap.
+let pendingSessionId: string | undefined;
+interface SessionListItem {
+  session: AgentSession;
+  nodeId: string;
+  nodeName?: string;
+}
+const displayedSessions = computed<SessionListItem[]>(() => {
+  if (showAllServers.value) {
+    return allServerSessions.value.map((session) => ({ session, nodeId: session.nodeId, nodeName: session.nodeName }));
+  }
+  return sessions.value.map((session) => ({ session, nodeId: selectedNodeId.value }));
+});
 const selected = ref<AgentSession>();
 const events = ref<SessionEvent[]>([]);
 // Raw/copy toolbar (only shown on a Run's final assistant reply, never on an
@@ -495,13 +521,17 @@ async function loadNodeContext(nodeId: string) {
   if (node && node.status !== 'connected') {
     // Offline node: nothing to fetch. The template shows an empty state
     // from selectedNode.status instead of an error.
+    pendingSessionId = undefined;
     return;
   }
 
   await act(async () => {
     await loadWorkspaceContextForCurrentNode();
-    const firstActive = sessions.value.find((session) => session.status === 'active') ?? sessions.value[0];
-    if (firstActive) await selectSession(firstActive);
+    const target = pendingSessionId
+      ? sessions.value.find((session) => session.id === pendingSessionId)
+      : sessions.value.find((session) => session.status === 'active') ?? sessions.value[0];
+    pendingSessionId = undefined;
+    if (target) await selectSession(target);
   });
 }
 
@@ -655,6 +685,48 @@ async function refreshSessions(reset = false) {
   await refreshUnreadSessions(sessions.value);
 }
 
+// ADR-009 Decision 5.1: refreshes the cross-server aggregate list. Kept
+// deliberately simple (no cursor-based "load more" across nodes) — the
+// endpoint itself just fans out and truncates to `limit`.
+async function refreshAllServerSessions() {
+  const response = await api.listAllSessions(100, sessionStatusFilter.value);
+  allServerSessions.value = response.sessions;
+  await refreshUnreadSessions(allServerSessions.value);
+}
+
+async function toggleShowAllServers() {
+  localStorage.setItem(showAllServersKey, showAllServers.value ? '1' : '0');
+  if (showAllServers.value) {
+    await act(async () => {
+      await refreshAllServerSessions();
+    });
+  }
+}
+
+function sessionDotStyle(status: AgentSession['status'], nodeId: string): { background: string; boxShadow: string } | undefined {
+  if (status !== 'active') return undefined;
+  const color = colorForNode(nodeId);
+  return { background: color, boxShadow: `0 0 0 4px ${color}22` };
+}
+
+// Clicking a Session in the cross-server aggregate list hands off to the
+// existing single-node switch (ADR-009 Decision 5.1's "the aggregate view
+// is a launcher, not a second Chat implementation"): if the Session already
+// belongs to the currently selected node, just open it directly; otherwise
+// switch nodes first and let loadNodeContext (via pendingSessionId) open it
+// once that node's own Session list has loaded.
+async function openSessionListItem(item: SessionListItem) {
+  if (!showAllServers.value || item.nodeId === selectedNodeId.value) {
+    const local = sessions.value.find((session) => session.id === item.session.id) ?? item.session;
+    await act(async () => {
+      await selectSession(local);
+    });
+    return;
+  }
+  pendingSessionId = item.session.id;
+  selectNode(item.nodeId);
+}
+
 async function refreshUnreadSessions(items: AgentSession[]) {
   const unread = new Set(unreadSessionIDs.value);
   await Promise.all(items.map(async (session) => {
@@ -698,6 +770,7 @@ async function changeSessionStatusFilter() {
   localStorage.setItem(sessionStatusFilterKey, sessionStatusFilter.value);
   await act(async () => {
     await refreshSessions(true);
+    if (showAllServers.value) await refreshAllServerSessions();
   });
 }
 
@@ -1122,6 +1195,7 @@ function startSessionPolling() {
     void refreshSessions().catch((cause) => {
       handleFailure(cause);
     });
+    if (showAllServers.value) void refreshAllServerSessions().catch(() => undefined);
   }, 10_000);
 }
 
@@ -1151,6 +1225,9 @@ onMounted(async () => {
       const firstActive = linkedSession ?? sessions.value.find((session) => session.status === 'active') ?? sessions.value[0];
       if (firstActive) await selectSession(firstActive);
     });
+  }
+  if (showAllServers.value) {
+    await refreshAllServerSessions().catch(() => undefined);
   }
   startSessionPolling();
   nodeContextReady = true;
@@ -1211,12 +1288,16 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
       <div class="section-heading">
         <span>Sessions</span>
         <div class="session-filter">
+          <label class="all-servers-toggle" title="複数サーバのSessionをまとめて表示">
+            <input v-model="showAllServers" type="checkbox" :disabled="busy" @change="toggleShowAllServers" />
+            <span>全サーバ</span>
+          </label>
           <select v-model="sessionStatusFilter" aria-label="Session status filter" :disabled="busy" @change="changeSessionStatusFilter">
             <option value="active">アクティブのみ</option>
             <option value="closed">終了済みのみ</option>
             <option value="all">すべて</option>
           </select>
-          <span class="count">{{ sessions.length }}</span>
+          <span class="count">{{ displayedSessions.length }}</span>
         </div>
       </div>
       <form class="new-session" @submit.prevent="createSession">
@@ -1241,24 +1322,24 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
       </form>
       <nav class="session-list" aria-label="Session history">
         <button
-          v-for="session in sessions"
-          :key="session.id"
+          v-for="item in displayedSessions"
+          :key="`${item.nodeId}:${item.session.id}`"
           class="session-item"
-          :class="{ selected: selected?.id === session.id }"
-          @click="selectSession(session)"
-          :title="session.workspace"
+          :class="{ selected: selected?.id === item.session.id }"
+          @click="openSessionListItem(item)"
+          :title="item.session.workspace"
         >
-          <span class="session-title">{{ session.firstPrompt ?? shortPath(session.workspace) }}</span>
-          <span v-if="session.activeRunStatus === 'running'" class="running-mark" title="実行中">実行中</span>
-          <span v-else-if="session.activeRunStatus === 'queued'" class="running-mark" title="待機中">待機中</span>
-          <span v-if="unreadSessionIDs.has(session.id)" class="unread-mark" title="未読">未読</span>
+          <span class="session-title">{{ item.session.firstPrompt ?? shortPath(item.session.workspace) }}</span>
+          <span v-if="item.session.activeRunStatus === 'running'" class="running-mark" title="実行中">実行中</span>
+          <span v-else-if="item.session.activeRunStatus === 'queued'" class="running-mark" title="待機中">待機中</span>
+          <span v-if="unreadSessionIDs.has(item.session.id)" class="unread-mark" title="未読">未読</span>
           <span class="session-meta">
-            <span :class="['mini-dot', session.status]" />{{ directoryName(session.workspace) }} · {{ session.agent }}
+            <span class="mini-dot" :class="item.session.status" :style="sessionDotStyle(item.session.status, item.nodeId)" />{{ directoryName(item.session.workspace) }} · {{ item.session.agent }}<template v-if="item.nodeName"> · {{ item.nodeName }}</template>
           </span>
-          <span class="session-time">{{ formatRelativeTime(session.createdAt) }}に作成</span>
+          <span class="session-time">{{ formatRelativeTime(item.session.createdAt) }}に作成</span>
         </button>
       </nav>
-      <button v-if="nextSessionCursor" class="load-more" :disabled="loadingMoreSessions" @click="loadMoreSessions">
+      <button v-if="!showAllServers && nextSessionCursor" class="load-more" :disabled="loadingMoreSessions" @click="loadMoreSessions">
         {{ loadingMoreSessions ? 'Loading…' : 'Load more' }}
       </button>
     </aside>

@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { useAgentApi } from './github/useAgentApi';
 import { githubRepositoryStatus, watchGitHubRepository } from './github/repository';
-import { refreshRepositories, remoteGroups, selectRemote, selectedRemoteKey } from './github/repositories';
+import { remoteGroups, selectRemote, selectedRemoteKey } from './github/repositories';
 import NodeSelector from './NodeSelector.vue';
+import { selectedNodeId } from './nodes';
 
 const route = useRoute();
 const api = useAgentApi();
 watchGitHubRepository(api);
-onMounted(() => void refreshRepositories(api));
+
+const nodeQuery = computed(() => (selectedNodeId.value === 'local' ? {} : { node: selectedNodeId.value }));
+
+function navigationTarget(name: string) {
+  return { name, query: nodeQuery.value };
+}
 
 function routeName(): string {
   return typeof route.name === 'string' ? route.name : '';
@@ -26,12 +32,12 @@ function onRemoteChange(event: Event) {
 <template>
   <div class="shell">
     <nav class="shell-nav" aria-label="共通ナビゲーション">
-      <RouterLink to="/" class="shell-nav-link" :class="{ active: routeName() === 'sessions' }">Session</RouterLink>
-      <RouterLink to="/github/issues" class="shell-nav-link" :class="{ active: isIssuesArea }">Issue</RouterLink>
-      <RouterLink to="/github/pulls" class="shell-nav-link" :class="{ active: isPullsArea }">PR</RouterLink>
-      <RouterLink to="/github/events" class="shell-nav-link" :class="{ active: routeName() === 'github-events' }">Job</RouterLink>
-      <RouterLink to="/github/settings" class="shell-nav-link" :class="{ active: routeName() === 'github-settings' }">設定</RouterLink>
-      <RouterLink to="/server" class="shell-nav-link" :class="{ active: routeName() === 'server-settings' }">サーバ</RouterLink>
+      <RouterLink :to="navigationTarget('sessions')" class="shell-nav-link" :class="{ active: routeName() === 'sessions' }">Session</RouterLink>
+      <RouterLink :to="navigationTarget('github-issues')" class="shell-nav-link" :class="{ active: isIssuesArea }">Issue</RouterLink>
+      <RouterLink :to="navigationTarget('github-pulls')" class="shell-nav-link" :class="{ active: isPullsArea }">PR</RouterLink>
+      <RouterLink :to="navigationTarget('github-events')" class="shell-nav-link" :class="{ active: routeName() === 'github-events' }">Job</RouterLink>
+      <RouterLink :to="navigationTarget('github-settings')" class="shell-nav-link" :class="{ active: routeName() === 'github-settings' }">設定</RouterLink>
+      <RouterLink :to="navigationTarget('server-settings')" class="shell-nav-link" :class="{ active: routeName() === 'server-settings' }">サーバ</RouterLink>
       <select
         v-if="remoteGroups.length"
         class="shell-repository"

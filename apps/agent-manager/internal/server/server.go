@@ -295,6 +295,8 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 	}
 
 	if sessions != nil {
+		registerAggregateSessionRoute(mux, sessions, config.RelayController, config.UpstreamLister, config.UpstreamProxyProvider)
+
 		mux.Handle("GET /api/v1/sessions", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			limit, ok := parseBoundedInt(w, r, "limit", 100, 1, 500)
 			if !ok {

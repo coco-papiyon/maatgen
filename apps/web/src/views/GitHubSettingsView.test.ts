@@ -3,6 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import GitHubSettingsView from './GitHubSettingsView.vue';
 import { MockAgentApi } from '../testing/mock-agent-api';
 import { repositories, selectedRepository } from '../github/repositories';
+import { selectedNodeId } from '../nodes';
 
 const DEMO_WORKSPACE = 'C:/demo/current-repository';
 
@@ -13,6 +14,7 @@ afterEach(() => {
   wrapper = undefined;
   selectedRepository.value = '';
   repositories.value = [];
+  selectedNodeId.value = 'local';
 });
 
 async function mountSettings(api = new MockAgentApi()) {
@@ -359,5 +361,30 @@ describe('GitHubSettingsView', () => {
     } finally {
       window.confirm = originalConfirm;
     }
+  });
+
+  it('re-fetches monitoring settings when the selected server changes', async () => {
+    const api = new MockAgentApi();
+    let monitorCalls = 0;
+    let ruleCalls = 0;
+    const originalMonitors = api.listGitHubMonitors.bind(api);
+    const originalRules = api.listGitHubTriggerRules.bind(api);
+    api.listGitHubMonitors = () => {
+      monitorCalls++;
+      return originalMonitors();
+    };
+    api.listGitHubTriggerRules = (workspace) => {
+      ruleCalls++;
+      return originalRules(workspace);
+    };
+    await mountSettings(api);
+    const monitorCallsBeforeSwitch = monitorCalls;
+    const ruleCallsBeforeSwitch = ruleCalls;
+
+    selectedNodeId.value = 'remote-dev';
+    await flushPromises();
+
+    expect(monitorCalls).toBeGreaterThan(monitorCallsBeforeSwitch);
+    expect(ruleCalls).toBeGreaterThan(ruleCallsBeforeSwitch);
   });
 });

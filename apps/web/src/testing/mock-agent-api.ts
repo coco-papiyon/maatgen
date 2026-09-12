@@ -18,6 +18,7 @@ import type {
     GitHubTriggerRuleRequest,
     GitHubTriggerRuleTestRequest,
     GitHubTriggerRuleTestResponse,
+    NodeScopedSession,
     ProviderUsage,
     RelayNode,
     RestoreStatus,
@@ -55,6 +56,11 @@ export class MockAgentApi implements AgentApi {
   private relayNodeCounter = 0;
   private readonly upstreams = new Map<string, UpstreamStatus>();
   private upstreamCounter = 0;
+  // ADR-009 Decision 5.1: overrides what listAllSessions returns, for tests
+  // that need to simulate sessions living on a different (mock) node than
+  // this API's own flat session store. Defaults to this node's own
+  // sessions tagged "local" when not overridden.
+  private aggregateSessionsOverride: NodeScopedSession[] | undefined;
   private readonly githubPulls: GitHubItem[] = mockGitHubPullRequests();
 
   constructor() {
@@ -101,6 +107,22 @@ export class MockAgentApi implements AgentApi {
       sessions: page,
       ...(nextOffset < sessions.length ? { nextCursor: String(nextOffset) } : {}),
     });
+  }
+
+  async listAllSessions(limit = 100, status: SessionStatusFilter = 'active') {
+    if (this.aggregateSessionsOverride) {
+      return clone({ sessions: this.aggregateSessionsOverride.slice(0, limit) });
+    }
+    const sessions = [...this.sessions.values()].filter((session) => status === 'all' || session.status === status);
+    return clone({ sessions: sessions.slice(0, limit).map((session) => ({ ...session, nodeId: 'local', nodeName: 'Local' })) });
+  }
+
+  // Test-only: makes listAllSessions return exactly these entries instead
+  // of this node's own sessions, to exercise the cross-server aggregate
+  // view (a session reported under a different nodeId than this API's own
+  // flat store, which has no real concept of "other nodes").
+  setAggregateSessions(sessions: NodeScopedSession[]): void {
+    this.aggregateSessionsOverride = sessions;
   }
 
   async createSession(request: CreateSessionRequest): Promise<AgentSession> {

@@ -1075,7 +1075,7 @@ src/auth.test.ts
 
 ### サーバ選択
 
-Web版のサーバ選択プルダウンは共通ナビゲーション右上のリポジトリ選択プルダウン直後に配置し、Session以外の画面でも常時表示する。選択したノードIDは共通状態として保持し、Session画面は変更を検知してAPI base path、Session一覧、Provider、Workspaceを選択先へ切り替える。
+Web版のサーバ選択プルダウンは共通ナビゲーション右上のリポジトリ選択プルダウン直後に配置し、Session以外の画面でも常時表示する。選択したノードIDは共通状態として保持し、Session画面は変更を検知してAPI base path、Session一覧、Provider、Workspaceを選択先へ切り替える。Issue／PRの一覧・詳細、Job、GitHub監視設定も同じ選択変更を検知し、選択先サーバーのリポジトリ、ルール、イベント、Providerを再取得する。画面遷移とJob／Issue／PRからSessionへのリンクは`node` queryを保持し、再読み込み後も同じサーバーを選択する。
 
 `Local`はブラウザが直接開いているAgent Manager（下位ノード）を常に表し、名称や接続先を変更しない。サーバ設定画面で追加した上位ノードはそれぞれ`upstream:{id}`選択肢として追加される（ADR-009 Decision 3.2、複数の上位ノードを同時設定可能）。いずれかを選択すると、対応する上位ノードとの既存のWebSocket／yamux接続を双方向に使い、下位ノードの`/api/upstreams/{id}/*`から上位サーバの通常API／WebSocketへ透過的に転送する。Node Nameと同名の過去のpending表示は重複表示しない。
 

@@ -93,6 +93,11 @@ describe('Shell', () => {
     expect(selectedNodeId.value).toBe(nodeId);
     expect(getApiBasePath()).toBe(`/api/upstreams/${upstream!.config.id}`);
     expect(new URLSearchParams(window.location.search).get('node')).toBe(nodeId);
+
+    const issueLink = wrapper.findAll('.shell-nav-link').find((link) => link.text() === 'Issue');
+    const issueHref = issueLink?.attributes('href');
+    expect(issueHref).toBeDefined();
+    expect(new URL(issueHref!, window.location.origin).searchParams.get('node')).toBe(nodeId);
   });
 
   it('redirects "/github" to the event history route', async () => {

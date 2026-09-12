@@ -1,6 +1,7 @@
-import { onMounted, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
 import type { GitHubItem, GitHubMonitorEvent } from '@maatgen/protocol';
 import { AgentApiError } from '../api';
+import { selectedNodeId } from '../nodes';
 import { useAgentApi } from './useAgentApi';
 import { selectedRepository } from './repositories';
 
@@ -15,8 +16,11 @@ export function useGitHubItemDetail(kind: 'issue' | 'pull_request', number: () =
   const relatedEvents = ref<GitHubMonitorEvent[]>([]);
   const loading = ref(false);
   const error = ref('');
+  let refreshSequence = 0;
 
   async function refresh() {
+    const sequence = ++refreshSequence;
+    const nodeId = selectedNodeId.value;
     const currentNumber = number();
     if (!selectedRepository.value || !Number.isFinite(currentNumber)) {
       item.value = undefined;
@@ -32,12 +36,14 @@ export function useGitHubItemDetail(kind: 'issue' | 'pull_request', number: () =
           : api.getGitHubPullRequest(selectedRepository.value, currentNumber),
         api.listGitHubMonitorEvents(selectedRepository.value, 200).catch(() => []),
       ]);
+      if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
       item.value = fetchedItem;
       relatedEvents.value = events.filter((event) => event.kind === kind && event.number === currentNumber);
     } catch (cause) {
+      if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
       error.value = describeError(cause);
     } finally {
-      loading.value = false;
+      if (sequence === refreshSequence) loading.value = false;
     }
   }
 
@@ -46,8 +52,11 @@ export function useGitHubItemDetail(kind: 'issue' | 'pull_request', number: () =
     return cause instanceof Error ? cause.message : String(cause);
   }
 
-  watch([selectedRepository, number], () => void refresh());
-  onMounted(() => void refresh());
+  watch([selectedRepository, number, selectedNodeId], () => {
+    item.value = undefined;
+    relatedEvents.value = [];
+    void refresh();
+  }, { immediate: true });
 
   return { item, relatedEvents, loading, error, refresh };
 }

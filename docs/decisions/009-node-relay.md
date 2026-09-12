@@ -115,12 +115,19 @@ X-Maatgen-Node-Token: (任意、今回は未検証)
 
 - 元のユースケースが「使い慣れた端末から、特定のリモート環境（実行専用ノード）を参照・操作したい」という**1対1のアクセス**であり、多数ノードを俯瞰するフリート監視ではない。
 - 一括表示にすると、上位ノードが全下位ノードをファンアウト取得・マージするAPIや、一部ノード不調時のフォールバック表示など、実装・UIとも複雑度が増す（Session IDの衝突自体は5.1のとおり問題にならない）。
-- 切替方式であれば、[Decision 2](#2-ブラウザmaatgenと下位上位のifを共通化する)のプロキシ機構をそのまま使い、`HttpAgentApi`のbase URLを`/api/nodes/{nodeId}`に差し替えるだけでSession一覧・Chat・Diff・Checkpoint UIなどの既存実装を無改造で再利用できる。
+- 切替方式であれば、[Decision 2](#2-ブラウザmaatgenと下位上位のifを共通化する)のプロキシ機構をそのまま使い、`HttpAgentApi`のbase URLを`/api/nodes/{nodeId}`に差し替えるだけでSession一覧・Chat・Diff・Checkpointに加え、Issue／PR／Job／GitHub監視設定のAPIを再利用できる。サーバー変更時は各画面が選択状態を監視して再取得し、変更前サーバー向けの遅延レスポンスは破棄する。
 - 一括表示は、この切替方式の上にUI側だけで後から追加できる（プロキシ機構自体の変更は不要）。将来ノード数が増えて俯瞰ニーズが出た場合は別ADRとして再検討する。
 
-#### 5.1 将来の「Sessionだけ全ノード横断表示」に向けた拡張ポイント
+#### 5.1 「Sessionだけ全ノード横断表示」（実装済み）
 
-将来、Chat／Diff／Usageなどはノードごとのまま、**Session一覧だけ**は全ノード横断で見たいという要望が見込まれている。今回はこれを実装しないが、後から**Decision 1〜4（接続確立・共通I/F・ノード識別・ノードレジストリ）を一切変更せずに**追加できるよう、次を設計上の前提として確定させておく。
+Chat／Diff／Usageなどはノードごとのまま、**Session一覧だけ**を全ノード横断で見られるようにする拡張。当初は将来の拡張ポイントとして設計のみ確定させていたが、以下の方針で実装済み。**Decision 1〜4（接続確立・共通I/F・ノード識別・ノードレジストリ）は一切変更していない。**
+
+- `GET /api/sessions/all`（`internal/server/sessions_all.go`）が、ローカル自身と、`RelayController.ListNodes`で`connected`な下位ノード、`UpstreamLister`で`connected`な上位ノードそれぞれに対し、既存の`NodeProxy`／`UpstreamProxyProvider`が返すハンドラへ`GET /api/v1/sessions`を並行にファンアウトし、`createdAt`降順でマージして返す。一部ノードの取得失敗は`unavailableNodes`に列挙するだけで、全体は失敗させない（下記5.1本文の「一部ノードの失敗を許容する」方針通り）。
+- レスポンス型`protocol.NodeScopedSession`（`AgentSession`を埋め込み、`nodeId`／`nodeName`を追加するだけ）は集約専用で、下位ノード自身の`GET /api/v1/sessions`や`local`単体表示は今まで通り`AgentSession`のみを返す。
+- Web UI（`apps/web/src/App.vue`）はSessionサイドバーに「全サーバ」トグルを追加し、オンの間だけ`listAllSessions()`の結果を表示する。Sessionを選ぶと、そのSessionが属するノードが現在選択中のノードと異なる場合だけ[Decision 5](#5-web-uiは単一ノード切替方式とし複数ノードの一括表示は行わない)の単一ノード切替（`selectNode`）に委譲し、切替完了後に該当Sessionを開く（`pendingSessionId`で一度だけ受け渡す）。同じノードならその場で直接開く。
+- 各Sessionの状態ドットは、closedならグレー、activeならそのSessionが属するノードidから決定的に選ばれる色（`apps/web/src/nodeColors.ts`、ハッシュ→固定パレット、サーバ側に保存しない）で表示する。
+
+以下は実装時に踏襲した設計上の前提（当初の記述）：
 
 - **Session IDは追加の名前空間なしにノード横断で衝突しない**：`session.generateID()`は128bitの暗号論的乱数（`crypto/rand`由来の32文字hex、`session_`prefix付き）であり、衝突確率は無視できる。将来ノードをまたいでSessionを一意に扱う際も、`nodeId`との複合を必須にする必要はない（UIでのキー付けには`${nodeId}:${session.id}`を推奨するが、これは衝突対策ではなく単なる描画・ルーティング上の便宜）。この不変条件（Session IDの生成方式を連番などへ変更しない）を将来にわたって維持する。
 - **集約は新しい合成レイヤーとして追加し、下位ノードのSchema／APIには触れない**：全ノード横断一覧は、上位ノードが`GET /api/nodes`で得られる`connected`ノード一覧に対し、既存の`GET /api/nodes/{nodeId}/api/sessions`（Decision 2のプロキシ、下位の`GET /api/sessions`をそのまま中継）を並行にファンアウトし、結果を`createdAt`でマージソートするだけで実現できる。新しいエンドポイント案：`GET /api/sessions/all`。
@@ -207,7 +214,6 @@ AGENTS.mdの原則どおりAgentは対象Working Treeを直接変更するため
 - 上位ノードによる下位ノードのデータの永続化・キャッシュ・オフライン時の参照。
 - 複数の上位ノードを跨いだノードの多段リレー（下位→上位→さらに上位）。
 - 下位ノード側でのUIの無効化・制限（下位ノードは従来どおり自分自身のローカルWeb UIとしても動作し続けてよい）。
-- 複数下位ノードのSessionを一つの一覧へ集約表示する機能そのものの実装（単一ノード切替方式を採用。ただし将来この集約を追加する際にDecision 1〜4の再設計が不要になるよう、拡張ポイントを[Decision 5.1](#51-将来のsessionだけ全ノード横断表示に向けた拡張ポイント)として確定させてある）。
 - VS Code拡張へのノードセレクタ追加（対象はWeb版のみ。VS Code拡張は引き続き自分自身のAgent Managerだけを扱う）。
 
 ## Consequences

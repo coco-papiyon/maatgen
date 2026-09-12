@@ -4,6 +4,7 @@ import { createRouter, createMemoryHistory } from 'vue-router';
 import GitHubIssuesView from './GitHubIssuesView.vue';
 import { MockAgentApi } from '../testing/mock-agent-api';
 import { selectedRepository } from '../github/repositories';
+import { selectedNodeId } from '../nodes';
 
 let wrapper: VueWrapper | undefined;
 
@@ -11,6 +12,7 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
   selectedRepository.value = '';
+  selectedNodeId.value = 'local';
 });
 
 async function mountIssues(workspace = 'C:/demo/current-repository', api = new MockAgentApi()) {
@@ -51,5 +53,29 @@ describe('GitHubIssuesView', () => {
     await wrapper.get('.github-filter-bar').trigger('submit');
     await flushPromises();
     expect(lastQuery).toMatchObject({ assignee: 'bob' });
+  });
+
+  it('re-fetches issues when the selected server changes', async () => {
+    const api = new MockAgentApi();
+    let calls = 0;
+    const original = api.listGitHubIssues.bind(api);
+    api.listGitHubIssues = (workspace, query) => {
+      calls++;
+      return original(workspace, query);
+    };
+    await mountIssues('C:/demo/current-repository', api);
+    const callsBeforeSwitch = calls;
+
+    selectedNodeId.value = 'remote-dev';
+    await flushPromises();
+
+    expect(calls).toBeGreaterThan(callsBeforeSwitch);
+  });
+
+  it('keeps the selected server in issue detail links', async () => {
+    selectedNodeId.value = 'remote-dev';
+    const { wrapper } = await mountIssues();
+    const link = wrapper.get('.github-table tbody a');
+    expect(link.attributes('href')).toContain('node=remote-dev');
   });
 });

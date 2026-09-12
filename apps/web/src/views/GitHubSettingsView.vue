@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type {
   AgentName,
   GitHubConcurrencyPolicy,
@@ -17,6 +17,7 @@ import { reasoningEffortOptions } from '../constants';
 import { useAgentApi } from '../github/useAgentApi';
 import { priorityLabel } from '../github/priority';
 import { refreshRepositories, repositories } from '../github/repositories';
+import { selectedNodeId } from '../nodes';
 
 const api = useAgentApi();
 
@@ -31,24 +32,31 @@ const commonPollIntervalSeconds = ref(300);
 const commonCoalesceQueueLimit = ref(20);
 const applyingCommonSettings = ref(false);
 const projectNameDrafts = ref<Record<string, string>>({});
+let refreshSequence = 0;
 
 async function refresh() {
+  const sequence = ++refreshSequence;
+  const nodeId = selectedNodeId.value;
   loading.value = true;
   error.value = '';
   try {
     await refreshRepositories(api);
+    if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
     const first = repositories.value[0];
     if (first) {
       commonPollIntervalSeconds.value = first.pollIntervalSeconds;
       commonCoalesceQueueLimit.value = first.coalesceQueueLimit;
     }
     projectNameDrafts.value = Object.fromEntries(repositories.value.map((monitor) => [monitor.repository, monitor.projectName ?? '']));
-    rules.value = await api.listGitHubTriggerRules();
-    providers.value = (await api.listProviders()).providers;
+    const [ruleList, providerList] = await Promise.all([api.listGitHubTriggerRules(), api.listProviders()]);
+    if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
+    rules.value = ruleList;
+    providers.value = providerList.providers;
   } catch (cause) {
+    if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
     error.value = describeError(cause);
   } finally {
-    loading.value = false;
+    if (sequence === refreshSequence) loading.value = false;
   }
 }
 
@@ -450,7 +458,14 @@ function describeError(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-onMounted(() => void refresh());
+watch(selectedNodeId, () => {
+  cancelEditRule();
+  addResolution.value = undefined;
+  addError.value = '';
+  rules.value = [];
+  providers.value = [];
+  void refresh();
+}, { immediate: true });
 </script>
 
 <template>

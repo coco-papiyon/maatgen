@@ -1,6 +1,7 @@
-import { onMounted, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
 import type { GitHubItem } from '@maatgen/protocol';
 import { AgentApiError, type GitHubItemQuery } from '../api';
+import { selectedNodeId } from '../nodes';
 import { useAgentApi } from './useAgentApi';
 import { selectedRepository } from './repositories';
 
@@ -25,6 +26,7 @@ export function useGitHubItemList(kind: 'issue' | 'pull_request') {
   const text = ref('');
   const project = ref('');
   const status = ref('');
+  let refreshSequence = 0;
 
   function buildQuery(): GitHubItemQuery {
     const labels = labelsText.value.split(',').map((label) => label.trim()).filter(Boolean);
@@ -40,8 +42,11 @@ export function useGitHubItemList(kind: 'issue' | 'pull_request') {
   }
 
   async function refresh() {
+    const sequence = ++refreshSequence;
+    const nodeId = selectedNodeId.value;
     if (!selectedRepository.value) {
       items.value = [];
+      fetchedAt.value = '';
       return;
     }
     loading.value = true;
@@ -50,13 +55,15 @@ export function useGitHubItemList(kind: 'issue' | 'pull_request') {
       const response = kind === 'issue'
         ? await api.listGitHubIssues(selectedRepository.value, buildQuery())
         : await api.listGitHubPullRequests(selectedRepository.value, buildQuery());
+      if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
       items.value = response.items;
       projectsUnavailable.value = response.projectsUnavailable ?? false;
       fetchedAt.value = response.fetchedAt;
     } catch (cause) {
+      if (sequence !== refreshSequence || nodeId !== selectedNodeId.value) return;
       error.value = describeError(cause);
     } finally {
-      loading.value = false;
+      if (sequence === refreshSequence) loading.value = false;
     }
   }
 
@@ -65,8 +72,11 @@ export function useGitHubItemList(kind: 'issue' | 'pull_request') {
     return cause instanceof Error ? cause.message : String(cause);
   }
 
-  watch(selectedRepository, () => void refresh());
-  onMounted(() => void refresh());
+  watch([selectedRepository, selectedNodeId], () => {
+    items.value = [];
+    fetchedAt.value = '';
+    void refresh();
+  }, { immediate: true });
 
   return {
     items, loading, error, projectsUnavailable, fetchedAt,

@@ -177,6 +177,8 @@ select.shell-repository { cursor: pointer; }
 .section-heading { height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); color: #b8c4ba; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .session-filter { display: flex; align-items: center; gap: 8px; }
 .session-filter select { width: auto; padding: 5px 22px 5px 8px; font-size: 9px; text-transform: none; letter-spacing: normal; }
+.all-servers-toggle { display: flex; align-items: center; gap: 4px; color: #7f8c81; font: 9px ui-monospace, monospace; text-transform: none; letter-spacing: normal; cursor: pointer; }
+.all-servers-toggle input { width: auto; accent-color: var(--green-strong); cursor: pointer; }
 .count { min-width: 22px; padding: 2px 6px; border-radius: 10px; background: #222c24; color: var(--muted); text-align: center; font: 11px ui-monospace, monospace; }
 .count.accent { color: var(--green); }
 .bulk-restore { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--line); color: #77847a; font: 9px ui-monospace, monospace; }

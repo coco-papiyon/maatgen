@@ -1,7 +1,8 @@
 import { ref, watch } from 'vue';
 import type { AgentApi } from '../api';
+import { selectedNodeId } from '../nodes';
 import { githubWorkspace } from './workspace';
-import { refreshRepositories, selectedRepository } from './repositories';
+import { clearRepositories, refreshRepositories, selectedRepository } from './repositories';
 
 export type GitHubRepositoryStatus = 'idle' | 'resolving' | 'resolved' | 'ambiguous' | 'unavailable';
 
@@ -34,17 +35,26 @@ export const githubRepositoryStatus = ref<GitHubRepositoryStatus>('idle');
 // automatically when Shell unmounts — safe to call once per Shell
 // instance; Shell is the app root, so in production that's once, ever.
 export function watchGitHubRepository(api: AgentApi): void {
+  let resolutionSequence = 0;
+  let watchedNodeId: string | undefined;
   watch(
-    githubWorkspace,
-    async (workspace) => {
+    [githubWorkspace, selectedNodeId],
+    async ([workspace, nodeId]) => {
+      const sequence = ++resolutionSequence;
+      if (nodeId !== watchedNodeId) {
+        watchedNodeId = nodeId;
+        clearRepositories();
+      }
       if (!workspace) {
         githubRepositoryLabel.value = '';
         githubRepositoryStatus.value = 'idle';
+        await refreshRepositories(api).catch(() => undefined);
         return;
       }
       githubRepositoryStatus.value = 'resolving';
       try {
         const resolution = await api.resolveGitHubRepository(workspace);
+        if (sequence !== resolutionSequence || nodeId !== selectedNodeId.value) return;
         if (!resolution.selected) {
           githubRepositoryLabel.value = '';
           githubRepositoryStatus.value = resolution.candidates.length > 1 ? 'ambiguous' : 'unavailable';
@@ -66,8 +76,10 @@ export function watchGitHubRepository(api: AgentApi): void {
           }
         }
         await refreshRepositories(api);
+        if (sequence !== resolutionSequence || nodeId !== selectedNodeId.value) return;
         selectedRepository.value = resolution.repository;
       } catch {
+        if (sequence !== resolutionSequence || nodeId !== selectedNodeId.value) return;
         githubRepositoryLabel.value = '';
         githubRepositoryStatus.value = 'unavailable';
       }
