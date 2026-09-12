@@ -165,7 +165,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="github-form-row">
         <label>Node Token（任意）
-          <input v-model="nodeToken" type="password" placeholder="上位サーバの「ノードを追加」で発行されたトークン" :disabled="saving" />
+          <input v-model="nodeToken" type="password" placeholder="上位サーバで発行されたノードトークン" :disabled="saving" />
         </label>
       </div>
       <div class="github-form-actions">

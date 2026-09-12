@@ -918,3 +918,4 @@ docs/decisions/
 - [x] ノード選択状態とSession画面のAPI base path／Session／Provider／Workspace切替を共通化
 - [x] Localは直接接続中の下位ノードとして固定し、Node Nameを別のupstream選択肢として表示
 - [x] 既存のWebSocket／yamuxセッションを双方向化し、`/api/upstream/*`から上位Agent ManagerのAPI／WebSocketへ転送
+- [x] 右上のサーバ選択プルダウンからノード追加操作と追加ダイアログを削除

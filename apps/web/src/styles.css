@@ -138,17 +138,8 @@ select.shell-repository { cursor: pointer; }
 .node-option:hover { background: var(--panel-soft); }
 .node-option-name { flex: 1; }
 .node-option-status { color: #68746a; font-size: 10px; }
-.node-option-add { color: var(--green); }
 .node-option-delete { flex: 0 0 auto; border: 0; background: transparent; color: #68746a; font-size: 13px; cursor: pointer; padding: 4px 6px; }
 .node-option-delete:hover { color: #ffb4aa; }
-.node-selector-divider { margin: 4px 2px; border-top: 1px solid var(--line); }
-.add-node-modal { width: min(520px, 96vw); }
-.add-node-name-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #9aa79c; }
-.add-node-name-field input { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); color: inherit; font: 13px inherit; }
-.add-node-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.add-node-command-row { display: flex; align-items: center; gap: 8px; }
-.add-node-command { flex: 1; overflow-x: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); font: 11px ui-monospace, monospace; white-space: pre; }
-.add-node-waiting { color: #9aa79c; font-size: 12px; }
 .system-message-setting { display: flex; align-items: center; gap: 6px; color: #7f8c81; font: 10px ui-monospace, monospace; cursor: pointer; }
 .system-message-setting input { width: auto; accent-color: var(--green-strong); cursor: pointer; }
 .stream-state { display: flex; align-items: center; gap: 6px; color: #68746a; font: 9px ui-monospace, monospace; text-transform: uppercase; }
