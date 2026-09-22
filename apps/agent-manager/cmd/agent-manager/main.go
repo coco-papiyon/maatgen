@@ -126,8 +126,10 @@ func run() error {
 	copilotAdapter := copilot.New("copilot")
 	adapters := []agent.Adapter{codexAdapter, claudeAdapter, copilotAdapter}
 	availabilityCtx, cancelAvailability := context.WithTimeout(context.Background(), 5*time.Second)
-	availableProviders := agent.AvailableProviders(availabilityCtx, adapters)
+	availableProviders := agent.AvailableProviders(availabilityCtx, []agent.Adapter{codexAdapter, claudeAdapter})
 	cancelAvailability()
+	// Copilot is offered without a startup probe. Its adapter checks the CLI when a Run starts.
+	availableProviders[protocol.AgentCopilot] = true
 	for name, available := range availableProviders {
 		if !available {
 			slog.Info("agent CLI is not installed; hiding it from the provider list", "provider", name)

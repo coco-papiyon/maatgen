@@ -352,6 +352,8 @@ Approval Coordinatorは次の順にfail-closedで判定する。
 
 GitHub Copilot CLIはprogrammatic modeを使用し、対象Repositoryをcwdとして次の引数で実行する。
 
+Manager起動時にはCopilot CLIの使用可否を確認せず、CopilotをProvider一覧に表示する。Run開始時にAdapterがCLIを確認し、実行できない場合はRunのエラーとして返す。
+
 ```text
 copilot -C <repository> --prompt <message> --output-format json \
   --allow-all --no-ask-user --no-auto-update --no-color \
