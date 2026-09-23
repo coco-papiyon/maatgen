@@ -10,13 +10,11 @@ import (
 	"github.com/coco-papiyon/maatgen/apps/agent-manager/internal/protocol"
 )
 
-// fakeClock lets a test compress the multi-minute quiet-interval escalation
-// (supervisorQuietAfter/supervisorQuietInterval) into real time on the
-// order of milliseconds: ClientSupervisor.after advances it by exactly the
-// duration it was asked to wait, then fires immediately.
+// fakeClock advances retry waits without wall-clock delays.
 type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
+	mu    sync.Mutex
+	now   time.Time
+	waits []time.Duration
 }
 
 func (c *fakeClock) Now() time.Time {
@@ -25,8 +23,15 @@ func (c *fakeClock) Now() time.Time {
 	return c.now
 }
 
+func (c *fakeClock) Waits() []time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]time.Duration(nil), c.waits...)
+}
+
 func (c *fakeClock) After(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
+	c.waits = append(c.waits, d)
 	c.now = c.now.Add(d)
 	now := c.now
 	c.mu.Unlock()
@@ -138,35 +143,93 @@ func TestClientSupervisorRunsMultipleConnectionsIndependently(t *testing.T) {
 	}
 }
 
-// TestClientSupervisorBacksOffToQuietIntervalAfterSustainedFailure exercises
-// the "don't keep checking a long-offline upper node every few seconds"
-// requirement: with a target nothing is listening on, wait durations must
-// grow (capped at supervisorFastMaxBackoff) and then, once
-// supervisorQuietAfter of simulated failure has passed, jump to
-// supervisorQuietInterval and report UpstreamStateWaiting.
-func TestClientSupervisorBacksOffToQuietIntervalAfterSustainedFailure(t *testing.T) {
-	supervisor, _ := newTestSupervisor(http.NewServeMux())
-	// Port 1 on loopback refuses immediately, so dialOnce fails fast without
-	// a real timeout — the fake clock (not wall time) drives the backoff.
-	supervisor.Set("u1", protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws://127.0.0.1:1/api/relay/connect", NodeID: "n1"})
+func TestClientSupervisorStopsAfterConfiguredFailuresAndReconnects(t *testing.T) {
+	supervisor, clock := newTestSupervisor(http.NewServeMux())
+	supervisor.SetRetrySettings(protocol.UpstreamRetrySettings{MaxFailures: 2, RetryIntervalMinutes: 7})
+	config := protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws://127.0.0.1:1/api/relay/connect", NodeID: "n1"}
+	supervisor.Set("u1", config)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		status, _ := supervisor.Get("u1")
-		if status.State == protocol.UpstreamStateWaiting {
+		if status.State == protocol.UpstreamStateStopped {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for the quiet backoff state; last status: %+v", status)
+			t.Fatalf("timed out waiting for stopped state; last status: %+v", status)
 		}
 		time.Sleep(time.Millisecond)
 	}
 
 	status, _ := supervisor.Get("u1")
-	if status.NextAttemptAt == nil {
-		t.Fatal("expected NextAttemptAt to be set")
+	if status.FailureCount != 2 || status.NextAttemptAt != nil {
+		t.Fatalf("stopped status = %+v", status)
+	}
+	if waits := clock.Waits(); len(waits) != 1 || waits[0] != 7*time.Minute {
+		t.Fatalf("retry waits = %v, want one 7-minute wait", waits)
 	}
 	if status.LastError == "" {
 		t.Fatal("expected a LastError describing the failed connection attempt")
 	}
+	if _, ok := supervisor.UpstreamProxy("u1"); ok {
+		t.Fatal("stopped upstream must not have a proxy")
+	}
+	if restarted, ok := supervisor.Reconnect("u1"); !ok || restarted.State != protocol.UpstreamStateConnecting || restarted.FailureCount != 0 {
+		t.Fatalf("reconnect status = %+v, ok = %t", restarted, ok)
+	}
+	// The saved configuration remains enabled, so startup can start it again.
+	supervisor.Set("u1", config)
+	if restarted, ok := supervisor.Get("u1"); !ok || restarted.State != protocol.UpstreamStateConnecting {
+		t.Fatalf("startup status = %+v, ok = %t", restarted, ok)
+	}
+}
+
+func TestClientSupervisorDefaultsToThreeFailures(t *testing.T) {
+	supervisor, clock := newTestSupervisor(http.NewServeMux())
+	supervisor.Set("u1", protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws://127.0.0.1:1/api/relay/connect", NodeID: "n1"})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		status, _ := supervisor.Get("u1")
+		if status.State == protocol.UpstreamStateStopped {
+			if status.FailureCount != 3 {
+				t.Fatalf("failure count = %d, want 3", status.FailureCount)
+			}
+			if waits := clock.Waits(); len(waits) != 2 || waits[0] != 5*time.Minute || waits[1] != 5*time.Minute {
+				t.Fatalf("retry waits = %v, want two 5-minute waits", waits)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for default limit; status = %+v", status)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestClientSupervisorReschedulesWaitingConnectionWhenCommonIntervalChanges(t *testing.T) {
+	supervisor := NewClientSupervisor(http.NewServeMux(), nil)
+	waits := make(chan time.Duration, 2)
+	supervisor.after = func(duration time.Duration) <-chan time.Time {
+		waits <- duration
+		return make(chan time.Time)
+	}
+	supervisor.Set("u1", protocol.UpstreamConfig{Enabled: true, UpstreamURL: "ws://127.0.0.1:1/api/relay/connect", NodeID: "n1"})
+	select {
+	case first := <-waits:
+		if first < 4*time.Minute || first > 5*time.Minute {
+			t.Fatalf("first wait = %s, want about 5 minutes", first)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first retry was not scheduled")
+	}
+	supervisor.SetRetrySettings(protocol.UpstreamRetrySettings{MaxFailures: 4, RetryIntervalMinutes: 7})
+	select {
+	case second := <-waits:
+		if second < 6*time.Minute || second > 7*time.Minute {
+			t.Fatalf("updated wait = %s, want about 7 minutes", second)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("updated retry was not scheduled")
+	}
+	supervisor.Close()
 }

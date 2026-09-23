@@ -128,6 +128,20 @@ func TestSaveUpstreamsTrimsAndPersists(t *testing.T) {
 	}
 }
 
+func TestSaveUpstreamRetryPersistsCommonSettings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config", "providers.json")
+	config := Config{Providers: []protocol.Provider{{ID: protocol.AgentCodex, Label: "Codex", Models: []string{"model-a"}}}}
+	settings := protocol.UpstreamRetrySettings{MaxFailures: 4, RetryIntervalMinutes: 7}
+	if err := SaveUpstreamRetry(path, &config, settings); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := Load(filepath.Join(dir, "agent-manager.exe"), DefaultRelativePath)
+	if err != nil || loaded.UpstreamRetry != settings {
+		t.Fatalf("loaded retry settings = %+v, err = %v", loaded.UpstreamRetry, err)
+	}
+}
+
 func TestLoadFromUsesWorkingDirectoryForGoRunExecutable(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")

@@ -28,7 +28,8 @@ type Config struct {
 	// (potentially several upper nodes at once), set from its "Server"
 	// settings screen and persisted here so they survive restarts without
 	// needing --upstream-url etc. again.
-	Upstreams []protocol.UpstreamConfig `json:"upstreams"`
+	Upstreams     []protocol.UpstreamConfig      `json:"upstreams"`
+	UpstreamRetry protocol.UpstreamRetrySettings `json:"upstreamRetry"`
 }
 
 // GitHubConfig holds the credential and host allowlist GitHub monitoring
@@ -92,6 +93,16 @@ func SaveUpstreams(path string, config *Config, upstreams []protocol.UpstreamCon
 	}
 	config.Upstreams = normalized
 	return writeConfigFile(path, config)
+}
+
+func SaveUpstreamRetry(path string, config *Config, settings protocol.UpstreamRetrySettings) error {
+	previous := config.UpstreamRetry
+	config.UpstreamRetry = settings
+	if err := writeConfigFile(path, config); err != nil {
+		config.UpstreamRetry = previous
+		return err
+	}
+	return nil
 }
 
 // writeConfigFile atomically replaces the tool config file at path with

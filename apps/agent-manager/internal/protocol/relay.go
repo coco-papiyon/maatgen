@@ -53,6 +53,12 @@ type UpstreamConfig struct {
 	NodeToken   string `json:"nodeToken"`
 }
 
+// UpstreamRetrySettings apply to every outbound upper-server connection.
+type UpstreamRetrySettings struct {
+	MaxFailures          int `json:"maxFailures"`
+	RetryIntervalMinutes int `json:"retryIntervalMinutes"`
+}
+
 // UpstreamConnectionState is the live state of the lower node's outbound
 // connection attempt, shown on its own Server settings screen.
 type UpstreamConnectionState string
@@ -61,11 +67,10 @@ const (
 	UpstreamStateDisabled   UpstreamConnectionState = "disabled"
 	UpstreamStateConnecting UpstreamConnectionState = "connecting"
 	UpstreamStateConnected  UpstreamConnectionState = "connected"
-	// UpstreamStateWaiting means the upper node has been unreachable long
-	// enough that connection attempts have backed off to a long, quiet
-	// interval (see internal/relay.ClientSupervisor) instead of retrying
-	// every few seconds.
-	UpstreamStateWaiting UpstreamConnectionState = "waiting"
+	UpstreamStateWaiting    UpstreamConnectionState = "waiting"
+	// UpstreamStateStopped means the configured failure limit was reached.
+	// A manual reconnect or Manager restart starts a fresh attempt sequence.
+	UpstreamStateStopped UpstreamConnectionState = "stopped"
 )
 
 type UpstreamStatus struct {
@@ -74,6 +79,7 @@ type UpstreamStatus struct {
 	LastError       string                  `json:"lastError,omitempty"`
 	LastConnectedAt *time.Time              `json:"lastConnectedAt,omitempty"`
 	NextAttemptAt   *time.Time              `json:"nextAttemptAt,omitempty"`
+	FailureCount    int                     `json:"failureCount"`
 }
 
 // UpstreamStatusListResponse is GET /api/v1/upstreams's body: every upper

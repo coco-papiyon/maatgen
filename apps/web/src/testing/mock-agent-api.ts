@@ -26,6 +26,7 @@ import type {
     SessionEvent,
     UpdateGitHubMonitorRequest,
     UpstreamConfig,
+    UpstreamRetrySettings,
     UpstreamStatus,
     UsageSummary,
     WsTicketResponse,
@@ -55,6 +56,7 @@ export class MockAgentApi implements AgentApi {
   private readonly relayNodes = new Map<string, RelayNode>();
   private relayNodeCounter = 0;
   private readonly upstreams = new Map<string, UpstreamStatus>();
+  private upstreamRetrySettings: UpstreamRetrySettings = { maxFailures: 3, retryIntervalMinutes: 5 };
   private upstreamCounter = 0;
   // ADR-009 Decision 5.1: overrides what listAllSessions returns, for tests
   // that need to simulate sessions living on a different (mock) node than
@@ -704,6 +706,7 @@ export class MockAgentApi implements AgentApi {
     const status: UpstreamStatus = {
       config: clone({ ...config, id }),
       state: config.enabled && config.upstreamUrl && config.nodeId ? 'connecting' : 'disabled',
+      failureCount: 0,
     };
     this.upstreams.set(id, status);
     return clone(status);
@@ -714,6 +717,7 @@ export class MockAgentApi implements AgentApi {
     const status: UpstreamStatus = {
       config: clone({ ...config, id }),
       state: config.enabled && config.upstreamUrl && config.nodeId ? 'connecting' : 'disabled',
+      failureCount: 0,
     };
     this.upstreams.set(id, status);
     return clone(status);
@@ -722,6 +726,24 @@ export class MockAgentApi implements AgentApi {
   async deleteUpstream(id: string): Promise<void> {
     if (!this.upstreams.has(id)) throw new AgentApiError('upstream was not found', 404, 'upstream_not_found');
     this.upstreams.delete(id);
+  }
+
+  async reconnectUpstream(id: string): Promise<UpstreamStatus> {
+    const existing = this.upstreams.get(id);
+    if (!existing) throw new AgentApiError('upstream was not found', 404, 'upstream_not_found');
+    if (existing.state !== 'stopped') throw new AgentApiError('upstream is not stopped', 409, 'upstream_not_stopped');
+    const status: UpstreamStatus = { config: clone(existing.config), state: 'connecting', failureCount: 0 };
+    this.upstreams.set(id, status);
+    return clone(status);
+  }
+
+  async getUpstreamRetrySettings(): Promise<UpstreamRetrySettings> {
+    return clone(this.upstreamRetrySettings);
+  }
+
+  async updateUpstreamRetrySettings(settings: UpstreamRetrySettings): Promise<UpstreamRetrySettings> {
+    this.upstreamRetrySettings = clone(settings);
+    return clone(settings);
   }
 }
 

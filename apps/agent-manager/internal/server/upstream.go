@@ -12,6 +12,7 @@ import (
 // ErrUpstreamNotFound is returned by UpstreamUpdater/UpstreamDeleter for an
 // unknown upstream id.
 var ErrUpstreamNotFound = errors.New("upstream not found")
+var ErrUpstreamNotStopped = errors.New("upstream is not stopped")
 
 // UpstreamLister/UpstreamCreator/UpstreamUpdater/UpstreamDeleter back this
 // (lower) node's own "Server" settings screen: which upper nodes to connect
@@ -26,9 +27,34 @@ type UpstreamUpdater func(ctx context.Context, id string, config protocol.Upstre
 
 type UpstreamDeleter func(ctx context.Context, id string) error
 
+type UpstreamReconnector func(ctx context.Context, id string) (protocol.UpstreamStatus, error)
+type UpstreamRetryGetter func(ctx context.Context) protocol.UpstreamRetrySettings
+type UpstreamRetryUpdater func(ctx context.Context, settings protocol.UpstreamRetrySettings) error
+
 type UpstreamProxyProvider func(id string) (http.Handler, bool)
 
-func registerUpstreamRoutes(mux *http.ServeMux, lister UpstreamLister, creator UpstreamCreator, updater UpstreamUpdater, deleter UpstreamDeleter, proxyProvider UpstreamProxyProvider) {
+func registerUpstreamRetryRoutes(mux *http.ServeMux, getter UpstreamRetryGetter, updater UpstreamRetryUpdater) {
+	if getter == nil || updater == nil {
+		return
+	}
+	mux.Handle("GET /api/v1/upstream-retry-settings", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, getter(r.Context()))
+	}))
+	mux.Handle("PUT /api/v1/upstream-retry-settings", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var settings protocol.UpstreamRetrySettings
+		if err := readJSON(w, r, &settings); err != nil || settings.MaxFailures < 2 || settings.RetryIntervalMinutes < 1 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "maxFailures must be at least 2 and retryIntervalMinutes at least 1", nil)
+			return
+		}
+		if err := updater(r.Context(), settings); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "upstream_retry_save_failed", "retry settings could not be saved", nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, settings)
+	}))
+}
+
+func registerUpstreamRoutes(mux *http.ServeMux, lister UpstreamLister, creator UpstreamCreator, updater UpstreamUpdater, deleter UpstreamDeleter, reconnector UpstreamReconnector, proxyProvider UpstreamProxyProvider) {
 	if lister == nil || creator == nil || updater == nil || deleter == nil {
 		return
 	}
@@ -77,6 +103,23 @@ func registerUpstreamRoutes(mux *http.ServeMux, lister UpstreamLister, creator U
 		}
 		writeJSON(w, http.StatusOK, status)
 	}))
+
+	if reconnector != nil {
+		mux.Handle("POST /api/v1/upstreams/{id}/reconnect", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			status, err := reconnector(r.Context(), r.PathValue("id"))
+			if err != nil {
+				if errors.Is(err, ErrUpstreamNotFound) {
+					writeAPIError(w, http.StatusNotFound, "upstream_not_found", "upstream server was not found", nil)
+				} else if errors.Is(err, ErrUpstreamNotStopped) {
+					writeAPIError(w, http.StatusConflict, "upstream_not_stopped", "upstream server is not stopped", nil)
+				} else {
+					writeAPIError(w, http.StatusInternalServerError, "upstream_reconnect_failed", "upstream server could not reconnect", nil)
+				}
+				return
+			}
+			writeJSON(w, http.StatusOK, status)
+		}))
+	}
 
 	mux.Handle("DELETE /api/v1/upstreams/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

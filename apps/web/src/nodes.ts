@@ -34,6 +34,7 @@ function presentNodes(listedNodes: RelayNode[]): RelayNode[] {
     !isUpstreamNodeId(node.id) && (node.id === 'local' || node.status !== 'pending' || !upstreamNames.has(node.name))
   ));
   for (const upstream of configuredUpstreams) {
+    if (upstream.state === 'stopped') continue;
     const id = upstream.config.id;
     if (!id) continue;
     const name = upstream.config.nodeName.trim() || upstream.config.nodeId.trim();
@@ -57,6 +58,9 @@ export async function refreshNodes(api: AgentApi): Promise<void> {
     // Keep the last known upstream state while its status endpoint is transiently unavailable.
   }
   nodes.value = presentNodes(listedNodes);
+  if (isUpstreamNodeId(selectedNodeId.value) && !nodes.value.some((node) => node.id === selectedNodeId.value)) {
+    selectNode('local');
+  }
 }
 
 export async function initializeNodes(api: AgentApi): Promise<void> {

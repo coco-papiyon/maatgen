@@ -732,6 +732,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-57 | Copilot CLIの出力・認証方式 | programmatic JSONLとCLI管理のログイン情報を使用 | `--output-format json`を正規化し、認証情報は保存せずCLIのログイン状態を利用する。Session IDは`agentThreadId`へ保存して`--resume`する | Copilot Adapter | 検討済み |
 | D-64 | Copilot Usageの記録単位 | 実動作モデルとAI credits | `assistant.usage.model`を保存し、`copilotUsage.totalNanoAiu / 1_000_000_000`をRun内で加算する。Copilotのtoken数とモデル倍率`cost`は共通Usageへ保存しない | Copilot Adapter | 検討済み |
 | D-67 | 未インストールProviderのUI表示 | 起動時にCodex／Claude Codeの`--version`実行可否を確認し、失敗したProviderは`/api/v1/providers`から除外する。Copilotは起動時チェックなしで表示する | `agent.AvailableProviders`がCodex／Claude CodeのCheckを並行実行（5秒上限）する。CopilotのCLI確認はRun開始時にAdapterが行う。設定ファイル（`providers.json`）自体は変更しない | Provider選択UI | 検討済み |
+| D-68 | 上位サーバの接続失敗 | 共通設定の再試行間隔（既定5分）と失敗上限（既定3回）で自動再試行を停止し、手動再接続またはManager再起動で再開する | `upstreamRetry`を設定ファイルへ保存し、`GET/PUT /api/v1/upstream-retry-settings`から変更する。`UpstreamStatus`へ`stopped`と失敗回数を追加し、停止中は上位サーバ選択肢に含めない。設定画面の`POST /api/v1/upstreams/{id}/reconnect`で試行を再開する | サーバ設定・Relay | 検討済み |
 | D-66 | Session作成時のコード数計測 | cloc（`--vcs=git`）をSession作成時に一度だけ実行し結果を保存する | `cloc --vcs=git --json <workspace>`をSession作成のCreateSession内で同期実行し、`session_source_stats`テーブルへ言語別・合計行を保存する。Runごとの再計測は行わない。計測失敗（cloc未導入含む）はSession作成を失敗させず、コード数を未計測のまま扱う。UIはWeb版限定でUsage／Changesと並ぶ「コード数」Tabに表示する | Session作成／Web UI | 検討済み |
 | D-58 | GitHub Issue／PR連携方式 | — | — | GitHub連携 | 未 |
 | D-59 | Multi-Agent Sessionの分離単位 | — | — | 複数Agent実行 | 未 |

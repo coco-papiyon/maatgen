@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import ServerSettingsView from './ServerSettingsView.vue';
 import { MockAgentApi } from '../testing/mock-agent-api';
@@ -28,9 +28,20 @@ function newServerInputs(wrapper: VueWrapper) {
 }
 
 describe('ServerSettingsView (ADR-009 upstream connections, multi-server)', () => {
+  it('saves one retry policy for all servers', async () => {
+    const { wrapper, api } = await mountSettings();
+    const inputs = wrapper.get('.server-retry-settings').findAll('input[type="number"]');
+    await inputs[0]!.setValue('7');
+    await inputs[1]!.setValue('4');
+    await wrapper.get('.server-retry-settings button').trigger('click');
+    await flushPromises();
+    expect(await api.getUpstreamRetrySettings()).toEqual({ maxFailures: 4, retryIntervalMinutes: 7 });
+    expect(wrapper.get('.server-retry-settings').text()).toContain('保存しました');
+  });
+
   it('starts with no configured servers and an empty add-server form', async () => {
     const { wrapper } = await mountSettings();
-    expect(wrapper.findAll('.github-card')).toHaveLength(1);
+    expect(wrapper.findAll('.github-card')).toHaveLength(2);
     const { checkbox } = newServerInputs(wrapper);
     expect((checkbox.element as HTMLInputElement).checked).toBe(true);
   });
@@ -80,7 +91,7 @@ describe('ServerSettingsView (ADR-009 upstream connections, multi-server)', () =
 
     const upstreams = await api.listUpstreams();
     expect(upstreams.map((status) => status.config.nodeId).sort()).toEqual(['node-a', 'node-b']);
-    expect(wrapper.findAll('.github-card')).toHaveLength(3); // two servers + the add-server form
+    expect(wrapper.findAll('.github-card')).toHaveLength(4); // two servers, common settings, and add-server form
   });
 
   it('disables the add button when enabled without the required fields', async () => {
@@ -105,6 +116,25 @@ describe('ServerSettingsView (ADR-009 upstream connections, multi-server)', () =
     await flushPromises();
 
     expect((await api.listUpstreams())).toHaveLength(0);
-    expect(wrapper.findAll('.github-card')).toHaveLength(1); // only the add-server form remains
+    expect(wrapper.findAll('.github-card')).toHaveLength(2); // common settings and add-server form remain
+  });
+
+  it('reconnects a server after its failure limit stops automatic attempts', async () => {
+    const api = new MockAgentApi();
+    await api.updateUpstreamRetrySettings({ maxFailures: 2, retryIntervalMinutes: 5 });
+    const configured = await api.createUpstream({ enabled: true, upstreamUrl: 'ws://upper:3101/api/relay/connect', nodeId: 'n1', nodeName: 'Upper', nodeToken: '' });
+    const stopped = { ...configured, state: 'stopped' as const, failureCount: 2, lastError: 'connection refused' };
+    const connecting = { ...configured, state: 'connecting' as const, failureCount: 0 };
+    vi.spyOn(api, 'listUpstreams').mockResolvedValueOnce([stopped]).mockResolvedValueOnce([stopped]).mockResolvedValue([connecting]);
+    const reconnect = vi.spyOn(api, 'reconnectUpstream').mockResolvedValue(connecting);
+    const { wrapper } = await mountSettings(api);
+    expect(wrapper.text()).toContain('接続停止');
+    expect(wrapper.text()).toContain('2 / 2');
+    expect(nodes.value.some((node) => node.name === 'Upper')).toBe(false);
+    await wrapper.get('.server-settings-card button:nth-child(2)').trigger('click');
+    await flushPromises();
+    expect(reconnect).toHaveBeenCalledWith(configured.config.id);
+    expect(wrapper.text()).toContain('接続試行中');
+    expect(nodes.value.some((node) => node.name === 'Upper')).toBe(true);
   });
 });

@@ -32,6 +32,7 @@ import type {
     SessionListResponse,
     UpdateGitHubMonitorRequest,
     UpstreamConfig,
+    UpstreamRetrySettings,
     UpstreamStatus,
     UpstreamStatusListResponse,
     UsageModelListResponse,
@@ -197,6 +198,9 @@ export interface AgentApi {
   listUpstreams(): Promise<UpstreamStatus[]>;
   createUpstream(config: UpstreamConfig): Promise<UpstreamStatus>;
   updateUpstream(id: string, config: UpstreamConfig): Promise<UpstreamStatus>;
+  reconnectUpstream(id: string): Promise<UpstreamStatus>;
+  getUpstreamRetrySettings(): Promise<UpstreamRetrySettings>;
+  updateUpstreamRetrySettings(settings: UpstreamRetrySettings): Promise<UpstreamRetrySettings>;
   deleteUpstream(id: string): Promise<void>;
 }
 
@@ -507,6 +511,15 @@ export const httpAgentApi: AgentApi = {
   },
   updateUpstream(id, config) {
     return requestAtRoot(`/api/v1/upstreams/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(config) });
+  },
+  reconnectUpstream(id) {
+    return requestAtRoot(`/api/v1/upstreams/${encodeURIComponent(id)}/reconnect`, { method: 'POST' });
+  },
+  getUpstreamRetrySettings() {
+    return requestAtRoot('/api/v1/upstream-retry-settings');
+  },
+  updateUpstreamRetrySettings(settings) {
+    return requestAtRoot('/api/v1/upstream-retry-settings', { method: 'PUT', body: JSON.stringify(settings) });
   },
   deleteUpstream(id) {
     return requestAtRoot(`/api/v1/upstreams/${encodeURIComponent(id)}`, { method: 'DELETE' });

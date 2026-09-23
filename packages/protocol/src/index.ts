@@ -386,7 +386,12 @@ export interface UpstreamConfig {
   nodeToken: string;
 }
 
-export type UpstreamConnectionState = 'disabled' | 'connecting' | 'connected' | 'waiting';
+export interface UpstreamRetrySettings {
+  maxFailures: number;
+  retryIntervalMinutes: number;
+}
+
+export type UpstreamConnectionState = 'disabled' | 'connecting' | 'connected' | 'waiting' | 'stopped';
 
 export interface UpstreamStatus {
   config: UpstreamConfig;
@@ -394,6 +399,7 @@ export interface UpstreamStatus {
   lastError?: string;
   lastConnectedAt?: string;
   nextAttemptAt?: string;
+  failureCount: number;
 }
 
 export interface UpstreamStatusListResponse {

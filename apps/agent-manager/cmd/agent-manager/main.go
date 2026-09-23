@@ -391,6 +391,7 @@ func run() error {
 	// so it starts with a nil handler and SetHandler is called afterward,
 	// before the first Configure.
 	clientSupervisor := relay.NewClientSupervisor(nil, slog.Default())
+	clientSupervisor.SetRetrySettings(toolConfig.UpstreamRetry)
 	// upstreamCreator/upstreamUpdater/upstreamDeleter back the "Server"
 	// settings screen's CRUD over this node's own outbound relay
 	// connections (ADR-009, extended to allow several upper nodes at
@@ -461,6 +462,26 @@ func run() error {
 		clientSupervisor.Remove(id)
 		return nil
 	}
+	upstreamReconnector := func(_ context.Context, id string) (protocol.UpstreamStatus, error) {
+		if _, ok := clientSupervisor.Get(id); !ok {
+			return protocol.UpstreamStatus{}, server.ErrUpstreamNotFound
+		}
+		status, ok := clientSupervisor.Reconnect(id)
+		if !ok {
+			return protocol.UpstreamStatus{}, server.ErrUpstreamNotStopped
+		}
+		return status, nil
+	}
+	upstreamRetryUpdater := func(_ context.Context, settings protocol.UpstreamRetrySettings) error {
+		modelConfigMu.Lock()
+		err := toolconfig.SaveUpstreamRetry(resolvedConfigPath, &toolConfig, settings)
+		modelConfigMu.Unlock()
+		if err != nil {
+			return err
+		}
+		clientSupervisor.SetRetrySettings(settings)
+		return nil
+	}
 
 	if err := runtimeinfo.Write(*runtimeFile, runtimeinfo.Metadata{
 		PID:           os.Getpid(),
@@ -507,6 +528,9 @@ func run() error {
 			UpstreamCreator:       upstreamCreator,
 			UpstreamUpdater:       upstreamUpdater,
 			UpstreamDeleter:       upstreamDeleter,
+			UpstreamReconnector:   upstreamReconnector,
+			UpstreamRetryGetter:   func(context.Context) protocol.UpstreamRetrySettings { return clientSupervisor.RetrySettings() },
+			UpstreamRetryUpdater:  upstreamRetryUpdater,
 			UpstreamProxyProvider: clientSupervisor.UpstreamProxy,
 			StaticFS:              staticFS,
 		}, store, store).Handler(),

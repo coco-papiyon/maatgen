@@ -46,6 +46,64 @@ func TestUpstreamListAPI(t *testing.T) {
 	}
 }
 
+func TestUpstreamReconnectAPI(t *testing.T) {
+	config := testConfig()
+	config.UpstreamLister = func(context.Context) []protocol.UpstreamStatus { return nil }
+	config.UpstreamCreator = func(context.Context, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamUpdater = func(context.Context, string, protocol.UpstreamConfig) (protocol.UpstreamStatus, error) {
+		return protocol.UpstreamStatus{}, nil
+	}
+	config.UpstreamDeleter = func(context.Context, string) error { return nil }
+	called := false
+	config.UpstreamReconnector = func(_ context.Context, id string) (protocol.UpstreamStatus, error) {
+		if id != "u1" {
+			t.Fatalf("id = %q", id)
+		}
+		called = true
+		return protocol.UpstreamStatus{State: protocol.UpstreamStateConnecting}, nil
+	}
+	recorder := httptest.NewRecorder()
+	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest("POST", "/api/v1/upstreams/u1/reconnect"))
+	if recorder.Code != http.StatusOK || !called {
+		t.Fatalf("status = %d, called = %t, body = %s", recorder.Code, called, recorder.Body.String())
+	}
+	var status protocol.UpstreamStatus
+	if err := json.NewDecoder(recorder.Body).Decode(&status); err != nil || status.State != protocol.UpstreamStateConnecting {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestUpstreamRetrySettingsAPI(t *testing.T) {
+	settings := protocol.UpstreamRetrySettings{MaxFailures: 3, RetryIntervalMinutes: 5}
+	config := testConfig()
+	config.UpstreamRetryGetter = func(context.Context) protocol.UpstreamRetrySettings { return settings }
+	config.UpstreamRetryUpdater = func(_ context.Context, updated protocol.UpstreamRetrySettings) error { settings = updated; return nil }
+	handler := New(config, nil, nil).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, apiRequest("GET", "/api/v1/upstream-retry-settings"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET status = %d", recorder.Code)
+	}
+	var got protocol.UpstreamRetrySettings
+	if err := json.NewDecoder(recorder.Body).Decode(&got); err != nil || got != settings {
+		t.Fatalf("GET settings = %+v, err = %v", got, err)
+	}
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/upstream-retry-settings", `{"maxFailures":4,"retryIntervalMinutes":7}`))
+	if recorder.Code != http.StatusOK || settings.MaxFailures != 4 || settings.RetryIntervalMinutes != 7 {
+		t.Fatalf("PUT status = %d, settings = %+v, body = %s", recorder.Code, settings, recorder.Body.String())
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, jsonRequest("PUT", "/api/v1/upstream-retry-settings", `{"maxFailures":1,"retryIntervalMinutes":0}`))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid PUT status = %d", recorder.Code)
+	}
+}
+
 func TestUpstreamCreatePostAppliesAndReturnsNewStatus(t *testing.T) {
 	var lastConfig protocol.UpstreamConfig
 	config := testConfig()

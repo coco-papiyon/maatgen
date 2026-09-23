@@ -15,17 +15,19 @@ import (
 )
 
 const (
-	supervisorInitialBackoff = time.Second
-	supervisorFastMaxBackoff = 30 * time.Second
-	// supervisorQuietAfter/supervisorQuietInterval: once the upper node has
-	// been unreachable continuously for this long, stop retrying every few
-	// seconds and fall back to one attempt every supervisorQuietInterval
-	// instead, so a lower node left running against an upper node that is
-	// simply off (e.g. overnight) does not keep reconnecting/logging in a
-	// tight loop.
-	supervisorQuietAfter    = 2 * time.Minute
-	supervisorQuietInterval = 5 * time.Minute
+	defaultMaxFailures          = 3
+	defaultRetryIntervalMinutes = 5
 )
+
+func NormalizeRetrySettings(settings protocol.UpstreamRetrySettings) protocol.UpstreamRetrySettings {
+	if settings.MaxFailures < 2 {
+		settings.MaxFailures = defaultMaxFailures
+	}
+	if settings.RetryIntervalMinutes <= 0 {
+		settings.RetryIntervalMinutes = defaultRetryIntervalMinutes
+	}
+	return settings
+}
 
 // supervisorEntry is one configured outbound connection (one upper node).
 // run() holds a direct pointer to its own entry rather than looking it up
@@ -48,14 +50,14 @@ type supervisorEntry struct {
 type ClientSupervisor struct {
 	handler http.Handler
 	logger  *slog.Logger
-	// now and after are overridden by tests with a fake clock so the
-	// multi-minute quiet-interval escalation can be exercised without a
-	// real multi-minute wait.
+	// now and after are overridden by tests to exercise retry delays quickly.
 	now   func() time.Time
 	after func(time.Duration) <-chan time.Time
 
-	mu      sync.Mutex
-	entries map[string]*supervisorEntry
+	mu            sync.Mutex
+	entries       map[string]*supervisorEntry
+	retrySettings protocol.UpstreamRetrySettings
+	policyChanged chan struct{}
 }
 
 func NewClientSupervisor(handler http.Handler, logger *slog.Logger) *ClientSupervisor {
@@ -63,12 +65,36 @@ func NewClientSupervisor(handler http.Handler, logger *slog.Logger) *ClientSuper
 		logger = slog.Default()
 	}
 	return &ClientSupervisor{
-		handler: handler,
-		logger:  logger,
-		now:     time.Now,
-		after:   time.After,
-		entries: make(map[string]*supervisorEntry),
+		handler:       handler,
+		logger:        logger,
+		now:           time.Now,
+		after:         time.After,
+		entries:       make(map[string]*supervisorEntry),
+		retrySettings: NormalizeRetrySettings(protocol.UpstreamRetrySettings{}),
+		policyChanged: make(chan struct{}),
 	}
+}
+
+// SetRetrySettings updates the common policy and wakes waiting connections
+// so their next-attempt times reflect the new interval.
+func (s *ClientSupervisor) SetRetrySettings(settings protocol.UpstreamRetrySettings) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retrySettings = NormalizeRetrySettings(settings)
+	close(s.policyChanged)
+	s.policyChanged = make(chan struct{})
+}
+
+func (s *ClientSupervisor) RetrySettings() protocol.UpstreamRetrySettings {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.retrySettings
+}
+
+func (s *ClientSupervisor) policySnapshot() (protocol.UpstreamRetrySettings, <-chan struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.retrySettings, s.policyChanged
 }
 
 // SetHandler sets the handler served over every relay session once it
@@ -101,6 +127,10 @@ func GenerateID() (string, error) {
 func (s *ClientSupervisor) Set(id string, config protocol.UpstreamConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.setLocked(id, config)
+}
+
+func (s *ClientSupervisor) setLocked(id string, config protocol.UpstreamConfig) {
 	if existing, ok := s.entries[id]; ok && existing.cancel != nil {
 		existing.cancel()
 	}
@@ -114,6 +144,19 @@ func (s *ClientSupervisor) Set(id string, config protocol.UpstreamConfig) {
 	entry.cancel = cancel
 	entry.status = protocol.UpstreamStatus{Config: config, State: protocol.UpstreamStateConnecting}
 	go s.run(ctx, entry, config, s.handler)
+}
+
+// Reconnect starts a fresh attempt sequence for an exhausted connection.
+// It does not change its persisted configuration.
+func (s *ClientSupervisor) Reconnect(id string) (protocol.UpstreamStatus, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.entries[id]
+	if !ok || entry.status.State != protocol.UpstreamStateStopped {
+		return protocol.UpstreamStatus{}, false
+	}
+	s.setLocked(id, entry.status.Config)
+	return s.entries[id].status, true
 }
 
 // Remove stops and forgets the connection identified by id entirely (unlike
@@ -165,13 +208,11 @@ func (s *ClientSupervisor) update(ctx context.Context, entry *supervisorEntry, m
 }
 
 func (s *ClientSupervisor) run(ctx context.Context, entry *supervisorEntry, config protocol.UpstreamConfig, handler http.Handler) {
-	backoff := supervisorInitialBackoff
-	var failingSince time.Time
-
 	for ctx.Err() == nil {
 		s.update(ctx, entry, func(status *protocol.UpstreamStatus) {
 			status.State = protocol.UpstreamStateConnecting
 			status.LastError = ""
+			status.NextAttemptAt = nil
 		})
 
 		var connectedSession *yamux.Session
@@ -194,6 +235,7 @@ func (s *ClientSupervisor) run(ctx context.Context, entry *supervisorEntry, conf
 					status.State = protocol.UpstreamStateConnected
 					status.LastConnectedAt = &now
 					status.LastError = ""
+					status.FailureCount = 0
 				})
 			},
 		}, s.logger)
@@ -207,8 +249,6 @@ func (s *ClientSupervisor) run(ctx context.Context, entry *supervisorEntry, conf
 		s.mu.Unlock()
 
 		if connected {
-			backoff = supervisorInitialBackoff
-			failingSince = time.Time{}
 			if err != nil {
 				s.logger.Warn("relay: upstream connection ended", "upstream", config.UpstreamURL, "error", err)
 			}
@@ -218,9 +258,6 @@ func (s *ClientSupervisor) run(ctx context.Context, entry *supervisorEntry, conf
 				status.State = protocol.UpstreamStateConnecting
 			})
 		} else {
-			if failingSince.IsZero() {
-				failingSince = s.now()
-			}
 			message := ""
 			if err != nil {
 				message = err.Error()
@@ -228,34 +265,48 @@ func (s *ClientSupervisor) run(ctx context.Context, entry *supervisorEntry, conf
 			s.logger.Info("relay: upstream connection attempt failed", "upstream", config.UpstreamURL, "error", err)
 			s.update(ctx, entry, func(status *protocol.UpstreamStatus) {
 				status.LastError = message
+				status.FailureCount++
 			})
 		}
 
-		quiet := !failingSince.IsZero() && s.now().Sub(failingSince) > supervisorQuietAfter
-		wait := backoff
-		if quiet {
-			wait = supervisorQuietInterval
-		}
-		nextAttempt := s.now().Add(wait)
-		s.update(ctx, entry, func(status *protocol.UpstreamStatus) {
-			status.NextAttemptAt = &nextAttempt
-			if quiet {
+		failedAt := s.now()
+		for ctx.Err() == nil {
+			settings, changed := s.policySnapshot()
+			if status, ok := s.statusForEntry(ctx, entry); ok && status.FailureCount >= settings.MaxFailures {
+				s.update(ctx, entry, func(status *protocol.UpstreamStatus) {
+					status.State = protocol.UpstreamStateStopped
+					status.NextAttemptAt = nil
+				})
+				return
+			}
+			nextAttempt := failedAt.Add(time.Duration(settings.RetryIntervalMinutes) * time.Minute)
+			wait := nextAttempt.Sub(s.now())
+			if wait <= 0 {
+				break
+			}
+			s.update(ctx, entry, func(status *protocol.UpstreamStatus) {
+				status.NextAttemptAt = &nextAttempt
 				status.State = protocol.UpstreamStateWaiting
+			})
+			select {
+			case <-ctx.Done():
+				return
+			case <-changed:
+				continue
+			case <-s.after(wait):
 			}
-		})
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-s.after(wait):
-		}
-		if !connected {
-			backoff *= 2
-			if backoff > supervisorFastMaxBackoff {
-				backoff = supervisorFastMaxBackoff
-			}
+			break
 		}
 	}
+}
+
+func (s *ClientSupervisor) statusForEntry(ctx context.Context, entry *supervisorEntry) (protocol.UpstreamStatus, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		return protocol.UpstreamStatus{}, false
+	}
+	return entry.status, true
 }
 
 // Close stops every configured connection and forgets them. Used at process
