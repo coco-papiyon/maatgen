@@ -266,9 +266,13 @@ func (s *Store) GetSession(ctx context.Context, id string) (protocol.AgentSessio
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, agent, workspace, workspace_kind, agent_thread_id, status, trigger_source,
 			github_monitor_event, github_rule_id, github_item_kind, github_item_number,
-			created_at, closed_at
+			created_at, closed_at,
+			(SELECT status FROM runs WHERE runs.session_id = sessions.id
+				AND status IN ('queued', 'starting', 'running', 'waiting_for_approval')
+				ORDER BY julianday(runs.created_at) DESC, runs.id DESC LIMIT 1) AS active_run_status
 		FROM sessions WHERE id = ?`, id)
-	return scanSession(row)
+	var activeRunStatus sql.NullString
+	return scanSessionRow(row, nil, &activeRunStatus)
 }
 
 func (s *Store) ListSessions(ctx context.Context, limit int, before *protocol.SessionCursor, status protocol.SessionStatus) ([]protocol.AgentSession, error) {
@@ -491,8 +495,7 @@ type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// scanSession scans a session row that has no first_prompt column (e.g.
-// GetSession, which doesn't need the runs join that ListSessions uses).
+// scanSession scans a session row that has no derived run columns.
 func scanSession(row scanner) (protocol.AgentSession, error) {
 	return scanSessionRow(row, nil, nil)
 }

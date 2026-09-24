@@ -62,6 +62,10 @@ func TestSessionAndRunLifecycle(t *testing.T) {
 	if err := store.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
+	gotSession, err = store.GetSession(ctx, session.ID)
+	if err != nil || gotSession.ActiveRunStatus == nil || *gotSession.ActiveRunStatus != protocol.RunQueued {
+		t.Fatalf("session active run status = %v, err = %v", gotSession.ActiveRunStatus, err)
+	}
 
 	startedAt := createdAt.Add(time.Minute)
 	finishedAt := startedAt.Add(2 * time.Minute)
@@ -72,6 +76,10 @@ func TestSessionAndRunLifecycle(t *testing.T) {
 	run.ExitCode = &exitCode
 	if err := store.UpdateRun(ctx, run); err != nil {
 		t.Fatalf("update run: %v", err)
+	}
+	gotSession, err = store.GetSession(ctx, session.ID)
+	if err != nil || gotSession.ActiveRunStatus != nil {
+		t.Fatalf("completed session active run status = %v, err = %v", gotSession.ActiveRunStatus, err)
 	}
 
 	gotRun, err := store.GetRun(ctx, run.ID)

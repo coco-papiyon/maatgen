@@ -112,7 +112,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
         } else if (message.type === 'reasoning-effort.select') {
           this.selectedReasoningEffort = isReasoningEffort(message.reasoningEffort) ? message.reasoningEffort : '';
         } else if (message.type === 'run.cancel' && this.activeRunId) {
-          void this.manager.cancelRun(this.activeRunId).then(() => this.syncSession());
+          void this.cancelRun(this.activeRunId);
         } else if (message.type === 'approval.decide' && this.session) {
           void this.decideApproval(message);
         } else if (message.type === 'session.select') {
@@ -241,7 +241,7 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
       ]);
       this.session = session;
       this.events = events;
-      this.activeRunId = this.findActiveRunId(events);
+      this.activeRunId = session.activeRunStatus ? this.findActiveRunId(events) : undefined;
       this.approvals = approvals;
       const runFinished = Boolean(previousActiveRunId && !this.activeRunId);
       const latestChangeRefreshSequence = this.latestChangeRefreshSequence(events);
@@ -271,6 +271,20 @@ export class MaatgenWebviewViewProvider implements vscode.WebviewViewProvider {
   private startPolling(): void {
     if (this.pollTimer) return;
     this.pollTimer = setInterval(() => { void this.syncSession(); }, 1_000);
+  }
+
+  private async cancelRun(runId: string): Promise<void> {
+    try {
+      await this.manager.cancelRun(runId);
+    } catch (error) {
+      // A stale Stop click is already satisfied when the Run became terminal
+      // before the request arrived. Keep compatibility with older Managers.
+      if (!(error instanceof AgentManagerError) || error.code !== 'run_not_active') {
+        await this.view?.webview.postMessage({ type: 'manager.error', message: error instanceof Error ? error.message : String(error) });
+      }
+    } finally {
+      await this.syncSession();
+    }
   }
 
   private stopPolling(): void {

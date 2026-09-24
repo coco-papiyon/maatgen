@@ -859,6 +859,8 @@ POST   /api/sessions/{id}/checkpoints/{checkpointId}/files/{fileId}/restore
 POST   /api/sessions/{id}/checkpoints/{checkpointId}/hunks/{hunkId}/restore
 ```
 
+Runのcancelは冪等とし、対象Runがすでに終端状態なら成功として扱う。Web／VS Codeはcancel応答後にSessionを再取得し、`activeRunStatus`を正として停止ボタンと入力可否を同期する。これにより、Runの終端保存と終端イベント配信の間に停止操作が到着しても、古い実行中表示を残さない。
+
 Agent Manager は原則として loopback interface のみに bind する。
 
 ---

@@ -761,6 +761,44 @@ describe('App with MockAgentApi', () => {
     expect(cancel).toHaveBeenCalledWith('run-restored');
   });
 
+  it('reconciles a stale running view when cancel reports that the run already stopped', async () => {
+    class StaleRunningApi extends MockAgentApi {
+      stopped = false;
+
+      override async getSession(id: string) {
+        const session = await super.getSession(id);
+        if (id === 'mock-success' && !this.stopped) session.activeRunStatus = 'running';
+        return session;
+      }
+
+      override async getEvents(id: string, afterSequence = 0) {
+        const existing = await super.getEvents(id, afterSequence);
+        if (id !== 'mock-success' || afterSequence > 0) return existing;
+        return [...existing, {
+          id: 'stale-running-event', sessionId: id, runId: 'run-stale', sequence: 5,
+          timestamp: new Date().toISOString(), schemaVersion: 2 as const, source: 'manager' as const,
+          type: 'run_started' as const, data: {},
+        }];
+      }
+
+      override async cancelRun() {
+        this.stopped = true;
+        throw new AgentApiError('run is not active', 409, 'run_not_active');
+      }
+    }
+
+    wrapper = mount(App, { props: { agentApi: new StaleRunningApi(), eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+    expect(wrapper.find('.stop-button').exists()).toBe(true);
+
+    await wrapper.find('.stop-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.error-banner').exists()).toBe(false);
+    expect(wrapper.find('.stop-button').exists()).toBe(false);
+    expect((wrapper.find('.composer textarea').element as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
   it('opens a multi-hunk diff and restores one hunk', async () => {
     const mounted = await mountApp();
     const session = mounted.wrapper.findAll('.session-item').find((item) => item.text().includes('multi-hunk'));

@@ -432,6 +432,8 @@ POST   /api/sessions/{id}/checkpoints/{checkpointId}/hunks/{hunkId}/restore
 POST   /api/ws-tickets
 ```
 
+`POST /api/runs/{id}/cancel`は冪等とし、すでに終端状態のRunにも204を返す。Web／VS Codeは応答後にSessionを再同期し、`activeRunStatus`がなければローカルの実行中状態を解除する。
+
 WebSocketは次の形式とする。
 
 ```text

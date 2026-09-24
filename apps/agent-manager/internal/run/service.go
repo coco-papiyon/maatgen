@@ -265,7 +265,10 @@ func (s *Service) CancelRun(ctx context.Context, runID string) error {
 		return err
 	}
 	if isTerminal(run.Status) {
-		return ErrRunNotActive
+		// Cancellation is idempotent. The UI can race with terminal
+		// persistence/event delivery, so a repeated cancellation of a Run
+		// that has already stopped is already satisfied.
+		return nil
 	}
 	return ErrRunNotActive
 }

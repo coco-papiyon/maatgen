@@ -236,8 +236,8 @@ func TestRunServiceRejectsConcurrentRunAndCancels(t *testing.T) {
 		t.Fatalf("cancel run: %v", err)
 	}
 	waitForRunStatus(t, store, first.ID, protocol.RunCancelled)
-	if err := service.CancelRun(context.Background(), first.ID); !errors.Is(err, ErrRunNotActive) {
-		t.Fatalf("second cancel error = %v", err)
+	if err := service.CancelRun(context.Background(), first.ID); err != nil {
+		t.Fatalf("idempotent second cancel: %v", err)
 	}
 }
 

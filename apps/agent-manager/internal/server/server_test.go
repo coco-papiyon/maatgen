@@ -475,8 +475,8 @@ func TestRunAPIValidationAndDomainErrors(t *testing.T) {
 	config.RunController = controller
 	recorder := httptest.NewRecorder()
 	New(config, nil, nil).Handler().ServeHTTP(recorder, apiRequest(http.MethodPost, "/api/v1/runs/run-1/cancel"))
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("cancel status = %d, want %d", recorder.Code, http.StatusConflict)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("cancel status = %d, want %d", recorder.Code, http.StatusNoContent)
 	}
 }
 

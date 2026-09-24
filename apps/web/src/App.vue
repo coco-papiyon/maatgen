@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AgentRun, AgentSession, ApprovalDecision, ChangeSet, CommandApproval, NodeScopedSession, Provider, ProviderUsage, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { httpAgentApi, type AgentApi, type GitStatus, type GitStatusFile, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
+import { AgentApiError, httpAgentApi, type AgentApi, type GitStatus, type GitStatusFile, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
 import { reasoningEffortOptions } from './constants';
 import { SessionEventStream, type EventStreamFactory, type EventStreamLike, type EventStreamState } from './event-stream';
 import FileTree from './FileTree.vue';
@@ -1112,8 +1112,17 @@ function handleMentionKeydown(event: KeyboardEvent) {
 
 async function cancelRun() {
   if (!activeRun.value) return;
+  const runId = activeRun.value.id;
   await act(async () => {
-    await api.cancelRun(activeRun.value!.id);
+    try {
+      await api.cancelRun(runId);
+    } catch (cause) {
+      // Older Managers returned this conflict when the Run became terminal
+      // just before the click reached them. It is still a successful stop.
+      if (!(cause instanceof AgentApiError) || cause.code !== 'run_not_active') throw cause;
+    }
+    await refreshSelected();
+    if (activeRun.value?.id === runId && !selected.value?.activeRunStatus) activeRun.value = undefined;
   });
 }
 

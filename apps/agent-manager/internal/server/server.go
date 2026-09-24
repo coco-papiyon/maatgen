@@ -266,6 +266,12 @@ func New(config Config, sessions SessionReader, events EventReader) *Server {
 		}))
 		mux.Handle("POST /api/v1/runs/{id}/cancel", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if err := config.RunController.CancelRun(r.Context(), r.PathValue("id")); err != nil {
+				if errors.Is(err, runservice.ErrRunNotActive) {
+					// A stale Stop click is already satisfied when the Run became
+					// terminal before the request reached the Manager.
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
 				writeRunError(w, err)
 				return
 			}
