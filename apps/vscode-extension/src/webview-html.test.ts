@@ -71,6 +71,17 @@ describe('renderWebviewHtml', () => {
     expect(html).not.toContain('LATEST AGENT RESULT');
   });
 
+  it('renders command approval history with distinct English status labels', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain("'command_approval_requested', 'command_approval_decided'");
+    expect(html).toContain("return 'APPROVAL REQUIRED'");
+    expect(html).toContain("return 'APPROVED'");
+    expect(html).toContain("return 'DENIED'");
+    expect(html).toContain("return 'CANCELLED'");
+    expect(html).toContain("return 'EXPIRED'");
+    expect(html).toContain("return 'APPROVAL DECIDED'");
+  });
+
   it('shows provider-specific usage fields with one shared cost', () => {
     const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
     expect(html).toContain("const isCopilot = provider === 'copilot';");
