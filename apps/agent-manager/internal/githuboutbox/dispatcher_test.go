@@ -578,6 +578,44 @@ func TestSortJobsByPriorityDispatchesHighBeforeLowRegardlessOfDetectionOrder(t *
 	}
 }
 
+func TestSortJobsByPriorityDispatchesLowerItemNumberFirstWithinSamePriority(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.addMonitor(testMonitor("/repo"))
+	store.addRule(testRule("rule-1", "/repo", protocol.GitHubConcurrencySkip))
+
+	base := time.Now()
+	largerIssue := testEvent("event-issue", "/repo", "rule-1", protocol.GitHubMonitorEventQueued, base)
+	largerIssue.Number = 40
+	largerIssue.ItemSnapshot.Number = 40
+	largerIssue.ItemSnapshot.Title = "Larger issue"
+	store.addEvent(largerIssue)
+
+	smallerPullRequest := testEvent("event-pr", "/repo", "rule-1", protocol.GitHubMonitorEventQueued, base.Add(time.Minute))
+	smallerPullRequest.Kind = protocol.GitHubItemPullRequest
+	smallerPullRequest.Number = 12
+	smallerPullRequest.ItemSnapshot.Kind = protocol.GitHubItemPullRequest
+	smallerPullRequest.ItemSnapshot.Number = 12
+	smallerPullRequest.ItemSnapshot.Title = "Smaller pull request"
+	store.addEvent(smallerPullRequest)
+
+	runs := &fakeRuns{}
+	dispatcher := NewDispatcher(store, &fakeSessions{}, runs)
+	if err := dispatcher.Tick(ctx); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if len(runs.calls) != 2 {
+		t.Fatalf("runs.calls = %#v, want 2 dispatches", runs.calls)
+	}
+	if runs.calls[0].request.Message != "Design Smaller pull request (#12)" {
+		t.Fatalf("first dispatched job = %q, want the lower-numbered pull request first", runs.calls[0].request.Message)
+	}
+	if runs.calls[1].request.Message != "Design Larger issue (#40)" {
+		t.Fatalf("second dispatched job = %q, want the higher-numbered issue second", runs.calls[1].request.Message)
+	}
+}
+
 func TestReconcileCoalesceQueueSupersedesOlderEventsForSameItem(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()

@@ -213,8 +213,9 @@ var jobPriorityRank = map[protocol.GitHubJobPriority]int{
 }
 
 // sortJobsByPriority reorders jobs so that jobs matched by a higher-priority
-// rule are processed first (issue #13). It is a stable sort, so jobs with
-// the same priority keep the FIFO order Tick received them in.
+// rule are processed first (issue #13). Jobs with the same priority are
+// ordered by their Issue or Pull Request number (issue #40). The stable sort
+// preserves the order Tick received for jobs with the same priority and number.
 func (d *Dispatcher) sortJobsByPriority(ctx context.Context, jobs []protocol.GitHubMonitorEvent) []protocol.GitHubMonitorEvent {
 	type jobWithPriority struct {
 		event protocol.GitHubMonitorEvent
@@ -234,7 +235,10 @@ func (d *Dispatcher) sortJobsByPriority(ctx context.Context, jobs []protocol.Git
 	}
 
 	sort.SliceStable(jobsWithPriority, func(i, j int) bool {
-		return jobsWithPriority[i].rank < jobsWithPriority[j].rank
+		if jobsWithPriority[i].rank != jobsWithPriority[j].rank {
+			return jobsWithPriority[i].rank < jobsWithPriority[j].rank
+		}
+		return jobsWithPriority[i].event.Number < jobsWithPriority[j].event.Number
 	})
 
 	sorted := make([]protocol.GitHubMonitorEvent, len(jobsWithPriority))
@@ -250,17 +254,17 @@ func (d *Dispatcher) sortJobsByPriority(ctx context.Context, jobs []protocol.Git
 // each case honoring the matched rule's concurrency policy when the
 // repository's execution lock is held by another Run.
 // Jobs are ordered by the matched rule's priority (high before medium before
-// low, ties broken by detection order), then by provider availability: if a
-// provider's quota is exhausted, jobs for other providers in the queue are
-// processed first.
+// low, ties broken by Issue or Pull Request number), then by provider
+// availability: if a provider's quota is exhausted, jobs for other providers
+// in the queue are processed first.
 func (d *Dispatcher) Tick(ctx context.Context) error {
 	queued, err := d.store.ListMonitorEventsByStatus(ctx, protocol.GitHubMonitorEventQueued, batchSize)
 	if err != nil {
 		return fmt.Errorf("list queued github monitor jobs: %w", err)
 	}
 	queued = d.reconcileCoalesceQueue(ctx, queued)
-	// Sort jobs by rule priority first (stable, so detection order breaks ties),
-	// then by provider availability (stable, so priority order is preserved
+	// Sort jobs by rule priority and item number first, then by provider
+	// availability (stable, so priority and item-number order is preserved
 	// within each availability group).
 	queued = d.sortJobsByPriority(ctx, queued)
 	queued = d.sortJobsByProviderAvailability(ctx, queued)

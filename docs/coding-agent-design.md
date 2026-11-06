@@ -1099,6 +1099,8 @@ Web版のGitHub監視設定では、監視ルールの作成・編集フォー�
 
 観測済みIssue／PRの後から監視ルールを作成・更新した場合は、itemごとに永続化した評価済みルール版とルールの`updatedAt`を比較し、次回ポーリングで現在状態を評価する。新規ルールは既存itemへ適用できるが、同じルールとitem番号ですでに自動イベントがあれば、ルール更新やaction変更をまたいで再発火しない。delivery keyはrepository・item kind・number・rule idで構成する。イベント履歴の`detected`、`matched`、`queued`は「スキップ」操作で`skipped`へ遷移させ、履歴を保持したままdispatcherの実行対象から除外できる。
 
+dispatcherは`queued`ジョブをTrigger Ruleの優先度（`high` > `medium` > `low`）で並べ、同一優先度内ではIssue／PR番号の小さい順に実行する。優先度と番号が同じ場合は検出順を維持する。
+
 ---
 
 ## 24. Web開発モード
