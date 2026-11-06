@@ -902,6 +902,7 @@ docs/decisions/
 - [x] pending一覧／decision HTTP APIと二重応答の競合検出
 - [x] 1回、Session、永続、不許可のdecision scope
 - [x] Web／VS Codeのpending復元と承認UI
+- [x] Web／VS CodeのSession履歴で承認要求と承認／拒否結果を英語ラベルで区別
 - [x] cancel、timeout、Manager再起動時のfail-closed recovery
 - [x] parser、rule、AI、human decision、永続化のGoテスト
 - [ ] 実Codex CLIを使ったWindows／macOS／Linux手動統合試験

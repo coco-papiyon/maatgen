@@ -277,9 +277,19 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         const text = eventText(event);
         return text.trim() !== '' && !isTokenUsageOnly(text);
       };
+      const approvalEventLabel = (event) => {
+        if (event.type === 'command_approval_requested') return 'APPROVAL REQUIRED';
+        if (event.type !== 'command_approval_decided') return '';
+        const status = event.data?.status;
+        if (status === 'approved') return 'APPROVED';
+        if (status === 'denied') return 'DENIED';
+        if (status === 'cancelled') return 'CANCELLED';
+        if (status === 'expired') return 'EXPIRED';
+        return 'APPROVAL DECIDED';
+      };
       let lastRenderedEventsSignature = null;
       const renderEvents = (events) => {
-        const visibleEvents = events.filter((event) => ['user_prompt', 'assistant_message', 'run_started', 'run_completed', 'run_failed', 'run_cancelled', 'error'].includes(event.type))
+        const visibleEvents = events.filter((event) => ['user_prompt', 'assistant_message', 'run_started', 'run_completed', 'run_failed', 'run_cancelled', 'command_approval_requested', 'command_approval_decided', 'error'].includes(event.type))
           .filter((event) => hasVisibleEventText(event));
         const signature = JSON.stringify(visibleEvents.map((event) => [event.id, event.type, eventText(event)]));
         if (signature === lastRenderedEventsSignature) return;
@@ -287,8 +297,9 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         eventList.replaceChildren();
         visibleEvents.forEach((event) => {
           const item = document.createElement('article');
-          item.className = 'event-item ' + event.type;
-          const label = document.createElement('span'); label.className = 'event-label'; label.textContent = event.type === 'user_prompt' ? 'U' : event.type === 'assistant_message' ? 'A' : event.type.startsWith('run_') ? 'R' : 'E';
+          const approvalStatusClass = event.type === 'command_approval_decided' && typeof event.data?.status === 'string' ? ' ' + event.data.status : '';
+          item.className = 'event-item ' + event.type + approvalStatusClass;
+          const label = document.createElement('span'); label.className = 'event-label'; label.textContent = approvalEventLabel(event) || (event.type === 'user_prompt' ? 'U' : event.type === 'assistant_message' ? 'A' : event.type.startsWith('run_') ? 'R' : 'E');
           const body = document.createElement('div'); body.className = 'event-content';
           if (event.type === 'assistant_message') {
             body.innerHTML = event.renderedHtml || '';

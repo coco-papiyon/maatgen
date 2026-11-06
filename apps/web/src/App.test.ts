@@ -97,6 +97,42 @@ describe('App with MockAgentApi', () => {
     expect(mounted.wrapper.find('.change-title').text()).toContain('src/auth.ts');
   });
 
+  it('labels command approval requests and decisions instead of showing them as system events', async () => {
+    class ApprovalHistoryApi extends MockAgentApi {
+      override async getEvents(id: string, afterSequence = 0): Promise<SessionEvent[]> {
+        const events = await super.getEvents(id, afterSequence);
+        if (id !== 'mock-success' || afterSequence > 0) return events;
+        const approvalEvents: SessionEvent[] = [
+          {
+            id: 'approval-requested', sessionId: id, runId: 'run-1', sequence: 5,
+            timestamp: '2026-08-16T00:00:00Z', schemaVersion: 2, source: 'manager',
+            type: 'command_approval_requested', data: { command: 'npm test', status: 'pending' },
+          },
+          {
+            id: 'approval-approved', sessionId: id, runId: 'run-1', sequence: 6,
+            timestamp: '2026-08-16T00:00:01Z', schemaVersion: 2, source: 'manager',
+            type: 'command_approval_decided', data: { command: 'npm test', status: 'approved' },
+          },
+          {
+            id: 'approval-denied', sessionId: id, runId: 'run-1', sequence: 7,
+            timestamp: '2026-08-16T00:00:02Z', schemaVersion: 2, source: 'manager',
+            type: 'command_approval_decided', data: { command: 'npm run release', status: 'denied' },
+          },
+        ];
+        return [...events, ...approvalEvents];
+      }
+    }
+
+    const mounted = await mountApp(new ApprovalHistoryApi());
+    const timeline = mounted.wrapper.find('.timeline');
+    const labels = timeline.findAll('.event-label').map((label) => label.text());
+    expect(labels).toContain('APPROVAL REQUIRED');
+    expect(labels).toContain('APPROVED');
+    expect(labels).toContain('DENIED');
+    expect(timeline.text()).toContain('npm test');
+    expect(timeline.text()).toContain('npm run release');
+  });
+
   it('marks sessions with unread assistant activity and clears the mark when opened', async () => {
     const mounted = await mountApp();
     const unread = mounted.wrapper.findAll('.unread-mark');

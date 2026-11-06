@@ -465,6 +465,19 @@ function eventKind(event: SessionEvent): string {
   return 'system';
 }
 
+function eventLabel(event: SessionEvent): string {
+  if (event.type === 'command_approval_requested') return 'APPROVAL REQUIRED';
+  if (event.type === 'command_approval_decided') {
+    const status = (event.data as Record<string, unknown> | undefined)?.status;
+    if (status === 'approved') return 'APPROVED';
+    if (status === 'denied') return 'DENIED';
+    if (status === 'cancelled') return 'CANCELLED';
+    if (status === 'expired') return 'EXPIRED';
+    return 'APPROVAL DECIDED';
+  }
+  return eventKind(event) === 'assistant' ? providerLabel.value.toUpperCase() : eventKind(event).toUpperCase();
+}
+
 function eventHtml(event: SessionEvent): string {
   const data = event.data as Record<string, unknown> | undefined;
   if (event.type === 'assistant_message' || event.type === 'reasoning_summary') {
@@ -1530,7 +1543,7 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           <p v-else>対象Repositoryを直接編集します。各Run開始前にcheckpointを作成します。</p>
         </div>
         <article v-for="event in visibleEvents" :key="event.id" class="event" :class="eventKind(event)">
-          <div class="event-label">{{ eventKind(event) === 'assistant' ? providerLabel.toUpperCase() : eventKind(event).toUpperCase() }}</div>
+          <div class="event-label">{{ eventLabel(event) }}</div>
           <div
             v-if="(event.type === 'assistant_message' || event.type === 'reasoning_summary') && !rawViewEventIds.has(event.id)"
             class="event-body markdown-body"
