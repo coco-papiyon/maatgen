@@ -82,6 +82,13 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain("return 'APPROVAL DECIDED'");
   });
 
+  it('parses approval rules only for decisions that save a rule', () => {
+    const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
+    expect(html).toContain("const requiresRule = ['allow_session', 'allow_permanent'].includes(decision)");
+    expect(html).toContain('if (requiresRule)');
+    expect(html).toContain('...(requiresRule ? { ruleArgv } : {})');
+  });
+
   it('shows provider-specific usage fields with one shared cost', () => {
     const html = renderWebviewHtml({ cspSource: 'vscode-webview://unit-test', nonce: 'n', styleUri: 'style' });
     expect(html).toContain("const isCopilot = provider === 'copilot';");

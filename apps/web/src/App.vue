@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AgentRun, AgentSession, ApprovalDecision, ChangeSet, CommandApproval, NodeScopedSession, Provider, ProviderUsage, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
+import type { AgentRun, AgentSession, ApprovalDecision, ApprovalDecisionRequest, ChangeSet, CommandApproval, NodeScopedSession, Provider, ProviderUsage, SessionEvent, TokenUsage, UsageSummary } from '@maatgen/protocol';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AgentApiError, httpAgentApi, type AgentApi, type GitStatus, type GitStatusFile, type ReasoningEffort, type SessionStatusFilter, type SessionUsage, type SourceStats, type UsageGranularity, type WorkspaceFileContent, type WorkspaceFileNode } from './api';
 import { reasoningEffortOptions } from './constants';
@@ -1010,11 +1010,11 @@ function startEventStream(sessionId: string) {
 async function decideApproval(decision: ApprovalDecision) {
   if (!selected.value || !pendingApproval.value) return;
   await act(async () => {
-    const ruleArgv = parseApprovalRule(approvalRule.value);
-    await api.decideApproval(selected.value!.id, pendingApproval.value!.id, {
-      decision,
-      ...(['allow_session', 'allow_permanent'].includes(decision) ? { ruleArgv } : {}),
-    });
+    const requiresRule = ['allow_session', 'allow_permanent'].includes(decision);
+    const request: ApprovalDecisionRequest = requiresRule
+      ? { decision, ruleArgv: parseApprovalRule(approvalRule.value) }
+      : { decision };
+    await api.decideApproval(selected.value!.id, pendingApproval.value!.id, request);
     approvals.value = await api.listApprovals(selected.value!.id, true);
     approvalRule.value = formatApprovalRule(defaultApprovalSegment(approvals.value[0]));
   });

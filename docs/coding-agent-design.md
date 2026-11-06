@@ -346,7 +346,7 @@ Approval Coordinatorは次の順にfail-closedで判定する。
 2. 一致しなければ、同じProviderの設定済み軽量モデルをread-onlyの短命processとして実行し、`safe`／`low`／`high`／`critical`を判定する。このとき、そのSessionで一時承認済みおよび永続承認済みのargvルールをprompt内へ「既承認コマンド」として渡し、要求内容がそれらと同じ操作を行う近い変種であれば承認済みルール以上のriskにしないようモデルへ指示する。設定した最大risk以下かつconfidence閾値以上の場合だけAIで許可する。
 3. それ以外はRunを`waiting_for_approval`にし、SQLiteへ要求を保存してWebとVS Codeへ通知する。利用者は1回、Session中、永続、または不許可を選択する。
 
-Web版とVS Code版のSession履歴では、実行前の`command_approval_requested`を`APPROVAL REQUIRED`、応答後の`command_approval_decided`を最終statusに応じて`APPROVED`、`DENIED`、`CANCELLED`、`EXPIRED`と表示する。コマンド本文が同じでも、承認要求と結果を`SYSTEM`として一括表示しない。
+Web版とVS Code版のSession履歴では、実行前の`command_approval_requested`を`APPROVAL REQUIRED`、応答後の`command_approval_decided`を最終statusに応じて`APPROVED`、`DENIED`、`CANCELLED`、`EXPIRED`と表示する。コマンド本文が同じでも、承認要求と結果を`SYSTEM`として一括表示しない。`allow_once`と`deny`はルールを保存しないため、UIは表示中のrule inputを解析せずdecisionだけ送信する。`allow_session`と`allow_permanent`のときだけrule inputをargvとして解析する。
 
 永続許可は設定ファイルへargv配列としてatomicに保存する。複合commandは`|`、`||`、`&&`、`;`、改行、`&`で分割し、すべてのsegmentが個別に一致した場合だけ全体を許可する。PowerShell（`pwsh`／`powershell`）やPOSIX shell（`sh`／`bash`など）の`-Command`／`-c`、Windows `cmd /c`のようなラッパーは、オプション後の実コマンドを取り出して同じ規則で評価する。subshell、redirection、encoded command、その他の動的実行など静的に安全に解釈できない構文は設定で自動許可しない。詳細は[ADR-006](./decisions/006-command-approval.md)を参照する。
 
