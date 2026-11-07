@@ -276,8 +276,7 @@ packages/
 
 ### Phase 2：Agent Manager基盤
 
-- 
-et/http`によるlocalhost HTTP Server
+- `net/http`によるlocalhost HTTP Server
 - `127.0.0.1`限定bind
 - Bearer token認証
 - WebSocket ticketとOrigin検証
@@ -645,9 +644,7 @@ CIでは実Codexを起動せず、fake CLIでJSONL、遅延、invalid JSON、異
 | D-01 | Node.jsパッケージマネージャー | pnpm workspace | pnpm 10.15.0 workspace | Phase 0開始前 | 検討済み |
 | D-02 | Node.js／TypeScriptバージョン | Node.js LTS、TypeScript最新安定版 | Node.js 20.19以上、TypeScript 5系 | Phase 0開始前 | 検討済み |
 | D-03 | Goバージョン | 現行安定版の1世代固定 | Go 1.22.5以上 | Phase 0開始前 | 検討済み |
-| D-04 | Go HTTPルーター | Go標準の
-et/http`と`http.ServeMux`を使用 | 
-et/http`と`http.ServeMux` | Phase 0開始前 | 検討済み |
+| D-04 | Go HTTPルーター | Go標準の`net/http`と`http.ServeMux`を使用 | `net/http`と`http.ServeMux` | Phase 0開始前 | 検討済み |
 | D-05 | WebSocketライブラリ | `github.com/coder/websocket` | `github.com/coder/websocket` | Phase 0開始前 | 検討済み |
 | D-06 | SQLiteドライバ | `modernc.org/sqlite`を`database/sql`経由で使用 | `modernc.org/sqlite`と`database/sql` | Phase 0開始前 | 検討済み |
 | D-07 | Protocolの正規ソース | JSON Schemaをwire契約の正規ソースとし、TypeScript型とGo型を生成・検証 | JSON Schemaをwire契約の正規ソースとする。TypeScript公開型は`json-schema-to-typescript`で生成し、genericなどの補助型だけを手書きする。Go型は`time.Time`、`json.RawMessage`、内部定数を持つ手書き型とし、共有fixtureでSchema互換性を検証する | Phase 0開始前 | 検討済み |
@@ -684,8 +681,7 @@ et/http`と`http.ServeMux` | Phase 0開始前 | 検討済み |
 | D-01 | pnpm workspace | 設計書のmonorepo構成とworkspace protocolの相性がよく、Web、Extension、共有packagesを一つのlockfileで管理できる | CIでのNode／pnpm固定方法 | 
 | D-02 | Node.js LTSを採用し、CIとローカルのmajorを固定 | 最新版追従による差分を避け、Vite／Vueのサポート範囲と合わせやすい | 採用するLTS major | 
 | D-03 | Goの安定版を1世代固定し、`go.mod`のtoolchainとCIで一致させる | Go Modulesで依存と再現性を管理しやすい | 採用するGo version | 
-| D-04 | 
-et/http`と`http.ServeMux` | MVPのAPI数ではRouter依存を増やす必要がなく、標準機能で十分 | パスパラメータの実装規約 | 
+| D-04 | `net/http`と`http.ServeMux` | MVPのAPI数ではRouter依存を増やす必要がなく、標準機能で十分 | パスパラメータの実装規約 | 
 | D-05 | `github.com/coder/websocket` | context対応、JSON helper、zero dependencyを備え、ManagerのWebSocket用途に適する | 採用versionとライセンス確認 | 
 | D-06 | `modernc.org/sqlite` | CGO不要のpure Go構成にでき、VSIX同梱やcross buildの障害を減らせる | 実際のWindows／macOS／Linux build検証 | 
 | D-07 | JSON Schemaをwire契約の正規ソースにする | TypeScriptとGoの型ずれをfixtureだけに依存せず検出できる | 型生成ツールとCI検証コマンド | 
@@ -708,8 +704,7 @@ et/http`と`http.ServeMux` | MVPのAPI数ではRouter依存を増やす必要が
 | D-36 | JSONLの不正行の表示方法 | Error Eventへ変換して後続行の処理を継続 | `invalid_codex_jsonl` Error Eventへ変換し、元行は有効なJSON wrapperに格納して後続行を継続 | Codex Adapter実装時 | 検討済み |
 | D-37 | stderrのUI表示レベル | stderrは診断用Raw Eventとしてマスク後に保存し、通常UIには直接表示しない。Run失敗時は共通のError／Run Failed Eventを表示する | stderrはマスク済みRaw Eventとして保存する。stderr単独ではUI Eventにせず、終了結果に基づくRun Failed EventをUIへ表示する | Codex Adapter実装時 | 検討済み |
 | D-38 | Usageが累積値の場合の集計方法 | `turn.completed`の値をRunの最終値として保存 | `turn.completed.usage`をRun単位の最終値として上書き保存し、Event間では加算しない | Usage fixture確認時 | 検討済み |
-| D-39 | Session履歴のpagination | `createdAt`とSession IDによるkeyset paginationを使い、cursorはopaqueな文字列として扱う | `createdAt`とSession IDによるkeyset pagination。HTTPは
-extCursor`を返し、Web UIは25件ずつLoad moreで追加する | Phase 2またはPhase 6 | 検討済み |
+| D-39 | Session履歴のpagination | `createdAt`とSession IDによるkeyset paginationを使い、cursorはopaqueな文字列として扱う | `createdAt`とSession IDによるkeyset pagination。HTTPは`nextCursor`を返し、Web UIは25件ずつLoad moreで追加する | Phase 2またはPhase 6 | 検討済み |
 | D-40 | APIエラーコードの詳細一覧 | — | — | API統合テスト前 | 未 |
 | D-41 | WebSocket再接続backoff | 0.5秒開始、最大10秒の指数backoff。再接続ごとに短命ticketを再取得し、最後のsequenceから再開する | 0.5秒開始、最大10秒の指数backoff。再接続ごとに短命ticketを再取得し、最後のsequenceから再開する。受信成功時にbackoffをリセットする | Web UI統合時 | 検討済み |
 | D-42 | 大きなDiff／ログの遅延読み込み | — | — | Web UI統合時 | 未 |
@@ -789,8 +784,7 @@ docs/decisions/
 - [x] Chat／Timeline／Cancel／Error表示
 - [x] Changed Files／Hunk概要表示
 - [x] Desktop 3ペインとモバイル向けレスポンシブ表示
-- [x] 
-pm run dev`によるManager／Web UI同時起動
+- [x] `npm run dev`によるManager／Web UI同時起動
 - [x] WebSocket streamingと再接続表示
 - [x] Diff詳細表示
 - [x] 旧Accept／Reject UIをCheckpoint Restore UIへ置換
@@ -827,8 +821,7 @@ pm run dev`によるManager／Web UI同時起動
 
 - [x] `codex`実行ファイルのPATH検出と絶対パス化
 - [x] shellを介さない`codex --version`検証
-- [x] `workspace-write`／approval 
-ever`／stdin Promptの固定引数生成
+- [x] `workspace-write`／approval `never`／stdin Promptの固定引数生成
 - [x] 新規`exec`とThread `resume`の引数生成
 - [x] stdout／stderrの行単位streaming基盤
 - [x] Run単位timeoutとcontext cancel
