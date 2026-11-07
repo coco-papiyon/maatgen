@@ -145,6 +145,16 @@ func TestParseCommandRejectsEncodedPowerShellPayload(t *testing.T) {
 }
 
 func TestPowerShellEnvironmentAssignmentRules(t *testing.T) {
+	for _, command := range []string{
+		`$env:GOCACHE="C:\Program Files\cache"`,
+		"$env:GOCACHE=\"C:\\cache\tfiles\"",
+		`pwsh -Command '$env:GOCACHE="C:\Program Files\cache"'`,
+	} {
+		parsed, err := ParseCommand(command)
+		if err != nil || !AllSegmentsAllowed(parsed, [][]string{{"$env:GOCACHE=*"}}) {
+			t.Fatalf("static assignment not allowed: %q: %#v, %v", command, parsed, err)
+		}
+	}
 	segments, err := ParseCommand(`pwsh -Command "$env:GOCACHE = 'C:\tmp\cache'; go test ./..."`)
 	if err != nil || len(segments) != 2 {
 		t.Fatalf("segments=%#v err=%v", segments, err)
@@ -159,7 +169,7 @@ func TestPowerShellEnvironmentAssignmentRules(t *testing.T) {
 	if MatchArgv(rule, []string{"$env:OTHER=value"}) {
 		t.Fatal("matched another variable")
 	}
-	for _, command := range []string{`$env:GOCACHE=$other`, `$env:GOCACHE="$(whoami)"`, `$env:GOCACHE=Get-Location`, `$env:GOCACHE='x' + 'y'`} {
+	for _, command := range []string{`$env:GOCACHE=$other`, `$env:GOCACHE="$(whoami)"`, `$env:GOCACHE=Get-Location`, `$env:GOCACHE='x' + 'y'`, `$env:GOCACHE="C:\Program Files\$other"`, `$env:GOCACHE="x" + " y"`, `$env:GOCACHE="unterminated`} {
 		parsed, err := ParseCommand(command)
 		if err == nil || AllSegmentsAllowed(parsed, [][]string{rule}) {
 			t.Fatalf("dynamic assignment resolved: %s", command)

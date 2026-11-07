@@ -248,13 +248,11 @@ func staticEnvironmentAssignment(command string) string {
 			return ""
 		}
 	} else {
-		if !strings.HasPrefix(value, `"`) {
+		if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
 			return ""
 		}
-		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-			value = value[1 : len(value)-1]
-		}
-		if strings.ContainsAny(value, "$`'\"(){};|&<> \t\r\n") {
+		value = value[1 : len(value)-1]
+		if strings.ContainsAny(value, "$`'\"(){};|&<>\r\n") {
 			return ""
 		}
 	}
