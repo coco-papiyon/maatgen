@@ -7,6 +7,10 @@ description: Issue番号を引数に取り、mainを最新化してissue_<番号
 
 指定されたIssueを確認し、最新の`main`から`issue_<Issue番号>`ブランチを作成して実装する。実装計画はローカルの`result/plan`に保存し、内容を実装結果とともにPR本文へ投稿する。計画ファイル自体はpushしない。
 
+## 操作手段
+
+GitHubの情報取得・更新には認証済みのGitHub CLI（`gh`）を優先し、専用コマンドで不足する操作には`gh api`を使う。リポジトリの状態確認・差分取得・ブランチ操作・commit・pushには`git`コマンドを優先する。GitHub連携ツールは、`gh`/`git`で必要な操作を実行できない場合の代替手段とする。認証・権限エラーや実行結果が不明な場合は、代替手段で回避せず、各手順の停止・確認条件に従う。
+
 ## 引数
 
 `<Issue番号>`を必須の位置引数として受け取る。例: `/implement-github-issue 123`。
@@ -18,7 +22,7 @@ description: Issue番号を引数に取り、mainを最新化してissue_<番号
 
 1. リポジトリの指示を読み、現在の作業ツリーとブランチを確認する。未コミット変更を判定するときは、依存関係管理ツールが生成するロックファイル（`package-lock.json`、`npm-shrinkwrap.json`、`yarn.lock`、`pnpm-lock.yaml`、`bun.lock`、`bun.lockb`、`Cargo.lock`、`Gemfile.lock`、`composer.lock`、`Pipfile.lock`、`poetry.lock`、`uv.lock`、`.terraform.lock.hcl`など）だけの変更は無視して処理を続ける。ロックファイル以外に未コミット変更がある場合は、stash、破棄、上書きをせずに停止し、ユーザーへ整理を依頼する。リモート`origin`と`main`が存在することも確認する。
 2. `git switch main`で`main`へ切り替え、`git pull --ff-only`で最新状態を取得する。無視したロックファイルの変更は保持し、stash、破棄、上書き、stage、commitしない。ロックファイルを含むローカル変更が原因で切り替えやpullが拒否された場合も、強制せず原因を報告して実装を開始しない。既存のローカル変更を自動的に退避しない。
-3. Issue番号からGitHub Issue情報を取得する。少なくともタイトル、本文、状態、ラベル、コメント、リンクされた資料を読む。利用可能なGitHub連携を優先し、なければ認証済みのGitHub CLI/APIを使う。Issueを取得できない場合は推測せず停止する。
+3. Issue番号からGitHub Issue情報を取得する。少なくともタイトル、本文、状態、ラベル、コメント、リンクされた資料を読む。認証済みのGitHub CLI（`gh`）を優先し、専用コマンドで不足する操作には`gh api`を使う。Issueを取得できない場合は推測せず停止する。
 4. `issue_<Issue番号>`という名前の新しいブランチを`main`から作成する（例: `git switch -c issue_123`）。同名ブランチがすでに存在する場合は削除、reset、上書きをせず停止して指示を求める。
 5. Issueの要求から観測可能な受け入れ条件を導き、実装方針を決める。要件とIssueに書かれた実装案を区別し、リポジトリの文脈でも解消できない重大な曖昧さだけを確認する。
 6. 実装前に、次の内容をMarkdownで`result/plan/<Issue番号>_<Issueタイトル>.md`へ保存する。
@@ -41,9 +45,9 @@ description: Issue番号を引数に取り、mainを最新化してissue_<番号
     - 未解決の制約、既存失敗、残存リスク
     
     計画ファイルのローカルパスだけを本文に書いて済ませず、計画の内容を本文へ転記する。Issue本文やコメントに含まれる秘密情報や不要な個人情報は転記しない。PR本文の末尾には、GitHubの自動クローズキーワードとして`Close #<Issue番号>`を単独行で追加する。既存PR本文を更新する場合も、この行を末尾に保持し、重複させない。
-12. 現在の`issue_<Issue番号>`ブランチに対応するオープンPRを確認する。実装変更（`result/plan`の計画ファイルを除く）を対象ファイルだけ明示してcommitし、`git push -u origin issue_<Issue番号>`でブランチをpushする。`git add -A`で計画ファイルや無関係な変更を一括ステージしない。既存PRがあればpush後にそのPR本文を作成した本文で更新し、タイトルは変更しない。既存PRがなければpush後にbaseを`main`として、タイトルを`[#<Issue番号>] <Issueタイトル>`に完全一致させてPRを作成する（例: `[#123] ログイン処理を改善する`）。利用可能なGitHub連携を優先し、なければ認証済みのGitHub CLI/APIを使う。
+12. 現在の`issue_<Issue番号>`ブランチに対応するオープンPRを確認する。実装変更（`result/plan`の計画ファイルを除く）を対象ファイルだけ明示してcommitし、`git push -u origin issue_<Issue番号>`でブランチをpushする。`git add -A`で計画ファイルや無関係な変更を一括ステージしない。既存PRがあればpush後にそのPR本文を作成した本文で更新し、タイトルは変更しない。既存PRがなければpush後にbaseを`main`として、タイトルを`[#<Issue番号>] <Issueタイトル>`に完全一致させてPRを作成する（例: `[#123] ログイン処理を改善する`）。認証済みのGitHub CLI（`gh`）を優先し、専用コマンドで不足する操作には`gh api`を使う。
 13. PR本文の更新または作成結果を確認し、PR番号、URL、本文に`## 実装計画`、`## 実装結果`、末尾の`Close #<Issue番号>`が含まれることを確認する。新規作成したPRは、タイトルが`[#<Issue番号>] <Issueタイトル>`に完全一致することも確認する。タイトルが一致しない場合は修正する。`Close #<Issue番号>`がない、別のIssue番号になっている、または末尾以外にある場合はPR本文を修正してから完了とする。push、commit、PR作成または更新に失敗した場合は、実装済みの変更と失敗した外部操作を分けて報告する。PRが発行・更新されたことを確認できるまで、Issueのステータスは変更しない。
-14. PRの発行または既存PR本文の更新が成功した後、対応するIssueが所属するGitHub Projectの`Status`フィールドを`In review`へ変更する。利用可能なGitHub連携を優先し、なければ認証済みのGitHub APIまたは`gh project item-edit`相当の操作を使う。対象Projectが複数ある場合はIssueが現在所属するProjectを特定し、`In review`という既存の選択肢を使用する。Project、Statusフィールド、または`In review`選択肢を特定できない場合は、PR発行済みだがステータス未変更として報告し、推測でラベル追加や別Projectの変更を行わない。更新後にIssueとProjectを再取得し、Statusが正確に`In review`であることを確認する。
+14. PRの発行または既存PR本文の更新が成功した後、対応するIssueが所属するGitHub Projectの`Status`フィールドを`In review`へ変更する。認証済みの`gh project item-edit`を優先し、専用コマンドで不足する操作には`gh api`を使う。対象Projectが複数ある場合はIssueが現在所属するProjectを特定し、`In review`という既存の選択肢を使用する。Project、Statusフィールド、または`In review`選択肢を特定できない場合は、PR発行済みだがステータス未変更として報告し、推測でラベル追加や別Projectの変更を行わない。更新後にIssueとProjectを再取得し、Statusが正確に`In review`であることを確認する。
 
 ## 境界
 
