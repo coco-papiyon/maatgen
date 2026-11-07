@@ -79,7 +79,7 @@ describe('Shell', () => {
     await textInputs[1]!.setValue('3101');
     await textInputs[2]!.setValue('linux-dev');
     await textInputs[3]!.setValue('Linux dev box');
-    await wrapper.get('.github-form-actions button').trigger('click');
+    await wrapper.findAll('.github-form-actions button').find((button) => button.text() === '追加')!.trigger('click');
     await flushPromises();
 
     const [upstream] = await api.listUpstreams();
