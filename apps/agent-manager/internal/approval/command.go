@@ -3,6 +3,7 @@ package approval
 import (
 	"errors"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -29,6 +30,10 @@ func parseCommand(command string, depth int) ([]protocol.CommandSegment, error) 
 	segments := make([]protocol.CommandSegment, 0, len(parts))
 	var parseErr error
 	for _, part := range parts {
+		if assignment := staticEnvironmentAssignment(part); assignment != "" {
+			segments = append(segments, protocol.CommandSegment{Index: len(segments), Command: strings.TrimSpace(part), Argv: []string{assignment}})
+			continue
+		}
 		argv, argvErr := splitArgv(part)
 		if argvErr != nil || len(argv) == 0 || dynamicExecutable(argv[0]) {
 			segments = append(segments, unresolvedSegment(len(segments), part))
@@ -227,6 +232,33 @@ func dynamicExecutable(executable string) bool {
 	return value == "eval" || value == "invoke-expression" || strings.HasPrefix(value, "$")
 }
 
+var environmentAssignment = regexp.MustCompile(`(?i)^\$env:([a-z_][a-z0-9_]*)\s*=\s*(.*)$`)
+
+// Only literal values are eligible for remembered approval. Expressions and
+// interpolation remain unresolved, even when enclosed in double quotes.
+func staticEnvironmentAssignment(command string) string {
+	parts := environmentAssignment.FindStringSubmatch(strings.TrimSpace(command))
+	if parts == nil {
+		return ""
+	}
+	value := strings.TrimSpace(parts[2])
+	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+		value = value[1 : len(value)-1]
+		if strings.Contains(value, "'") {
+			return ""
+		}
+	} else {
+		if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+			return ""
+		}
+		value = value[1 : len(value)-1]
+		if strings.ContainsAny(value, "$`'\"(){};|&<>\r\n") {
+			return ""
+		}
+	}
+	return "$env:" + strings.ToUpper(parts[1]) + "=" + value
+}
+
 // SegmentAllowed reports whether segment individually matches one of rules.
 // A segment with no argv (unresolved dynamic syntax) never matches, since
 // there is nothing static to compare against a rule.
@@ -277,6 +309,14 @@ func MatchArgv(pattern, argv []string) bool {
 }
 
 func equalCommandPart(index int, expected, actual string) bool {
+	if index == 0 && strings.HasPrefix(strings.ToLower(expected), "$env:") {
+		expectedName, expectedValue, ok := strings.Cut(expected, "=")
+		actualName, _, actualOK := strings.Cut(actual, "=")
+		if ok && actualOK && expectedValue == "*" {
+			return strings.EqualFold(expectedName, actualName)
+		}
+		return expected == actual
+	}
 	if index == 0 {
 		expected = strings.TrimSuffix(strings.ToLower(expected), ".exe")
 		actual = strings.TrimSuffix(strings.ToLower(actual), ".exe")

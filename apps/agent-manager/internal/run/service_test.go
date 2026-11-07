@@ -257,7 +257,16 @@ func TestRunServiceQueuesRunForBusyRepositoryAcrossSessions(t *testing.T) {
 		t.Fatalf("create second session: %v", err)
 	}
 
-	adapter := &fakeAdapter{block: true}
+	started := make(chan agent.RunRequest, 2)
+	waitForAdapter := func() {
+		t.Helper()
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("adapter did not start")
+		}
+	}
+	adapter := &fakeAdapter{block: true, started: started}
 	service := New(store, adapter, WithCheckpointManager(&fakeCheckpointManager{}))
 	defer service.Close(context.Background())
 
@@ -266,6 +275,7 @@ func TestRunServiceQueuesRunForBusyRepositoryAcrossSessions(t *testing.T) {
 		t.Fatalf("start first run: %v", err)
 	}
 	waitForRunStatus(t, store, firstRun.ID, protocol.RunRunning)
+	waitForAdapter()
 	secondRun, err := service.StartRun(context.Background(), second.ID, protocol.SendMessageRequest{Message: "Second"})
 	if err != nil {
 		t.Fatalf("queue second session run: %v", err)
@@ -281,6 +291,9 @@ func TestRunServiceQueuesRunForBusyRepositoryAcrossSessions(t *testing.T) {
 	waitForRunStatus(t, store, firstRun.ID, protocol.RunCancelled)
 
 	waitForRunStatus(t, store, secondRun.ID, protocol.RunRunning)
+	// RunRunning is persisted before adapter.Run; wait for the invocation
+	// before reading requests, including on slower Windows runners.
+	waitForAdapter()
 	if len(adapter.requests) != 2 {
 		t.Fatalf("adapter requests after releasing repository = %d, want 2", len(adapter.requests))
 	}
@@ -516,6 +529,7 @@ func TestRunServiceDoesNotScheduleUsageLimitRetryForUnrelatedFailure(t *testing.
 }
 
 type fakeAdapter struct {
+	started     chan agent.RunRequest
 	name        protocol.AgentName
 	lines       []agent.Output
 	block       bool
@@ -608,6 +622,9 @@ func (f *fakeAdapter) ParseLine(line string) agent.ParsedLine {
 
 func (f *fakeAdapter) Run(ctx context.Context, request agent.RunRequest, emit agent.Emitter) (agent.RunResult, error) {
 	f.requests = append(f.requests, request)
+	if f.started != nil {
+		f.started <- request
+	}
 	startedAt := time.Now().UTC()
 	for _, output := range f.lines {
 		if err := emit(output); err != nil {

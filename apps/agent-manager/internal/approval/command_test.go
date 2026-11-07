@@ -102,7 +102,7 @@ func TestParseCommandEvaluatesNestedShellCommandPayload(t *testing.T) {
 }
 
 func TestParseCommandKeepsResolvedSegmentsAlongsideAnUnresolvedOne(t *testing.T) {
-	segments, err := ParseCommand(`"C:\Program Files\PowerShell\7\pwsh.exe" -Command "gofmt -w internal/storage/sqlite/store_test.go; $env:GOCACHE='C:\tmp\maatgen-gocache-dedupe'; go test ./internal/storage/sqlite ./internal/githubmonitor"`)
+	segments, err := ParseCommand(`"C:\Program Files\PowerShell\7\pwsh.exe" -Command "gofmt -w internal/storage/sqlite/store_test.go; $cache; go test ./internal/storage/sqlite ./internal/githubmonitor"`)
 	if !errors.Is(err, ErrDynamicCommand) {
 		t.Fatalf("error = %v, want ErrDynamicCommand", err)
 	}
@@ -141,5 +141,38 @@ func TestParseCommandRejectsEncodedPowerShellPayload(t *testing.T) {
 	}
 	if len(segments) != 1 || len(segments[0].Argv) != 0 {
 		t.Fatalf("fallback segments = %#v", segments)
+	}
+}
+
+func TestPowerShellEnvironmentAssignmentRules(t *testing.T) {
+	for _, command := range []string{
+		`$env:GOCACHE="C:\Program Files\cache"`,
+		"$env:GOCACHE=\"C:\\cache\tfiles\"",
+		`pwsh -Command '$env:GOCACHE="C:\Program Files\cache"'`,
+	} {
+		parsed, err := ParseCommand(command)
+		if err != nil || !AllSegmentsAllowed(parsed, [][]string{{"$env:GOCACHE=*"}}) {
+			t.Fatalf("static assignment not allowed: %q: %#v, %v", command, parsed, err)
+		}
+	}
+	segments, err := ParseCommand(`pwsh -Command "$env:GOCACHE = 'C:\tmp\cache'; go test ./..."`)
+	if err != nil || len(segments) != 2 {
+		t.Fatalf("segments=%#v err=%v", segments, err)
+	}
+	rule := []string{"$env:GOCACHE=*"}
+	if !SegmentAllowed(segments[0], [][]string{rule}) {
+		t.Fatal("assignment did not match")
+	}
+	if AllSegmentsAllowed(segments, [][]string{rule}) {
+		t.Fatal("assignment rule allowed following command")
+	}
+	if MatchArgv(rule, []string{"$env:OTHER=value"}) {
+		t.Fatal("matched another variable")
+	}
+	for _, command := range []string{`$env:GOCACHE=$other`, `$env:GOCACHE="$(whoami)"`, `$env:GOCACHE=Get-Location`, `$env:GOCACHE='x' + 'y'`, `$env:GOCACHE="C:\Program Files\$other"`, `$env:GOCACHE="x" + " y"`, `$env:GOCACHE="unterminated`} {
+		parsed, err := ParseCommand(command)
+		if err == nil || AllSegmentsAllowed(parsed, [][]string{rule}) {
+			t.Fatalf("dynamic assignment resolved: %s", command)
+		}
 	}
 }
