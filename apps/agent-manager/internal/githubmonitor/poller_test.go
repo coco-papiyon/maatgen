@@ -11,6 +11,10 @@ import (
 )
 
 type fakeGitHubClient struct {
+	getIssues         map[int]protocol.GitHubItem
+	getIssueErr       map[int]error
+	issueFetches      int
+	pullFetches       int
 	issues            []protocol.GitHubItem
 	pulls             []protocol.GitHubItem
 	projectFields     map[int][]protocol.GitHubProjectFieldValue
@@ -21,6 +25,11 @@ type fakeGitHubClient struct {
 	listPullsErr      error
 	issueState        string
 	pullState         string
+}
+
+func (f *fakeGitHubClient) GetIssue(_ context.Context, _, _ string, number int) (protocol.GitHubItem, error) {
+	f.issueFetches++
+	return f.getIssues[number], f.getIssueErr[number]
 }
 
 func (f *fakeGitHubClient) ListIssues(ctx context.Context, owner, repo string, opts githubapi.ListOptions) ([]protocol.GitHubItem, error) {
@@ -40,6 +49,7 @@ func (f *fakeGitHubClient) ListPullRequests(ctx context.Context, owner, repo str
 }
 
 func (f *fakeGitHubClient) GetPullRequest(ctx context.Context, owner, repo string, number int) (protocol.GitHubItem, error) {
+	f.pullFetches++
 	if f.getPullRequestErr != nil {
 		if err, ok := f.getPullRequestErr[number]; ok {
 			return protocol.GitHubItem{}, err

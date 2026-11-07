@@ -916,6 +916,7 @@ docs/decisions/
 - [x] 監視ルール作成・編集をWeb版のポップアップで提供
 - [x] Issue／PRの担当者条件と、PRのレビュー依頼中ユーザー条件をルールへ保存・評価
 - [x] ポーラーはOpenのIssue／PRだけを取得し、状態条件は設定画面に公開しない
+- [x] Issue #45: 未クローズJobの対象がOpen一覧から消えた場合だけ詳細取得し、closedなら既存CloseEventでJob／Sessionを閉じる。実行中Runは保持して次回同期で再試行し、API失敗・remote不一致では閉じない。同一対象の取得を共有し、古いJobも対象とする。Web／VS Codeは共通の状態を参照する。
 - [x] GitHub PRのレビュー依頼変更を正規化状態と変更検知hashへ反映
 - [x] 定期ポーリングとIssue／PR一覧取得の構造化ログ
 - [x] Issue／PR観測後に作成・更新された監視ルールを現在状態へ評価し、同じルール・item番号の自動イベントはactionをまたいで一度だけ作成
