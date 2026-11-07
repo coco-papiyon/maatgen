@@ -896,6 +896,7 @@ docs/decisions/
 - [x] `commandApproval`設定とargv単位の許可ルール
 - [x] 複合commandのsegment分割と全segment照合
 - [x] PowerShell／sh／bash／cmdラッパーの実コマンド抽出と評価
+- [x] Issue #57: 条件分岐・subshellを未解析segmentとして保持し、前後のコマンドをトップレベルの区切りで分割・個別評価する
 - [x] Codex App Serverのread loop、pending response map、直列write
 - [x] 軽量Codexモデルによる短命Diagnostic Reviewer
 - [x] `waiting_for_approval`、approval Event、SQLite migration

@@ -176,3 +176,35 @@ func TestPowerShellEnvironmentAssignmentRules(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePowerShellConditionalKeepsSiblingCommands(t *testing.T) {
+	for _, executable := range []string{`"C:\Program Files\PowerShell\7\pwsh.exe"`, `powershell.exe`} {
+		command := executable + ` -NoProfile -Command "gh pr edit 54 --add-label 再レビュー; if ($LASTEXITCODE -ne 0) { throw 'ラベル更新失敗'; Write-Error 'failure' }; gh pr view 54 --json labels"`
+		segments, err := ParseCommand(command)
+		if !errors.Is(err, ErrDynamicCommand) || len(segments) != 3 {
+			t.Fatalf("segments=%#v err=%v", segments, err)
+		}
+		if !reflect.DeepEqual(segments[0].Argv, []string{"gh", "pr", "edit", "54", "--add-label", "再レビュー"}) || !reflect.DeepEqual(segments[2].Argv, []string{"gh", "pr", "view", "54", "--json", "labels"}) {
+			t.Fatalf("segments=%#v", segments)
+		}
+		if len(segments[1].Argv) != 0 || segments[1].Index != 1 || AllSegmentsAllowed(segments, [][]string{{"gh", "*"}, {"pwsh", "*"}}) {
+			t.Fatalf("conditional must remain unresolved: %#v", segments)
+		}
+	}
+}
+
+func TestParseCommandKeepsDynamicSubexpressionTogether(t *testing.T) {
+	segments, err := ParseCommand(`git status; echo $(whoami; hostname); git diff`)
+	if !errors.Is(err, ErrDynamicCommand) || len(segments) != 3 || len(segments[1].Argv) != 0 || segments[2].Argv[0] != "git" {
+		t.Fatalf("segments=%#v err=%v", segments, err)
+	}
+}
+
+func TestParseCommandRejectsUnbalancedWrapper(t *testing.T) {
+	for _, command := range []string{`pwsh -Command 'git status; git diff"`, `git status; if ($true) { whoami; git diff`} {
+		segments, err := ParseCommand(command)
+		if !errors.Is(err, ErrDynamicCommand) || len(segments) != 1 || len(segments[0].Argv) != 0 {
+			t.Fatalf("segments=%#v err=%v", segments, err)
+		}
+	}
+}
