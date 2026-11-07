@@ -19,6 +19,46 @@ type fixedReviewer struct {
 	approvedCommands [][]string
 }
 
+func TestServiceRemembersPowerShellEnvironmentAssignment(t *testing.T) {
+	for _, commands := range [][2]string{
+		{`$env:GOCACHE='C:\tmp\first'`, `$env:GOCACHE='C:\tmp\second'`},
+		{`$env:GOCACHE="C:\Program Files\first"`, `$env:GOCACHE="C:\Program Files\second"`},
+	} {
+		for _, scope := range []protocol.ApprovalDecision{protocol.ApprovalAllowSession, protocol.ApprovalAllowPermanent} {
+			t.Run(string(scope), func(t *testing.T) {
+				store := approvalTestStore(t)
+				var saved []string
+				service := New(store, Config{Enabled: true, HumanTimeout: time.Second, SavePermanentRule: func(rule []string) error { saved = rule; return nil }})
+				done := make(chan error, 1)
+				go func() {
+					decision, err := service.Handle(context.Background(), approvalRequest(commands[0]))
+					if err == nil && !decision.Approved {
+						err = context.Canceled
+					}
+					done <- err
+				}()
+				pending := waitForPendingApproval(t, store)
+				rule := []string{"$env:GOCACHE=*"}
+				if _, err := service.Decide(context.Background(), "session-1", pending.ID, protocol.ApprovalDecisionRequest{Decision: scope, RuleArgv: rule}); err != nil {
+					t.Fatal(err)
+				}
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if scope == protocol.ApprovalAllowPermanent && !reflect.DeepEqual(saved, rule) {
+					t.Fatalf("saved = %#v", saved)
+				}
+				request := approvalRequest(commands[1])
+				request.ProviderRequestID = "second-request"
+				decision, err := service.Handle(context.Background(), request)
+				if err != nil || !decision.Approved {
+					t.Fatalf("decision=%#v err=%v", decision, err)
+				}
+			})
+		}
+	}
+}
+
 func (reviewer *fixedReviewer) Review(_ context.Context, _ agent.ApprovalRequest, _ []protocol.CommandSegment, approvedCommands [][]string) (Assessment, error) {
 	reviewer.approvedCommands = approvedCommands
 	return reviewer.assessment, nil

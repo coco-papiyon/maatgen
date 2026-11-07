@@ -214,6 +214,7 @@ async function registerNewRepository() {
 // --- Trigger Rule editor (cross-repository) -------------------------------
 
 interface RuleForm {
+  filters: GitHubMonitorFilters;
   id: string;
   repository: string;
   name: string;
@@ -243,6 +244,7 @@ function repositoryProjectName(repository: string): string {
 function blankRuleForm(): RuleForm {
   const repository = repositories.value[0]?.repository ?? '';
   return {
+    filters: {},
     id: '', repository, name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
     provider: providers.value[0]?.id ?? 'codex', model: '', reasoningEffort: '', autoApprove: false, concurrencyPolicy: 'coalesce', priority: '3',
     labels: '', assignees: '', reviewers: '', conflicting: '', projectTitle: repositoryProjectName(repository), projectField: '', projectValue: '',
@@ -317,10 +319,19 @@ const ruleTestError = ref('');
 const testingRule = ref(false);
 
 function buildRuleFilters(form: RuleForm): GitHubMonitorFilters {
+  // Keep API-supported conditions that the editor does not expose. Visible
+  // conditions are rebuilt below so clearing an input also removes its filter.
+  const filters: GitHubMonitorFilters = JSON.parse(JSON.stringify(form.filters));
+  delete filters.labels;
+  delete filters.assignees;
+  delete filters.reviewers;
+  delete filters.conflicting;
+  delete filters.project;
   const labels = parseCommaSeparated(form.labels);
   const assignees = parseCommaSeparated(form.assignees);
   const reviewers = parseCommaSeparated(form.reviewers);
   return {
+    ...filters,
     ...(labels.length ? { labels } : {}),
     ...(assignees.length ? { assignees } : {}),
     ...(form.eventKinds.includes('pull_request') && reviewers.length ? { reviewers } : {}),
@@ -377,11 +388,12 @@ function startCreateRule() {
   focusRuleDialog();
 }
 
-function startEditRule(rule: GitHubTriggerRule) {
+function startEditRule(rule: GitHubTriggerRule, copy = false) {
   resetPromptPreview();
   resetRuleTest();
   editingRule.value = {
-    id: rule.id, repository: rule.repository, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
+    filters: JSON.parse(JSON.stringify(rule.filters)),
+    id: copy ? '' : rule.id, repository: rule.repository, name: copy ? `${rule.name} (コピー)` : rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider,
     model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', autoApprove: rule.autoApprove, concurrencyPolicy: rule.concurrencyPolicy,
     priority: rule.priority,
@@ -567,6 +579,7 @@ watch(selectedNodeId, () => {
           </div>
           <div class="github-form-actions">
             <button type="button" @click="startEditRule(rule)">編集</button>
+            <button type="button" @click="startEditRule(rule, true)">コピー</button>
             <button type="button" class="github-danger" @click="deleteRule(rule)">削除</button>
           </div>
         </li>
