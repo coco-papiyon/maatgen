@@ -933,3 +933,5 @@ docs/decisions/
 - [x] Localは直接接続中の下位ノードとして固定し、Node Nameを別のupstream選択肢として表示
 - [x] 既存のWebSocket／yamuxセッションを双方向化し、`/api/upstream/*`から上位Agent ManagerのAPI／WebSocketへ転送
 - [x] 右上のサーバ選択プルダウンからノード追加操作と追加ダイアログを削除
+
+- Issue #47: PowerShell の静的な環境変数代入と変数名を固定した値ワイルドカード承認に対応。session/permanent の保存と再利用、動的構文・別変数・後続コマンドの拒否を回帰テストする。
