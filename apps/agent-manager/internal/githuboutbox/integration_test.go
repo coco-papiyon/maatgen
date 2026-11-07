@@ -56,6 +56,17 @@ func initGitRepo(t *testing.T) string {
 // a real Run that runs to completion, and a monitor event that ends up
 // "completed" with the Session/Run IDs attached.
 func TestDispatcherEndToEndWithRealSessionAndRunServices(t *testing.T) {
+	testDispatcherEndToEnd(t, "")
+}
+
+func TestDispatcherResumedJobSurvivesCoalescing(t *testing.T) {
+	for _, scenario := range []string{"same item", "queue limit"} {
+		t.Run(scenario, func(t *testing.T) { testDispatcherEndToEnd(t, scenario) })
+	}
+}
+
+func testDispatcherEndToEnd(t *testing.T, resumeScenario string) {
+	t.Helper()
 	ctx := context.Background()
 	repository := initGitRepo(t)
 
@@ -75,6 +86,9 @@ func TestDispatcherEndToEndWithRealSessionAndRunServices(t *testing.T) {
 		Repository: repository, Host: "github.com", Owner: "octo-org", Name: "example",
 		RemoteName: "origin", Enabled: true, PollIntervalSeconds: 300, CoalesceQueueLimit: 20,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if resumeScenario == "queue limit" {
+		monitor.CoalesceQueueLimit = 1
 	}
 	if err := store.CreateRepositoryMonitor(ctx, monitor); err != nil {
 		t.Fatalf("create repository monitor: %v", err)
@@ -101,6 +115,29 @@ func TestDispatcherEndToEndWithRealSessionAndRunServices(t *testing.T) {
 	if inserted, err := store.InsertMonitorEvent(ctx, event); err != nil || !inserted {
 		t.Fatalf("insert monitor event: inserted=%v err=%v", inserted, err)
 	}
+	if resumeScenario != "" {
+		if err := store.SkipMonitorEvent(ctx, event.ID, "manual skip", event.CreatedAt); err != nil {
+			t.Fatal(err)
+		}
+		newer := event
+		newer.ID = "newer-event"
+		newer.CreatedAt = event.CreatedAt.Add(time.Minute)
+		newer.UpdatedAt = newer.CreatedAt
+		if resumeScenario == "queue limit" {
+			newer.Number++
+			newer.ItemSnapshot.Number = newer.Number
+		}
+		if inserted, err := store.InsertMonitorEvent(ctx, newer); err != nil || !inserted {
+			t.Fatalf("insert newer event: inserted=%v err=%v", inserted, err)
+		}
+		resumed, err := store.CreateReplayEvent(ctx, event.ID, "unused-replay-id", newer.CreatedAt.Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resumed.ID != event.ID || !resumed.CreatedAt.Equal(event.CreatedAt) {
+			t.Fatalf("resume changed identity or creation time: %#v", resumed)
+		}
+	}
 
 	var dispatcher *Dispatcher
 	runs := runservice.New(store, noopAdapter{}, runservice.WithCheckpointManager(checkpointManager),
@@ -126,6 +163,16 @@ func TestDispatcherEndToEndWithRealSessionAndRunServices(t *testing.T) {
 	}
 	if got.Status != protocol.GitHubMonitorEventCompleted {
 		t.Fatalf("event did not reach completed: %#v", got)
+	}
+	if resumeScenario != "" {
+		jobs, err := store.ListMonitorEvents(ctx, repository, 10, "all")
+		if err != nil || len(jobs) != 2 {
+			t.Fatalf("resume added a job: jobs=%#v err=%v", jobs, err)
+		}
+		newer, err := store.GetMonitorEvent(ctx, "newer-event")
+		if err != nil || newer.Status != protocol.GitHubMonitorEventSkipped {
+			t.Fatalf("expected the previously queued job to be skipped: %#v err=%v", newer, err)
+		}
 	}
 	if got.SessionID == nil || got.RunID == nil {
 		t.Fatalf("event = %#v, want session and run ids attached", got)
