@@ -12,6 +12,10 @@ description: Issue番号を引数に取り、GitHub Issue本文を解析して�
 - 実装内容
 - 受入条件
 
+## 操作手段
+
+GitHubの情報取得・更新には認証済みのGitHub CLI（`gh`）を優先し、専用コマンドで不足する操作には`gh api`を使う。リポジトリの状態確認・差分取得・ブランチ操作・commit・pushには`git`コマンドを優先する。GitHub連携ツールは、`gh`/`git`で必要な操作を実行できない場合の代替手段とする。認証・権限エラーや実行結果が不明な場合は、代替手段で回避せず、各手順の停止・確認条件に従う。
+
 ## 引数
 
 `<Issue番号>`を必須の位置引数として受け取る。例: `/analyze-github-issue 123`。
@@ -22,7 +26,7 @@ description: Issue番号を引数に取り、GitHub Issue本文を解析して�
 ## 手順
 
 1. リポジトリの指示を確認し、作業ツリーを変更する必要がないことを確認する。Issueの更新以外のファイル変更、ブランチ作成、commit、pushは行わない。
-2. Issue番号からGitHub Issueを取得する。利用可能なGitHub連携を優先し、なければ認証済みのGitHub CLI/APIを使う。少なくともタイトル、本文、状態、ラベル、既存コメント、Issue URLを確認する。取得できない場合は推測せず停止する。
+2. Issue番号からGitHub Issueを取得する。認証済みのGitHub CLI（`gh`）を優先し、専用コマンドで不足する操作には`gh api`を使う。少なくともタイトル、本文、状態、ラベル、既存コメント、Issue URLを確認する。取得できない場合は推測せず停止する。
 3. Issue本文を解析し、明示された要件と文脈から合理的に導ける内容を分けて整理する。情報が不足している項目は「未記載」または「要確認」と明記し、事実を創作しない。コメントは補足情報として参照するが、本文にない仕様を断定しない。
 4. 更新本文を次のMarkdown構成で作成する。
 
@@ -54,10 +58,10 @@ description: Issue番号を引数に取り、GitHub Issue本文を解析して�
    原文の情報を保持することが重要な場合は、原文を`## 原文`にそのまま残す。既存本文がすでに見出し構成を持つ場合も、意味を変えずに上記4項目へ再整理する。Issue本文やコメント内の秘密情報・認証情報・不要な個人情報は転記しない。
 5. `### 実装範囲`では、Issueの明示要件またはリポジトリの文脈から実装対象と判断できる項目を`[x]`、対象外または判断できない項目を`[ ]`にする。WebまたはVSCodeの一方でも対象なら親のフロントエンドも`[x]`にする。判断できない範囲は勝手に対象へ含めず、実装内容に「要確認」と理由を記載する。受入条件は、実装後に第三者が確認できる観測可能な表現にする。Issueに明示されていない条件を追加する場合は、推定であることを示すか「要確認」とする。実装内容には実装方針を断定せず、Issueで指定された範囲と未確定事項を区別する。
 6. 更新前に、対象Issue番号と更新差分を再確認する。本文更新後にIssueのステータスを`Refined`へ変更することを明示する。ラベル、担当者、マイルストーン、コメントは変更しない。
-7. GitHub Issue本文だけを更新する。利用可能なGitHub連携を優先し、なければ認証済みの`gh issue edit <番号> --body-file <一時ファイル>`または同等のAPIを使う。一時ファイルには本文を書き込むが、処理後に不要なら削除する。更新が失敗した場合は再試行を繰り返さず、原因と未更新の状態を報告する。
-8. 更新後に`gh issue view <番号> --json title,body,state,labels,assignees,milestone,comments,url,projectItems`（または利用可能なGitHub連携の同等操作）でIssueを再取得し、4つの見出し、`### 実装範囲`のチェック欄と選択内容、受入条件、原文保持の要否を確認する。更新後の確認に`gh project item-list`は使用しない。本文の再取得・検証に失敗した場合は、ステータスを変更せず停止する。
-9. 本文の更新と検証が成功した後、対象Issueが所属するGitHub Projectの`Status`フィールドを`Refined`へ変更する。利用可能なGitHub連携を優先し、なければ認証済みのGitHub APIまたは`gh project item-edit`相当の操作を使う。対象Projectが複数ある場合はIssueが現在所属するProjectを特定し、`Refined`という既存の選択肢を使用する。Project、Statusフィールド、または`Refined`選択肢を特定できない場合は、Issue本文は更新済みだがステータス未変更として停止し、推測でラベル追加や別Projectの変更を行わない。
-10. ステータス更新後も`gh issue view <番号> --json title,body,state,labels,assignees,milestone,comments,url,projectItems`（または利用可能なGitHub連携の同等操作）でIssueを再取得する。`projectItems`からStatusが正確に`Refined`であることを確認し、ラベル・コメント・その他のIssue属性に意図しない変更がないことを確認する。この確認に`gh project item-list`は使用しない。
+7. GitHub Issue本文だけを更新する。認証済みの`gh issue edit <番号> --body-file <一時ファイル>`を優先し、専用コマンドで不足する操作には`gh api`を使う。一時ファイルには本文を書き込むが、処理後に不要なら削除する。更新が失敗した場合は再試行を繰り返さず、原因と未更新の状態を報告する。
+8. 更新後に`gh issue view <番号> --json title,body,state,labels,assignees,milestone,comments,url,projectItems`でIssueを再取得し、4つの見出し、`### 実装範囲`のチェック欄と選択内容、受入条件、原文保持の要否を確認する。更新後の確認に`gh project item-list`は使用しない。本文の再取得・検証に失敗した場合は、ステータスを変更せず停止する。
+9. 本文の更新と検証が成功した後、対象Issueが所属するGitHub Projectの`Status`フィールドを`Refined`へ変更する。認証済みの`gh project item-edit`を優先し、専用コマンドで不足する操作には`gh api`を使う。対象Projectが複数ある場合はIssueが現在所属するProjectを特定し、`Refined`という既存の選択肢を使用する。Project、Statusフィールド、または`Refined`選択肢を特定できない場合は、Issue本文は更新済みだがステータス未変更として停止し、推測でラベル追加や別Projectの変更を行わない。
+10. ステータス更新後も`gh issue view <番号> --json title,body,state,labels,assignees,milestone,comments,url,projectItems`でIssueを再取得する。`projectItems`からStatusが正確に`Refined`であることを確認し、ラベル・コメント・その他のIssue属性に意図しない変更がないことを確認する。この確認に`gh project item-list`は使用しない。
 
 ## 境界
 
