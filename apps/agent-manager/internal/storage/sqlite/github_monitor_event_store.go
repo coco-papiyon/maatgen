@@ -47,7 +47,8 @@ func insertMonitorEvent(ctx context.Context, exec execer, event protocol.GitHubM
 	return true, nil
 }
 
-// CreateReplayEvent creates a new Outbox delivery that re-executes an
+// CreateReplayEvent resumes unstarted skipped jobs in place, or creates a
+// new Outbox delivery that re-executes an
 // earlier event without touching the original's dedupe key (ADR-007
 // section 6): it copies the original's repository/rule/kind/number/action
 // and item snapshot, sets status to queued (a replay is a deliberate,
@@ -57,6 +58,27 @@ func (s *Store) CreateReplayEvent(ctx context.Context, originalEventID, newEvent
 	original, err := s.GetMonitorEvent(ctx, originalEventID)
 	if err != nil {
 		return protocol.GitHubMonitorEvent{}, fmt.Errorf("create github monitor event replay: %w", err)
+	}
+	// An unstarted skipped job is resumed in place, preserving its delivery
+	// identity instead of creating a second row for the same pending work.
+	if original.Status == protocol.GitHubMonitorEventSkipped && original.SessionID == nil && original.RunID == nil {
+		result, err := s.db.ExecContext(ctx, `UPDATE github_monitor_events
+			SET status = 'queued', skip_reason = NULL, last_error = NULL, updated_at = ?
+			WHERE id = ? AND status = 'skipped' AND session_id IS NULL AND run_id IS NULL`, formatTime(createdAt), originalEventID)
+		if err != nil {
+			return protocol.GitHubMonitorEvent{}, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return protocol.GitHubMonitorEvent{}, err
+		}
+		if count != 1 {
+			return protocol.GitHubMonitorEvent{}, storage.ErrConflict
+		}
+		return s.GetMonitorEvent(ctx, originalEventID)
+	}
+	if original.Status != protocol.GitHubMonitorEventSkipped && original.Status != protocol.GitHubMonitorEventFailed && original.Status != protocol.GitHubMonitorEventCancelled {
+		return protocol.GitHubMonitorEvent{}, storage.ErrConflict
 	}
 	replay := protocol.GitHubMonitorEvent{
 		ID:              newEventID,

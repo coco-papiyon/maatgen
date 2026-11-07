@@ -561,6 +561,9 @@ type coalesceKey struct {
 //     skipped immediately by startRun) and never held.
 //   - Within a (repository, rule, item kind, item number) group, only the
 //     newest event survives; older ones are marked skipped as superseded.
+//     Recency uses UpdatedAt, the time the queued job was last enqueued,
+//     so an explicitly resumed job participates as a new delivery while
+//     retaining its original CreatedAt and ID.
 //   - Each repository's number of distinct surviving groups is capped at
 //     its configured CoalesceQueueLimit; the oldest groups beyond the limit
 //     are marked skipped rather than silently dropped, so they remain
@@ -589,7 +592,7 @@ func (d *Dispatcher) reconcileCoalesceQueue(ctx context.Context, events []protoc
 	}
 	survivors := make([]survivor, 0, len(groups))
 	for key, group := range groups {
-		sort.Slice(group, func(i, j int) bool { return group[i].CreatedAt.Before(group[j].CreatedAt) })
+		sort.SliceStable(group, func(i, j int) bool { return group[i].UpdatedAt.Before(group[j].UpdatedAt) })
 		newest := group[len(group)-1]
 		for _, stale := range group[:len(group)-1] {
 			d.skipEvent(ctx, stale.ID, "superseded by a newer event for the same item")
@@ -614,7 +617,7 @@ func (d *Dispatcher) reconcileCoalesceQueue(ctx context.Context, events []protoc
 			}
 			continue
 		}
-		sort.Slice(group, func(i, j int) bool { return group[i].event.CreatedAt.Before(group[j].event.CreatedAt) })
+		sort.SliceStable(group, func(i, j int) bool { return group[i].event.UpdatedAt.Before(group[j].event.UpdatedAt) })
 		overflow := len(group) - limit
 		for i, s := range group {
 			if i < overflow {
