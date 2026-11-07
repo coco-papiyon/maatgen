@@ -671,7 +671,7 @@ func TestReplayEventCreatesNewQueuedEventWithoutTouchingOriginal(t *testing.T) {
 	store := newFakeStore()
 	deliveryKey := "original-key"
 	original := protocol.GitHubMonitorEvent{
-		ID: "event-1", Repository: "/repo", Status: protocol.GitHubMonitorEventSkipped, DeliveryKey: &deliveryKey,
+		ID: "event-1", Repository: "/repo", Status: protocol.GitHubMonitorEventFailed, DeliveryKey: &deliveryKey,
 	}
 	store.events[original.ID] = original
 	service := New(store, fakeValidator{}, "", nil, nil, nil, nil)

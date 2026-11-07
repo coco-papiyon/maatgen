@@ -26,6 +26,19 @@ async function mountEvents(api = new MockAgentApi()) {
 }
 
 describe('GitHubEventsView', () => {
+  it('resumes a skipped job without adding another row', async () => {
+    localStorage.removeItem('maatgen.jobStatusFilter');
+    const { wrapper, api } = await mountEvents();
+    const before = await api.listGitHubMonitorEvents();
+    const row = wrapper.findAll('tbody tr').find((row) => row.text().includes('skipped'))!;
+    const execute = row.findAll('button').find((button) => button.text().includes('このイベントを実行'))!;
+    await execute.trigger('click');
+    await flushPromises();
+    const after = await api.listGitHubMonitorEvents();
+    expect(after).toHaveLength(before.length);
+    expect(after.find((event) => event.id === 'mock-event-2')?.status).toBe('queued');
+    expect(wrapper.findAll('tbody tr')).toHaveLength(before.length);
+  });
   it("shows each event's rule priority", async () => {
     const { wrapper } = await mountEvents();
     const rows = wrapper.findAll('.github-table tbody tr');
