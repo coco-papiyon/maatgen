@@ -52,7 +52,7 @@ func createReadyRule(t *testing.T, store *sqlite.Store, repository string) proto
 			Project: &protocol.GitHubProjectFilterCondition{ProjectTitle: "Roadmap", FieldName: "Status", Value: "Ready"},
 		},
 		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce,
-		Priority:          protocol.GitHubPriorityMedium,
+		Priority:          protocol.GitHubPriority3,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
@@ -239,7 +239,7 @@ func TestEvaluateItemFiresOnceWhenRuleIsAddedAfterIssueWasObserved(t *testing.T)
 		EventKinds:     []protocol.GitHubItemKind{protocol.GitHubItemIssue},
 		Filters:        protocol.GitHubMonitorFilters{Assignees: []string{"coco-papiyon"}},
 		PromptTemplate: "Implement issue #{{.Number}}", Provider: protocol.AgentCodex,
-		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce, Priority: protocol.GitHubPriorityMedium, CreatedAt: ruleTime, UpdatedAt: ruleTime,
+		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce, Priority: protocol.GitHubPriority3, CreatedAt: ruleTime, UpdatedAt: ruleTime,
 	}
 	if err := store.CreateTriggerRule(ctx, rule); err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -285,7 +285,7 @@ func TestEvaluateItemDoesNotFireAgainWhenMatchingRuleIsUpdated(t *testing.T) {
 		Filters:        protocol.GitHubMonitorFilters{Assignees: []string{"coco-papiyon"}},
 		PromptTemplate: "Implement issue #{{.Number}}", Provider: protocol.AgentCodex,
 		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce,
-		Priority:          protocol.GitHubPriorityMedium,
+		Priority:          protocol.GitHubPriority3,
 		CreatedAt:         time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC),
 		UpdatedAt:         time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC),
 	}

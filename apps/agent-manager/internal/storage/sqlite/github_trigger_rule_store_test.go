@@ -29,7 +29,7 @@ func testTriggerRule(id, repository string, createdAt time.Time) protocol.GitHub
 			},
 		},
 		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce,
-		Priority:          protocol.GitHubPriorityHigh,
+		Priority:          protocol.GitHubPriority1,
 		CreatedAt:         createdAt,
 		UpdatedAt:         createdAt,
 	}
@@ -73,7 +73,7 @@ func TestTriggerRuleCreateGetList(t *testing.T) {
 	if got.ConcurrencyPolicy != protocol.GitHubConcurrencyCoalesce {
 		t.Fatalf("concurrencyPolicy = %v", got.ConcurrencyPolicy)
 	}
-	if got.Priority != protocol.GitHubPriorityHigh {
+	if got.Priority != protocol.GitHubPriority1 {
 		t.Fatalf("priority = %v, want high", got.Priority)
 	}
 

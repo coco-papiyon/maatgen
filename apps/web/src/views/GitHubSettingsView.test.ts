@@ -87,7 +87,7 @@ describe('GitHubSettingsView', () => {
 
     const rules = await api.listGitHubTriggerRules(DEMO_WORKSPACE);
     const rule = rules.find((candidate) => candidate.name === '新しいルール');
-    expect(rule?.priority).toBe('medium');
+    expect(rule?.priority).toBe('3');
   });
 
   it('allows changing the local path when editing a trigger rule', async () => {
@@ -104,7 +104,7 @@ describe('GitHubSettingsView', () => {
       provider: 'codex',
       autoApprove: false,
       concurrencyPolicy: 'coalesce',
-      priority: 'medium',
+      priority: '3',
     });
     const { wrapper } = await mountSettings(api);
 
@@ -125,13 +125,13 @@ describe('GitHubSettingsView', () => {
     await wrapper.get('.github-rule-form select').setValue(DEMO_WORKSPACE);
     await wrapper.get('.github-rule-form input:not([disabled])').setValue('優先度ルール');
     await wrapper.get('.github-rule-form textarea').setValue('Design {{.Title}}');
-    const prioritySelect = wrapper.findAll('.github-rule-form select').find((select) => select.text().includes('高'));
-    await prioritySelect!.setValue('high');
+    const prioritySelect = wrapper.findAll('.github-rule-form select').find((select) => select.findAll('option').map((option) => option.text()).join(',') === '1,2,3,4,5');
+    await prioritySelect!.setValue('2');
     await wrapper.get('.github-rule-form').trigger('submit');
     await flushPromises();
 
     const rule = (await api.listGitHubTriggerRules(DEMO_WORKSPACE)).find((candidate) => candidate.name === '優先度ルール');
-    expect(rule?.priority).toBe('high');
+    expect(rule?.priority).toBe('2');
   });
 
   it('opens rule creation in a dialog and saves assignee and PR reviewer filters', async () => {
@@ -229,7 +229,7 @@ describe('GitHubSettingsView', () => {
       reasoningEffort: 'ultra-legacy',
       autoApprove: false,
       concurrencyPolicy: 'coalesce',
-      priority: 'medium',
+      priority: '3',
     });
     const { wrapper } = await mountSettings(api);
 

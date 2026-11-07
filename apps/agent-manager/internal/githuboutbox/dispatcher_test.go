@@ -540,11 +540,11 @@ func TestSortJobsByPriorityDispatchesHighBeforeLowRegardlessOfDetectionOrder(t *
 	store.addMonitor(testMonitor("/repo"))
 
 	highRule := testRule("rule-high", "/repo", protocol.GitHubConcurrencyCoalesce)
-	highRule.Priority = protocol.GitHubPriorityHigh
+	highRule.Priority = protocol.GitHubPriority1
 	store.addRule(highRule)
 
 	lowRule := testRule("rule-low", "/repo", protocol.GitHubConcurrencyCoalesce)
-	lowRule.Priority = protocol.GitHubPriorityLow
+	lowRule.Priority = protocol.GitHubPriority5
 	store.addRule(lowRule)
 
 	base := time.Now()
@@ -715,5 +715,25 @@ func TestDispatchQueuedFailsWhenSessionCreationFails(t *testing.T) {
 	got := store.getEvent("event-1")
 	if got.Status != protocol.GitHubMonitorEventFailed {
 		t.Fatalf("event.Status = %v, want failed", got.Status)
+	}
+}
+
+func TestSortJobsAllFivePriorityLevels(t *testing.T) {
+	store := newFakeStore()
+	var events []protocol.GitHubMonitorEvent
+	for i, priority := range []protocol.GitHubJobPriority{"5", "3", "1", "4", "2"} {
+		rule := testRule(string(priority), "/repo", protocol.GitHubConcurrencySkip)
+		rule.Priority = priority
+		store.addRule(rule)
+		event := testEvent("event-"+string(priority), "/repo", rule.ID, protocol.GitHubMonitorEventQueued, time.Now())
+		event.Number = i + 1
+		events = append(events, event)
+	}
+	dispatcher := NewDispatcher(store, &fakeSessions{}, &fakeRuns{})
+	sorted := dispatcher.sortJobsByPriority(context.Background(), events)
+	for i, want := range []string{"1", "2", "3", "4", "5"} {
+		if sorted[i].RuleID == nil || *sorted[i].RuleID != want {
+			t.Fatalf("position %d = %v, want %s", i, sorted[i].RuleID, want)
+		}
 	}
 }

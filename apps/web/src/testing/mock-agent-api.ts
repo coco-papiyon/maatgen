@@ -968,12 +968,12 @@ function mockGitHubTriggerRules(): GitHubTriggerRule[] {
     id: 'mock-rule-1', repository: GITHUB_DEMO_WORKSPACE, name: 'Ready になったら設計する', enabled: true,
     eventKinds: ['issue'], filters: { project: { projectTitle: 'Roadmap', fieldName: 'Status', value: 'Ready' } },
     promptTemplate: 'Design {{.Title}} (#{{.Number}})\n\n{{.ExternalDataBlock}}', includeBody: false, provider: 'codex',
-    autoApprove: false, concurrencyPolicy: 'coalesce', priority: 'medium', createdAt: now, updatedAt: now,
+    autoApprove: false, concurrencyPolicy: 'coalesce', priority: '3', createdAt: now, updatedAt: now,
   }, {
     id: 'mock-rule-2', repository: GITHUB_DEMO_WORKSPACE, name: 'PRが作成されたらレビューする', enabled: true,
     eventKinds: ['pull_request'], filters: { actions: ['opened'] },
     promptTemplate: 'Review pull request #{{.Number}}: {{.Title}}', includeBody: false, provider: 'claude',
-    autoApprove: false, concurrencyPolicy: 'skip', priority: 'high', createdAt: now, updatedAt: now,
+    autoApprove: false, concurrencyPolicy: 'skip', priority: '1', createdAt: now, updatedAt: now,
   }];
 }
 

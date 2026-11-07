@@ -576,3 +576,47 @@ func TestMultiAgentMigrationPreservesCodexSessions(t *testing.T) {
 		t.Fatalf("events = %#v, err = %v", events, err)
 	}
 }
+
+func TestPriorityMigrationPreservesExistingSettings(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.Exec("CREATE TABLE github_trigger_rules (id TEXT PRIMARY KEY, name TEXT, priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high','medium','low'))); INSERT INTO github_trigger_rules VALUES ('a','A','high'),('b','B','medium'),('c','C','low')"); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := migrationsFS.ReadFile("migrations/023_github_priority_five_levels.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"a": "1", "b": "3", "c": "5"} {
+		var got, name string
+		if err = db.QueryRow("SELECT priority, name FROM github_trigger_rules WHERE id = ?", id).Scan(&got, &name); err != nil {
+			t.Fatal(err)
+		}
+		if got != want || name == "" {
+			t.Fatalf("%s priority=%s name=%s", id, got, name)
+		}
+	}
+	for _, priority := range []string{"1", "2", "3", "4", "5"} {
+		if _, err = db.Exec("INSERT INTO github_trigger_rules(id, priority) VALUES (?, ?)", "new-"+priority, priority); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, priority := range []string{"0", "6", "high", "medium", "low"} {
+		if _, err = db.Exec("INSERT INTO github_trigger_rules(id, priority) VALUES (?, ?)", "invalid-"+priority, priority); err == nil {
+			t.Fatalf("accepted %s", priority)
+		}
+	}
+	if _, err = db.Exec("INSERT INTO github_trigger_rules(id) VALUES ('default')"); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err = db.QueryRow("SELECT priority FROM github_trigger_rules WHERE id = 'default'").Scan(&got); err != nil || got != "3" {
+		t.Fatalf("default=%s err=%v", got, err)
+	}
+}

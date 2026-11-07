@@ -99,7 +99,7 @@ export type WsTicketResponse = GeneratedWsTicketResponse;
 export type GitHubItemKind = 'issue' | 'pull_request';
 export type GitHubItemState = 'open' | 'closed';
 export type GitHubConcurrencyPolicy = 'skip' | 'coalesce';
-export type GitHubJobPriority = 'high' | 'medium' | 'low';
+export type GitHubJobPriority = '1' | '2' | '3' | '4' | '5';
 export type GitHubMonitorEventStatus =
   | 'detected'
   | 'matched'
