@@ -674,17 +674,20 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
         button.addEventListener('click', () => {
           if (!pendingApprovalId) return;
           const decision = button.dataset.approvalDecision;
+          const requiresRule = ['allow_session', 'allow_permanent'].includes(decision);
           let ruleArgv;
-          try {
-            ruleArgv = parseApprovalRule(approvalRule.value);
-          } catch (error) {
-            managerError.textContent = error instanceof Error ? error.message : String(error);
-            managerError.hidden = false;
-            return;
+          if (requiresRule) {
+            try {
+              ruleArgv = parseApprovalRule(approvalRule.value);
+            } catch (error) {
+              managerError.textContent = error instanceof Error ? error.message : String(error);
+              managerError.hidden = false;
+              return;
+            }
           }
           vscode.postMessage({
             type: 'approval.decide', approvalId: pendingApprovalId, decision,
-            ...(['allow_session', 'allow_permanent'].includes(decision) ? { ruleArgv } : {}),
+            ...(requiresRule ? { ruleArgv } : {}),
           });
         });
       });

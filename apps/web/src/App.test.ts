@@ -273,6 +273,49 @@ describe('App with MockAgentApi', () => {
     expect(wrapper.find('.approval-dialog').exists()).toBe(false);
   });
 
+  it('allows or denies a complex raw command without parsing an unused approval rule', async () => {
+    for (const decision of ['allow_once', 'deny'] as const) {
+      class RawCommandApprovalApi extends MockAgentApi {
+        submitted?: ApprovalDecisionRequest;
+        approval: CommandApproval = {
+          id: `approval-${decision}`, sessionId: 'mock-success', runId: 'run-1', providerRequestId: 'provider-raw',
+          command: '"C:\\Program Files\\PowerShell\\7\\pwsh.exe"\n-Command \'$ErrorActionPreference = "Stop"\'',
+          shell: 'powershell', workingDirectory: 'C:/demo/success',
+          segments: [{
+            index: 0,
+            command: '"C:\\Program Files\\PowerShell\\7\\pwsh.exe"\n-Command \'$ErrorActionPreference = "Stop"\'',
+            argv: [],
+            allowed: false,
+          }],
+          status: 'pending', factors: [], createdAt: '2026-11-06T00:00:00Z',
+        };
+
+        override async listApprovals(id: string) {
+          return id === this.approval.sessionId && this.approval.status === 'pending' ? [this.approval] : [];
+        }
+
+        override async decideApproval(_sessionId: string, _approvalId: string, request: ApprovalDecisionRequest) {
+          this.submitted = request;
+          this.approval = { ...this.approval, status: decision === 'deny' ? 'denied' : 'approved', decision };
+          return this.approval;
+        }
+      }
+
+      wrapper?.unmount();
+      const api = new RawCommandApprovalApi();
+      wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
+      await flushPromises();
+
+      expect(wrapper.find<HTMLInputElement>('.approval-rule input').element.value).toContain('C:\\Program Files');
+      const buttonIndex = decision === 'deny' ? 0 : 1;
+      await wrapper.findAll('.approval-actions button')[buttonIndex]!.trigger('click');
+      await flushPromises();
+
+      expect(api.submitted).toEqual({ decision });
+      expect(wrapper.find('.approval-dialog').exists()).toBe(false);
+    }
+  });
+
   it('shows the error inside the approval dialog when a rule is rejected, instead of hiding it behind the modal', async () => {
     class RejectingApprovalApi extends MockAgentApi {
       approval: CommandApproval = {
