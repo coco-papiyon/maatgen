@@ -934,6 +934,7 @@ docs/decisions/
 - [x] 既存のWebSocket／yamuxセッションを双方向化し、`/api/upstream/*`から上位Agent ManagerのAPI／WebSocketへ転送
 - [x] 右上のサーバ選択プルダウンからノード追加操作と追加ダイアログを削除
 
+- [x] Issue #46: ジョブ優先度を1〜5（1が最高、既定値3）へ変更。既存設定を高→1・中→3・低→5へ移行し、Web／VS Code共通画面とdispatch順序を更新。
 - Issue #47: PowerShell の静的な環境変数代入と変数名を固定した値ワイルドカード承認に対応。session/permanent の保存と再利用（二重引用符の空白入りパスを含む）、引用内の空白・タブの保持、動的構文・別変数・後続コマンドの拒否を回帰テストする。Windows CI の Run キューテストは running 状態だけでなくアダプター呼び出しも待って検証する。
 
 ### Issue #44：監視ルールのコピー

@@ -99,7 +99,7 @@ func testDispatcherEndToEnd(t *testing.T, resumeScenario string) {
 		PromptTemplate:    "Design {{.Title}} (#{{.Number}})",
 		Provider:          protocol.AgentCodex,
 		ConcurrencyPolicy: protocol.GitHubConcurrencyCoalesce,
-		Priority:          protocol.GitHubPriorityMedium,
+		Priority:          protocol.GitHubPriority3,
 		CreatedAt:         time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	if err := store.CreateTriggerRule(ctx, rule); err != nil {

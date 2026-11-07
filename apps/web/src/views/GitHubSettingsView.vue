@@ -246,7 +246,7 @@ function blankRuleForm(): RuleForm {
   return {
     filters: {},
     id: '', repository, name: '', enabled: true, eventKinds: ['issue'], promptTemplate: '', includeBody: false,
-    provider: providers.value[0]?.id ?? 'codex', model: '', reasoningEffort: '', autoApprove: false, concurrencyPolicy: 'coalesce', priority: 'medium',
+    provider: providers.value[0]?.id ?? 'codex', model: '', reasoningEffort: '', autoApprove: false, concurrencyPolicy: 'coalesce', priority: '3',
     labels: '', assignees: '', reviewers: '', conflicting: '', projectTitle: repositoryProjectName(repository), projectField: '', projectValue: '',
   };
 }
@@ -721,11 +721,9 @@ watch(selectedNodeId, () => {
                 <option value="skip">skip（今回はスキップ）</option>
               </select>
             </label>
-            <label>優先度
+            <label>優先度（1が最高）
               <select v-model="editingRule.priority">
-                <option value="high">高</option>
-                <option value="medium">中</option>
-                <option value="low">低</option>
+                <option v-for="priority in ['1', '2', '3', '4', '5']" :key="priority" :value="priority">{{ priority }}</option>
               </select>
             </label>
           </div>

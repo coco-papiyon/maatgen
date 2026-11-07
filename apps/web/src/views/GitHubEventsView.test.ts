@@ -42,8 +42,8 @@ describe('GitHubEventsView', () => {
   it("shows each event's rule priority", async () => {
     const { wrapper } = await mountEvents();
     const rows = wrapper.findAll('.github-table tbody tr');
-    expect(rows.some((row) => row.text().includes('中'))).toBe(true);
-    expect(rows.some((row) => row.text().includes('高'))).toBe(true);
+    expect(rows.some((row) => row.findAll('td')[7]?.text() === '3')).toBe(true);
+    expect(rows.some((row) => row.findAll('td')[7]?.text() === '1')).toBe(true);
   });
 
   it("shows each event's repository and rule provider, independent of the top-right repository selector", async () => {

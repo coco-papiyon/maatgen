@@ -205,11 +205,13 @@ func (d *Dispatcher) sortJobsByProviderAvailability(ctx context.Context, jobs []
 
 // jobPriorityRank orders protocol.GitHubJobPriority values from most to
 // least urgent. An unrecognized or empty priority (e.g. a job whose rule was
-// deleted) ranks as medium, matching normalizeJobPriority's default.
+// deleted) ranks as 3, matching normalizeJobPriority's default.
 var jobPriorityRank = map[protocol.GitHubJobPriority]int{
-	protocol.GitHubPriorityHigh:   0,
-	protocol.GitHubPriorityMedium: 1,
-	protocol.GitHubPriorityLow:    2,
+	protocol.GitHubPriority1: 0,
+	protocol.GitHubPriority2: 1,
+	protocol.GitHubPriority3: 2,
+	protocol.GitHubPriority4: 3,
+	protocol.GitHubPriority5: 4,
 }
 
 // sortJobsByPriority reorders jobs so that jobs matched by a higher-priority
@@ -223,7 +225,7 @@ func (d *Dispatcher) sortJobsByPriority(ctx context.Context, jobs []protocol.Git
 	}
 	jobsWithPriority := make([]jobWithPriority, len(jobs))
 	for i, job := range jobs {
-		rank := jobPriorityRank[protocol.GitHubPriorityMedium]
+		rank := jobPriorityRank[protocol.GitHubPriority3]
 		if job.RuleID != nil {
 			if rule, err := d.store.GetTriggerRule(ctx, *job.RuleID); err == nil {
 				if r, ok := jobPriorityRank[rule.Priority]; ok {
@@ -253,8 +255,8 @@ func (d *Dispatcher) sortJobsByPriority(ctx context.Context, jobs []protocol.Git
 // Session exists from a previous, interrupted attempt; start its Run), in
 // each case honoring the matched rule's concurrency policy when the
 // repository's execution lock is held by another Run.
-// Jobs are ordered by the matched rule's priority (high before medium before
-// low, ties broken by Issue or Pull Request number), then by provider
+// Jobs are ordered by the matched rule's priority (1 before 2 before 3 before 4 before
+// 5, ties broken by Issue or Pull Request number), then by provider
 // availability: if a provider's quota is exhausted, jobs for other providers
 // in the queue are processed first.
 func (d *Dispatcher) Tick(ctx context.Context) error {

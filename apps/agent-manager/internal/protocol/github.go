@@ -146,13 +146,16 @@ const (
 
 // GitHubJobPriority orders queued jobs within the Outbox dispatcher (see
 // githuboutbox.Dispatcher.Tick): higher-priority jobs are dispatched before
-// lower-priority ones, with FIFO order preserved within the same priority.
+// lower-priority ones (1 is highest, 5 is lowest). Equal priorities use item
+// number order, then preserve detection order.
 type GitHubJobPriority string
 
 const (
-	GitHubPriorityHigh   GitHubJobPriority = "high"
-	GitHubPriorityMedium GitHubJobPriority = "medium"
-	GitHubPriorityLow    GitHubJobPriority = "low"
+	GitHubPriority1 GitHubJobPriority = "1"
+	GitHubPriority2 GitHubJobPriority = "2"
+	GitHubPriority3 GitHubJobPriority = "3"
+	GitHubPriority4 GitHubJobPriority = "4"
+	GitHubPriority5 GitHubJobPriority = "5"
 )
 
 // GitHubProjectFilterCondition matches a GitHubItem whose named Project

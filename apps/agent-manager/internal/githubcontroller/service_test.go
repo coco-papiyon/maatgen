@@ -409,10 +409,25 @@ func TestCreateRuleValidatesTemplateAndProvider(t *testing.T) {
 	if created.ConcurrencyPolicy != protocol.GitHubConcurrencyCoalesce {
 		t.Fatalf("default concurrencyPolicy = %v, want coalesce", created.ConcurrencyPolicy)
 	}
-	if created.Priority != protocol.GitHubPriorityMedium {
-		t.Fatalf("default priority = %v, want medium", created.Priority)
+	if created.Priority != protocol.GitHubPriority3 {
+		t.Fatalf("default priority = %v, want 3", created.Priority)
 	}
 
+	for _, priority := range []protocol.GitHubJobPriority{"1", "2", "3", "4", "5"} {
+		request := base
+		request.Priority = priority
+		created, err := service.CreateRule(ctx, request)
+		if err != nil || created.Priority != priority {
+			t.Fatalf("priority %s: got %s err %v", priority, created.Priority, err)
+		}
+	}
+	for _, priority := range []protocol.GitHubJobPriority{"0", "6", "high", "medium", "low"} {
+		request := base
+		request.Priority = priority
+		if _, err := service.CreateRule(ctx, request); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("accepted %s: %v", priority, err)
+		}
+	}
 	badPriority := base
 	badPriority.Priority = "urgent"
 	if _, err := service.CreateRule(ctx, badPriority); !errors.Is(err, ErrInvalidRequest) {
@@ -420,13 +435,13 @@ func TestCreateRuleValidatesTemplateAndProvider(t *testing.T) {
 	}
 
 	highPriority := base
-	highPriority.Priority = protocol.GitHubPriorityHigh
+	highPriority.Priority = protocol.GitHubPriority1
 	createdHigh, err := service.CreateRule(ctx, highPriority)
 	if err != nil {
 		t.Fatalf("CreateRule with high priority: %v", err)
 	}
-	if createdHigh.Priority != protocol.GitHubPriorityHigh {
-		t.Fatalf("priority = %v, want high", createdHigh.Priority)
+	if createdHigh.Priority != protocol.GitHubPriority1 {
+		t.Fatalf("priority = %v, want 1", createdHigh.Priority)
 	}
 }
 

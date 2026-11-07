@@ -486,7 +486,7 @@ func normalizeConcurrencyPolicy(policy protocol.GitHubConcurrencyPolicy) protoco
 
 func normalizeJobPriority(priority protocol.GitHubJobPriority) protocol.GitHubJobPriority {
 	if priority == "" {
-		return protocol.GitHubPriorityMedium
+		return protocol.GitHubPriority3
 	}
 	return priority
 }
@@ -520,7 +520,7 @@ func validateRuleRequest(request protocol.GitHubTriggerRuleRequest) error {
 		return fmt.Errorf("%w: concurrencyPolicy is invalid", ErrInvalidRequest)
 	}
 	switch request.Priority {
-	case "", protocol.GitHubPriorityHigh, protocol.GitHubPriorityMedium, protocol.GitHubPriorityLow:
+	case "", protocol.GitHubPriority1, protocol.GitHubPriority2, protocol.GitHubPriority3, protocol.GitHubPriority4, protocol.GitHubPriority5:
 	default:
 		return fmt.Errorf("%w: priority is invalid", ErrInvalidRequest)
 	}
