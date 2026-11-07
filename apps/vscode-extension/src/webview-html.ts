@@ -330,6 +330,13 @@ export function renderWebviewHtml(options: WebviewHtmlOptions): string {
           const meta = document.createElement('span');
           meta.textContent = session.agent + ' · ' + session.status + ' · ' + new Date(session.createdAt).toLocaleString();
           button.append(title);
+          if (session.activeRunStatus === 'waiting_for_approval') {
+            const approvalMark = document.createElement('span');
+            approvalMark.className = 'approval-mark';
+            approvalMark.textContent = '承認待ち';
+            approvalMark.title = '承認待ち';
+            button.append(approvalMark);
+          }
           if (session.activeRunStatus === 'running' || session.activeRunStatus === 'queued') {
             runningMark.textContent = session.activeRunStatus === 'queued' ? '待機中' : '実行中';
             runningMark.title = runningMark.textContent;

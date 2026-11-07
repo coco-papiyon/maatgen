@@ -179,6 +179,40 @@ describe('App with MockAgentApi', () => {
     expect(wrapper.find('.running-mark').exists()).toBe(false);
   });
 
+  it('shows approval waiting in session history and clears it when execution resumes or ends', async () => {
+    vi.useFakeTimers();
+    localStorage.removeItem('maatgen.sessionReadSequences');
+    class ApprovalSessionApi extends MockAgentApi {
+      status: 'waiting_for_approval' | 'running' | undefined = 'waiting_for_approval';
+      override async listSessions() {
+        const page = await super.listSessions();
+        return { ...page, sessions: page.sessions.map((session, index) => ({
+          ...session, ...(index === 1 && this.status ? { activeRunStatus: this.status } : {}),
+        })) };
+      }
+    }
+    const api = new ApprovalSessionApi();
+    localStorage.setItem('maatgen.showAllServers', '0');
+    wrapper = mount(App, { props: { agentApi: api, eventStreamFactory: passiveEventStream } });
+    await flushPromises();
+    const item = wrapper.findAll('.session-item')[1]!;
+    expect(item.find('.approval-mark').text()).toBe('承認待ち');
+    expect(item.find('.running-mark').exists()).toBe(false);
+    expect(item.find('.unread-mark').exists()).toBe(true);
+
+    api.status = 'running';
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flushPromises();
+    expect(item.find('.approval-mark').exists()).toBe(false);
+    expect(item.find('.running-mark').text()).toBe('実行中');
+
+    api.status = undefined;
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flushPromises();
+    expect(item.find('.approval-mark').exists()).toBe(false);
+    expect(item.find('.running-mark').exists()).toBe(false);
+  });
+
   it('shows the remaining provider usage percentage', async () => {
     class ProviderUsageApi extends MockAgentApi {
       override async getProviderUsage() {
