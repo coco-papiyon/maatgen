@@ -79,7 +79,7 @@ describe('Shell', () => {
     await textInputs[1]!.setValue('3101');
     await textInputs[2]!.setValue('linux-dev');
     await textInputs[3]!.setValue('Linux dev box');
-    const addButton = wrapper.findAll('button').find((button) => button.text() === '追加')!;
+    const addButton = wrapper.findAll('.github-form-actions button').find((button) => button.text() === '追加')!;
     await addButton.trigger('click');
     await flushPromises();
 
