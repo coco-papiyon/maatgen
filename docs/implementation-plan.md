@@ -933,3 +933,5 @@ docs/decisions/
 - [x] Localは直接接続中の下位ノードとして固定し、Node Nameを別のupstream選択肢として表示
 - [x] 既存のWebSocket／yamuxセッションを双方向化し、`/api/upstream/*`から上位Agent ManagerのAPI／WebSocketへ転送
 - [x] 右上のサーバ選択プルダウンからノード追加操作と追加ダイアログを削除
+
+- [x] Issue #46: ジョブ優先度を1〜5（1が最高、既定値3）へ変更。既存設定を高→1・中→3・低→5へ移行し、Web／VS Code共通画面とdispatch順序を更新。
