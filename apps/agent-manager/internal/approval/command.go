@@ -30,6 +30,11 @@ func parseCommand(command string, depth int) ([]protocol.CommandSegment, error) 
 	segments := make([]protocol.CommandSegment, 0, len(parts))
 	var parseErr error
 	for _, part := range parts {
+		if _, partErr := splitStaticCommand(part); partErr != nil {
+			segments = append(segments, unresolvedSegment(len(segments), part))
+			parseErr = ErrDynamicCommand
+			continue
+		}
 		if assignment := staticEnvironmentAssignment(part); assignment != "" {
 			segments = append(segments, protocol.CommandSegment{Index: len(segments), Command: strings.TrimSpace(part), Argv: []string{assignment}})
 			continue
@@ -113,7 +118,64 @@ func unresolvedSegment(index int, part string) protocol.CommandSegment {
 	return protocol.CommandSegment{Index: index, Command: strings.TrimSpace(part), Argv: []string{}}
 }
 
+// Split only at top-level boundaries. Unsupported syntax stays together as an
+// unresolved segment, without concealing the commands before and after it.
 func splitCommand(command string) ([]string, error) {
+	var parts []string
+	runes := []rune(command)
+	start, quote := 0, rune(0)
+	var stack []rune
+	for i := 0; i < len(runes); i++ {
+		c := runes[i]
+		if (c == '\\' && quote != '\'' && i+1 < len(runes) && shellEscapable(runes[i+1])) || (c == '`' && quote != '\'') {
+			i++
+			if i >= len(runes) {
+				return nil, ErrDynamicCommand
+			}
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		switch c {
+		case '(', '{':
+			stack = append(stack, c)
+		case ')', '}':
+			if len(stack) == 0 || (c == ')' && stack[len(stack)-1] != '(') || (c == '}' && stack[len(stack)-1] != '{') {
+				return nil, ErrDynamicCommand
+			}
+			stack = stack[:len(stack)-1]
+		}
+		if len(stack) != 0 || !strings.ContainsRune("|&;\n", c) {
+			continue
+		}
+		part := strings.TrimSpace(string(runes[start:i]))
+		if part == "" {
+			return nil, ErrDynamicCommand
+		}
+		parts = append(parts, part)
+		if (c == '|' || c == '&') && i+1 < len(runes) && runes[i+1] == c {
+			i++
+		}
+		start = i + 1
+	}
+	if quote != 0 || len(stack) != 0 {
+		return nil, ErrDynamicCommand
+	}
+	if last := strings.TrimSpace(string(runes[start:])); last != "" {
+		parts = append(parts, last)
+	}
+	return parts, nil
+}
+
+func splitStaticCommand(command string) ([]string, error) {
 	var parts []string
 	start := 0
 	quote := rune(0)
