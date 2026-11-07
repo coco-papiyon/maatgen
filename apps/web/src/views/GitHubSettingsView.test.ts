@@ -24,6 +24,39 @@ async function mountSettings(api = new MockAgentApi()) {
 }
 
 describe('GitHubSettingsView', () => {
+  it('copies all rule settings into an editable new rule without changing the source, and supports cancellation', async () => {
+    const api = new MockAgentApi();
+    for (const rule of await api.listGitHubTriggerRules()) await api.deleteGitHubTriggerRule(rule.id);
+    const source = await api.createGitHubTriggerRule({
+      workspace: DEMO_WORKSPACE, name: 'コピー元', enabled: false,
+      eventKinds: ['issue', 'pull_request'],
+      filters: { labels: ['bug', 'ready'], assignees: ['alice'], reviewers: ['bob'], conflicting: false,
+        project: { projectTitle: 'Custom project', fieldName: 'Status', value: 'Ready' } },
+      promptTemplate: 'Review {{.Title}}', includeBody: true, provider: 'codex',
+      model: 'saved-custom-model', reasoningEffort: 'saved-effort', autoApprove: true,
+      concurrencyPolicy: 'skip', priority: 'high',
+    });
+    const { wrapper } = await mountSettings(api);
+    const copyButton = () => wrapper.findAll('.github-rule button').find((button) => button.text() === 'コピー')!;
+    await copyButton().trigger('click');
+    expect(wrapper.get('[role="dialog"] h2').text()).toBe('監視ルールを作成');
+    const name = wrapper.get('.github-rule-form input');
+    expect((name.element as HTMLInputElement).value).toBe('コピー元 (コピー)');
+    await name.setValue('コピー先');
+    await wrapper.get('input[value="issue"]').setValue(false);
+    await wrapper.get('.github-rule-form').trigger('submit');
+    await flushPromises();
+    const rules = await api.listGitHubTriggerRules();
+    expect(rules).toHaveLength(2);
+    expect(rules.find((rule) => rule.id === source.id)).toEqual(source);
+    const copied = rules.find((rule) => rule.id !== source.id)!;
+    expect(copied).toEqual({ ...source, id: copied.id, name: 'コピー先', eventKinds: ['pull_request'],
+      createdAt: copied.createdAt, updatedAt: copied.updatedAt });
+    await copyButton().trigger('click');
+    await wrapper.get('[aria-label="閉じる"]').trigger('click');
+    expect(await api.listGitHubTriggerRules()).toEqual(rules);
+  });
+
   it('lists every registered repository in a table, keyed by local path', async () => {
     const { wrapper } = await mountSettings();
     const row = wrapper.get('.github-table tbody tr');

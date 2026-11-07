@@ -377,11 +377,11 @@ function startCreateRule() {
   focusRuleDialog();
 }
 
-function startEditRule(rule: GitHubTriggerRule) {
+function startEditRule(rule: GitHubTriggerRule, copy = false) {
   resetPromptPreview();
   resetRuleTest();
   editingRule.value = {
-    id: rule.id, repository: rule.repository, name: rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
+    id: copy ? '' : rule.id, repository: rule.repository, name: copy ? `${rule.name} (コピー)` : rule.name, enabled: rule.enabled, eventKinds: [...rule.eventKinds],
     promptTemplate: rule.promptTemplate, includeBody: rule.includeBody, provider: rule.provider,
     model: rule.model ?? '', reasoningEffort: rule.reasoningEffort ?? '', autoApprove: rule.autoApprove, concurrencyPolicy: rule.concurrencyPolicy,
     priority: rule.priority,
@@ -567,6 +567,7 @@ watch(selectedNodeId, () => {
           </div>
           <div class="github-form-actions">
             <button type="button" @click="startEditRule(rule)">編集</button>
+            <button type="button" @click="startEditRule(rule, true)">コピー</button>
             <button type="button" class="github-danger" @click="deleteRule(rule)">削除</button>
           </div>
         </li>
