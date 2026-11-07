@@ -1085,7 +1085,8 @@ src/auth.test.ts
 
 ### サーバ選択
 
-Web版のサーバ選択プルダウンは共通ナビゲーション右上のリポジトリ選択プルダウン直後に配置し、Session以外の画面でも常時表示する。右上で選択したノードIDはSession一覧のフィルタ条件として共通状態に保持し、Session画面は変更を検知してAPI base path、Session一覧、Providerを選択先へ切り替える。Session作成フォームにはProviderの直下に独立したHostnameプルダウンを表示し、新規Sessionの作成先、作成先で利用可能なProvider、およびWorkspaceのデフォルト値だけを切り替える。Hostnameを変更しても表示中のSession一覧と右上のサーバ選択は変更しない。「全サーバ」は保存設定がない場合にデフォルトで有効とし、有効な間は右上の選択にかかわらず接続可能な全サーバのSessionを一覧表示する。ユーザーが無効にした設定は次回表示にも保持する。Issue／PRの一覧・詳細、Job、GitHub監視設定も右上の選択変更を検知し、選択先サーバーのリポジトリ、ルール、イベント、Providerを再取得する。画面遷移とJob／Issue／PRからSessionへのリンクは`node` queryを保持し、再読み込み後も同じサーバーを選択する。
+Web版のサーバ選択プルダウンは共通ナビゲーション右上のリポジトリ選択プルダウン直後に配置し、Session以外の画面でも常時表示する。右上で選択したノードIDはSession一覧のフィルタ条件として共通状態に保持し、Session画面は変更を検知してAPI base path、Session一覧、Providerを選択先へ切り替える。Session作成フォームにはProviderの直下に独立したHostnameプルダウンを表示し、新規Sessionの作成先、作成先で利用可能なProvider、およびWorkspaceのデフォルト値だけを切り替える。Hostnameを変更しても表示中のSession一覧と右上のサーバ選択は変更しない。「全サーバ」は保存設定がない場合にデフォルトで有効とし、有効な間は右上の選択にかかわらず接続可能な全サーバのSessionを一覧表示する。ユーザーが無効にした設定は次回表示にも保持する。Issue／PRの一覧・詳細、Job、GitHub監視設定も右上の選択変更を検知し、選択先サーバーのリポジトリ、ルール、イベント、Providerを再取得する。画面遷移とJob／Issue／PRからSessionへのリンクは
+ode` queryを保持し、再読み込み後も同じサーバーを選択する。
 
 `Local`はブラウザが直接開いているAgent Manager（下位ノード）を常に表し、名称や接続先を変更しない。サーバ設定画面で追加した上位ノードはそれぞれ`upstream:{id}`選択肢として追加される（ADR-009 Decision 3.2、複数の上位ノードを同時設定可能）。いずれかを選択すると、対応する上位ノードとの既存のWebSocket／yamux接続を双方向に使い、下位ノードの`/api/upstreams/{id}/*`から上位サーバの通常API／WebSocketへ透過的に転送する。Node Nameと同名の過去のpending表示は重複表示しない。
 
@@ -1101,7 +1102,8 @@ coalesceで同一Itemの最新ジョブを選ぶときとキュー上限を整�
 
 Web版のGitHub監視設定では、監視ルールの作成・編集フォームをルール一覧上のポップアップとして表示する。Issue／PRには担当者loginを条件指定でき、PRには加えてレビュー依頼中ユーザーのloginをレビューア条件として指定できる。レビュー依頼の変更はGitHub itemの正規化状態と変更検知hashに含める。ポーラーはOpenのIssue／PRだけを取得し、リポジトリの全クローズ履歴を毎回走査しない。VS Code版は監視ルール編集画面を持たず、自動実行されたSessionの参照のみ提供する。
 
-定期ポーリングはAgent Manager起動中にSchedulerが30秒間隔で期限到来を確認し、各monitorの`pollIntervalSeconds`と`nextSyncAt`に従って実行する。Schedulerはポーリング開始・完了・失敗を、GitHub API adapterはIssue／PR一覧取得の開始・完了・失敗と取得件数を構造化ログへ出力する。認証tokenやIssue／PR本文はログへ出力しない。
+定期ポーリングはAgent Manager起動中にSchedulerが30秒間隔で期限到来を確認し、各monitorの`pollIntervalSeconds`と
+extSyncAt`に従って実行する。Schedulerはポーリング開始・完了・失敗を、GitHub API adapterはIssue／PR一覧取得の開始・完了・失敗と取得件数を構造化ログへ出力する。認証tokenやIssue／PR本文はログへ出力しない。
 
 観測済みIssue／PRの後から監視ルールを作成・更新した場合は、itemごとに永続化した評価済みルール版とルールの`updatedAt`を比較し、次回ポーリングで現在状態を評価する。新規ルールは既存itemへ適用できるが、同じルールとitem番号ですでに自動イベントがあれば、ルール更新やaction変更をまたいで再発火しない。delivery keyはrepository・item kind・number・rule idで構成する。イベント履歴の`detected`、`matched`、`queued`は「スキップ」操作で`skipped`へ遷移させ、履歴を保持したままdispatcherの実行対象から除外できる。
 
@@ -1554,3 +1556,5 @@ Session
 ```
 
 この構成により、VS Code 内の Coding Agent UI、ブラウザ単体での開発環境、複数 Coding Agent の統一管理、操作ログ・Token 利用量・ソース変更履歴の記録を一つのアーキテクチャで実現する。
+
+PowerShell の静的な環境変数代入（単一引用符または補間のない二重引用符の値）は独立した承認 segment として扱う。変数名と値を `$env:NAME=value` に正規化し、`$env:NAME=*` は同名変数の値だけに一致する。式・補間は自動承認せず、後続コマンドには個別のルールを要求する。
