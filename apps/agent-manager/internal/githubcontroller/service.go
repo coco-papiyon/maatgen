@@ -567,7 +567,8 @@ func (s *Service) CloseEvent(ctx context.Context, eventID string) (protocol.GitH
 	return s.store.GetMonitorEvent(ctx, eventID)
 }
 
-// ReplayEvent re-executes a past monitor event as a new Outbox delivery
+// ReplayEvent resumes an unstarted skipped event or re-executes a past event
+// as a new Outbox delivery
 // (ADR-007 section 6's "このイベントを実行"), without touching the
 // original event's dedupe key.
 func (s *Service) ReplayEvent(ctx context.Context, eventID string) (protocol.GitHubMonitorEvent, error) {

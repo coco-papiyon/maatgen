@@ -263,8 +263,8 @@ func TestCreateReplayEventPreservesOriginalDeliveryKey(t *testing.T) {
 	if inserted, err := store.InsertMonitorEvent(ctx, original); err != nil || !inserted {
 		t.Fatalf("insert original: inserted=%v err=%v", inserted, err)
 	}
-	if err := store.SkipMonitorEvent(ctx, original.ID, "skipped by policy", createdAt.Add(time.Minute)); err != nil {
-		t.Fatalf("skip original: %v", err)
+	if err := store.FailMonitorEvent(ctx, original.ID, "execution failed", createdAt.Add(time.Minute)); err != nil {
+		t.Fatalf("fail original: %v", err)
 	}
 
 	replayedAt := createdAt.Add(time.Hour)
@@ -294,12 +294,43 @@ func TestCreateReplayEventPreservesOriginalDeliveryKey(t *testing.T) {
 	if originalAfter.DeliveryKey == nil || *originalAfter.DeliveryKey != *original.DeliveryKey {
 		t.Fatalf("original delivery key changed: %#v", originalAfter.DeliveryKey)
 	}
-	if originalAfter.Status != protocol.GitHubMonitorEventSkipped {
-		t.Fatalf("original status changed to %v, want skipped", originalAfter.Status)
+	if originalAfter.Status != protocol.GitHubMonitorEventFailed {
+		t.Fatalf("original status changed to %v, want failed", originalAfter.Status)
 	}
 
 	if _, err := store.CreateReplayEvent(ctx, original.ID, "event-1-replay-2", replayedAt.Add(time.Minute)); err != nil {
 		t.Fatalf("create second replay: %v", err)
+	}
+}
+
+func TestReplaySkippedJobResumesSameRow(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	now := time.Now().UTC()
+	monitor := newTestRepositoryForEvents(t, store, now)
+	original := testMonitorEvent("resume-job", monitor.Repository, now)
+	if _, err := store.InsertMonitorEvent(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SkipMonitorEvent(ctx, original.ID, "manual skip", now); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := store.CreateReplayEvent(ctx, original.ID, "unused-new-id", now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.ID != original.ID || resumed.Status != protocol.GitHubMonitorEventQueued || resumed.SkipReason != nil || !resumed.CreatedAt.Equal(original.CreatedAt) {
+		t.Fatalf("unexpected resumed job: %#v", resumed)
+	}
+	if resumed.DeliveryKey == nil || *resumed.DeliveryKey != *original.DeliveryKey {
+		t.Fatal("delivery key changed")
+	}
+	if _, err := store.CreateReplayEvent(ctx, original.ID, "duplicate", now); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("repeat replay: %v", err)
+	}
+	jobs, err := store.ListMonitorEvents(ctx, monitor.Repository, 10, "")
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("jobs=%#v err=%v", jobs, err)
 	}
 }
 

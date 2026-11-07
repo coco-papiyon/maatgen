@@ -605,6 +605,15 @@ export class MockAgentApi implements AgentApi {
   async replayGitHubMonitorEvent(eventId: string): Promise<GitHubMonitorEvent> {
     const original = this.githubEvents.get(eventId);
     if (!original) throw new AgentApiError('monitor event was not found', 404, 'not_found');
+    if (!['skipped', 'failed', 'cancelled'].includes(original.status)) {
+      throw new AgentApiError('monitor event is no longer replayable', 409, 'conflict');
+    }
+    if (original.status === 'skipped' && !original.sessionId && !original.runId) {
+      const { skipReason: _skipReason, lastError: _lastError, ...rest } = original;
+      const resumed: GitHubMonitorEvent = { ...rest, status: 'queued', updatedAt: now };
+      this.githubEvents.set(eventId, resumed);
+      return clone(resumed);
+    }
     const { deliveryKey: _deliveryKey, sessionId: _sessionId, runId: _runId, ...rest } = original;
     const id = `${eventId}-replay-${this.githubEvents.size + 1}`;
     const replay: GitHubMonitorEvent = { ...rest, id, status: 'queued', replayOfEventId: eventId, createdAt: now, updatedAt: now };
