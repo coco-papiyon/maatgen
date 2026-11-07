@@ -1459,7 +1459,8 @@ watch([usageSummaryGranularity, usageSummaryProvider, usageSummaryModel], () => 
           :title="item.session.workspace"
         >
           <span class="session-title">{{ item.session.firstPrompt ?? shortPath(item.session.workspace) }}</span>
-          <span v-if="item.session.activeRunStatus === 'running'" class="running-mark" title="実行中">実行中</span>
+          <span v-if="item.session.activeRunStatus === 'waiting_for_approval'" class="approval-mark" title="承認待ち">承認待ち</span>
+          <span v-else-if="item.session.activeRunStatus === 'running'" class="running-mark" title="実行中">実行中</span>
           <span v-else-if="item.session.activeRunStatus === 'queued'" class="running-mark" title="待機中">待機中</span>
           <span v-if="unreadSessionIDs.has(item.session.id)" class="unread-mark" title="未読">未読</span>
           <span class="session-meta">

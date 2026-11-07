@@ -64,6 +64,9 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain("session.agent + ' · ' + session.status");
     expect(html).toContain("session.activeRunStatus === 'running' || session.activeRunStatus === 'queued'");
     expect(html).toContain("session.activeRunStatus === 'queued' ? '待機中' : '実行中'");
+    expect(html).toContain("session.activeRunStatus === 'waiting_for_approval'");
+    expect(html).toContain("approvalMark.className = 'approval-mark'");
+    expect(html).toContain("approvalMark.textContent = '承認待ち'");
     expect(html).toContain("(provider?.label || 'Agent') + 'に指示する…'");
     expect(html).toContain('id="approval-card"');
     expect(html).toContain('data-approval-decision="allow_permanent"');
