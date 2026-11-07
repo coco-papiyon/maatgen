@@ -14,6 +14,7 @@ import (
 // exists so tests can substitute a fake instead of hitting a real (or even
 // fake HTTP) GitHub API.
 type GitHubClient interface {
+	GetIssue(ctx context.Context, owner, repo string, number int) (protocol.GitHubItem, error)
 	ListIssues(ctx context.Context, owner, repo string, opts githubapi.ListOptions) ([]protocol.GitHubItem, error)
 	ListPullRequests(ctx context.Context, owner, repo string, opts githubapi.ListOptions) ([]protocol.GitHubItem, error)
 	// GetPullRequest fetches a single Pull Request. Unlike ListPullRequests,
@@ -30,6 +31,7 @@ type ClientFactory func(host string) (GitHubClient, error)
 // PollerStore is the persistence dependency Poller needs beyond what
 // Evaluator already requires.
 type PollerStore interface {
+	ListMonitorEvents(ctx context.Context, repository string, limit int, filter string) ([]protocol.GitHubMonitorEvent, error)
 	GetRepositoryMonitor(ctx context.Context, repository string) (protocol.GitHubRepositoryMonitor, error)
 	UpdateRepositoryMonitorSyncState(ctx context.Context, repository string, lastSyncedAt, nextSyncAt time.Time, lastError *string, updatedAt time.Time) error
 	// ApplyRemoteChange atomically updates the monitor's target, clears its
@@ -74,6 +76,12 @@ type Poller struct {
 	clients        ClientFactory
 	remoteResolver RemoteResolveFunc
 	now            func() time.Time
+	closeEvent     func(context.Context, string) (protocol.GitHubMonitorEvent, error)
+}
+
+// SetEventCloser wires the shared Job/Session close operation before polling starts.
+func (p *Poller) SetEventCloser(closeEvent func(context.Context, string) (protocol.GitHubMonitorEvent, error)) {
+	p.closeEvent = closeEvent
 }
 
 func NewPoller(store PollerStore, evaluator *Evaluator, clients ClientFactory, remoteResolver RemoteResolveFunc) *Poller {
@@ -102,7 +110,7 @@ func NewPoller(store PollerStore, evaluator *Evaluator, clients ClientFactory, r
 //
 // Only open items are fetched. This bounds polling work to the repository's
 // active Issue/PR set instead of walking its entire closed history on every
-// cycle. Closed transitions are therefore outside polling scope.
+// cycle. Existing Jobs absent from these lists are checked individually for closure.
 func (p *Poller) SyncRepository(ctx context.Context, repository string) (SyncResult, error) {
 	monitor, err := p.store.GetRepositoryMonitor(ctx, repository)
 	if err != nil {
@@ -166,6 +174,11 @@ func (p *Poller) SyncRepository(ctx context.Context, repository string) (SyncRes
 		}
 		result.PullRequestsProcessed++
 		result.EventsMatched += len(events)
+	}
+
+	if err := p.closeJobsForClosedItems(ctx, client, monitor, issues, pulls); err != nil {
+		p.recordFailure(ctx, monitor, err)
+		return result, err
 	}
 
 	now := p.now().UTC()
