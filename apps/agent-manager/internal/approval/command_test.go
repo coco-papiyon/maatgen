@@ -3,6 +3,7 @@ package approval
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -134,6 +135,67 @@ func TestSegmentAllowedMatchesIndividualSegments(t *testing.T) {
 	}
 }
 
+func TestParseCommandKeepsSiblingsOfPowerShellConditional(t *testing.T) {
+	command := `"C:\Program Files\PowerShell\7\pwsh.exe" -Command '$env:GOCACHE = Join-Path $env:TEMP '"'wintable-pr21-gocache'; go vet ./...; if ("'$LASTEXITCODE -eq 0) { pwsh -NoProfile -File build.ps1 }'`
+	segments, err := ParseCommand(command)
+	if !errors.Is(err, ErrDynamicCommand) || len(segments) != 3 {
+		t.Fatalf("segments=%#v err=%v", segments, err)
+	}
+	if !reflect.DeepEqual(segments[1].Argv, []string{"go", "vet", "./..."}) {
+		t.Fatalf("vet segment = %#v", segments[1])
+	}
+	for _, index := range []int{0, 2} {
+		if len(segments[index].Argv) != 0 || segments[index].Command == "" {
+			t.Fatalf("expected unresolved segment: %#v", segments[index])
+		}
+	}
+	if AllSegmentsAllowed(segments, [][]string{{"*"}}) {
+		t.Fatal("unsupported syntax must not match remembered rules")
+	}
+}
+
+func TestParseCommandKeepsUnsupportedGroupsOpaque(t *testing.T) {
+	for _, command := range []string{
+		`git status; if ($ok) { echo one; echo two }; go vet ./...`,
+		`git status; echo $(whoami; hostname); go vet ./...`,
+		`git status; echo value > output.txt; go vet ./...`,
+	} {
+		segments, err := ParseCommand(command)
+		if !errors.Is(err, ErrDynamicCommand) || len(segments) != 3 || len(segments[1].Argv) != 0 || !reflect.DeepEqual(segments[2].Argv, []string{"go", "vet", "./..."}) {
+			t.Fatalf("command=%q segments=%#v err=%v", command, segments, err)
+		}
+	}
+	for _, command := range []string{`git status; if ($ok) { echo one`, `git status; echo $(whoami}`, `git status; echo "unterminated`} {
+		segments, err := ParseCommand(command)
+		if err == nil || AllSegmentsAllowed(segments, [][]string{{"*"}}) {
+			t.Fatalf("malformed command resolved: %q: %#v", command, segments)
+		}
+	}
+}
+
+func TestParseCommandKeepsAPICommandAfterPowerShellLabelExpressions(t *testing.T) {
+	command := `"C:\Program Files\PowerShell\7\pwsh.exe" -Command '$pr = gh pr view 21 --repo coco-papiyon/wintable --json labels | ConvertFrom-Json; $keep = @($pr.labels.name | Where-Object { $_ -notmatch '"'"'^status:'"' -and "'$_ -notmatch '"'"'^(計画済み|実装済み|要修正|実装'"\\d+回目|要修正\\d+回目)"'$'"' }); "'$payload = @{labels = @($keep) + @('"'status:fix-1')} | ConvertTo-Json; [IO.File]::WriteAllText((Join-Path (Get-Location) '.cache/pr21-labels.json'), "'$payload, [Text.UTF8Encoding]::new($false)); gh api repos/coco-papiyon/wintable/issues/21/labels --method PUT --input .cache/pr21-labels.json'`
+	segments, err := ParseCommand(command)
+	if !errors.Is(err, ErrDynamicCommand) {
+		t.Fatalf("error = %v, want ErrDynamicCommand", err)
+	}
+	want := [][]string{
+		{}, {"ConvertFrom-Json"}, {}, {}, {"ConvertTo-Json"}, {},
+		{"gh", "api", "repos/coco-papiyon/wintable/issues/21/labels", "--method", "PUT", "--input", ".cache/pr21-labels.json"},
+	}
+	if len(segments) != len(want) {
+		t.Fatalf("segments = %#v", segments)
+	}
+	for index, argv := range want {
+		if len(argv) != len(segments[index].Argv) || (len(argv) > 0 && !reflect.DeepEqual(segments[index].Argv, argv)) || segments[index].Index != index || segments[index].Command == "" {
+			t.Errorf("segment %d = %#v, want argv %#v", index, segments[index], argv)
+		}
+	}
+	if AllSegmentsAllowed(segments, [][]string{{"*"}}) {
+		t.Fatal("dynamic label expressions must not be auto-approved")
+	}
+}
+
 func TestParseCommandRejectsEncodedPowerShellPayload(t *testing.T) {
 	segments, err := ParseCommand(`pwsh -EncodedCommand Z2V0LWNvbnRlbnQ=`)
 	if !errors.Is(err, ErrDynamicCommand) {
@@ -173,6 +235,25 @@ func TestPowerShellEnvironmentAssignmentRules(t *testing.T) {
 		parsed, err := ParseCommand(command)
 		if err == nil || AllSegmentsAllowed(parsed, [][]string{rule}) {
 			t.Fatalf("dynamic assignment resolved: %s", command)
+		}
+	}
+}
+
+func TestPowerShellLiteralVariableAssignment(t *testing.T) {
+	for _, command := range []string{
+		`$old='C:/data/dev/github/wintable/.cache/issue12/dist/mit-release-acceptance'`,
+		`$old = "C:/Program Files/release"`,
+		`pwsh -Command "$old='C:/release'"`,
+	} {
+		segments, err := ParseCommand(command)
+		if err != nil || len(segments) != 1 || len(segments[0].Argv) != 1 || !strings.HasPrefix(segments[0].Argv[0], "$old=") {
+			t.Fatalf("command=%q segments=%#v err=%v", command, segments, err)
+		}
+	}
+	for _, command := range []string{`$old=$other`, `$old=Get-Location`, `$old="C:/$other"`, `$old='x' + 'y'`, `$old='x'; Remove-Item C:/release`} {
+		segments, err := ParseCommand(command)
+		if err == nil && AllSegmentsAllowed(segments, [][]string{{"$old=*"}}) {
+			t.Fatalf("assignment rule allowed dynamic or sibling command: %q", command)
 		}
 	}
 }

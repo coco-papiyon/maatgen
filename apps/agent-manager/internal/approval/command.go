@@ -30,7 +30,12 @@ func parseCommand(command string, depth int) ([]protocol.CommandSegment, error) 
 	segments := make([]protocol.CommandSegment, 0, len(parts))
 	var parseErr error
 	for _, part := range parts {
-		if assignment := staticEnvironmentAssignment(part); assignment != "" {
+		if _, syntaxErr := splitCommandParts(part, true); syntaxErr != nil {
+			segments = append(segments, unresolvedSegment(len(segments), part))
+			parseErr = ErrDynamicCommand
+			continue
+		}
+		if assignment := staticVariableAssignment(part); assignment != "" {
 			segments = append(segments, protocol.CommandSegment{Index: len(segments), Command: strings.TrimSpace(part), Argv: []string{assignment}})
 			continue
 		}
@@ -114,7 +119,14 @@ func unresolvedSegment(index int, part string) protocol.CommandSegment {
 }
 
 func splitCommand(command string) ([]string, error) {
+	return splitCommandParts(command, false)
+}
+
+// Keep unsupported balanced groups opaque when splitting so they cannot hide
+// adjacent commands. Strict validation still prevents rules from allowing them.
+func splitCommandParts(command string, strict bool) ([]string, error) {
 	var parts []string
+	var groups []rune
 	start := 0
 	quote := rune(0)
 	escaped := false
@@ -140,7 +152,21 @@ func splitCommand(command string) ([]string, error) {
 			continue
 		}
 		if char == '`' || char == '(' || char == ')' || char == '<' || char == '>' || char == '{' || char == '}' || (char == '$' && index+1 < len(runes) && runes[index+1] == '(') {
-			return nil, ErrDynamicCommand
+			if strict || char == '`' {
+				return nil, ErrDynamicCommand
+			}
+		}
+		switch char {
+		case '(', '{':
+			groups = append(groups, char)
+		case ')', '}':
+			if len(groups) == 0 || (char == ')' && groups[len(groups)-1] != '(') || (char == '}' && groups[len(groups)-1] != '{') {
+				return nil, ErrDynamicCommand
+			}
+			groups = groups[:len(groups)-1]
+		}
+		if len(groups) > 0 {
+			continue
 		}
 		separatorLength := 0
 		switch char {
@@ -162,7 +188,7 @@ func splitCommand(command string) ([]string, error) {
 			start = index + 1
 		}
 	}
-	if quote != 0 || escaped {
+	if quote != 0 || escaped || len(groups) > 0 {
 		return nil, ErrDynamicCommand
 	}
 	last := strings.TrimSpace(string(runes[start:]))
@@ -232,12 +258,12 @@ func dynamicExecutable(executable string) bool {
 	return value == "eval" || value == "invoke-expression" || strings.HasPrefix(value, "$")
 }
 
-var environmentAssignment = regexp.MustCompile(`(?i)^\$env:([a-z_][a-z0-9_]*)\s*=\s*(.*)$`)
+var variableAssignment = regexp.MustCompile(`(?i)^(\$(?:env:)?[a-z_][a-z0-9_]*)\s*=\s*(.*)$`)
 
 // Only literal values are eligible for remembered approval. Expressions and
 // interpolation remain unresolved, even when enclosed in double quotes.
-func staticEnvironmentAssignment(command string) string {
-	parts := environmentAssignment.FindStringSubmatch(strings.TrimSpace(command))
+func staticVariableAssignment(command string) string {
+	parts := variableAssignment.FindStringSubmatch(strings.TrimSpace(command))
 	if parts == nil {
 		return ""
 	}
@@ -256,7 +282,11 @@ func staticEnvironmentAssignment(command string) string {
 			return ""
 		}
 	}
-	return "$env:" + strings.ToUpper(parts[1]) + "=" + value
+	name := parts[1]
+	if strings.HasPrefix(strings.ToLower(name), "$env:") {
+		name = "$env:" + strings.ToUpper(name[len("$env:"):])
+	}
+	return name + "=" + value
 }
 
 // SegmentAllowed reports whether segment individually matches one of rules.

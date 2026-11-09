@@ -102,9 +102,11 @@ select.shell-repository { cursor: pointer; }
 .github-modal-header h2 { margin: 0; font-size: 15px; }
 .github-modal-header button { padding: 2px 8px; font-size: 18px; line-height: 1; }
 .github-modal-actions { justify-content: flex-end; padding-top: 10px; border-top: 1px solid var(--line); }
-.github-rule-list { list-style: none; margin: 0; padding: 0; }
-.github-rule { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #263228; }
-.github-rule:first-child { border-top: 0; }
+.github-rule-table-scroll { overflow-x: auto; }
+.github-rule-list { min-width: 1000px; }
+.github-rule-list td { overflow-wrap: anywhere; }
+.github-rule-conditions { min-width: 220px; max-width: 420px; }
+.github-rule-list .github-form-actions { flex-wrap: nowrap; }
 .github-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #263229; color: #aab8ac; font: 10px ui-monospace, monospace; text-transform: uppercase; }
 .github-badge.status-completed { background: #17301f; color: var(--green); }
 .github-badge.status-failed { background: #331a17; color: var(--danger); }

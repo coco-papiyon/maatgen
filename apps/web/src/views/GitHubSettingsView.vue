@@ -90,6 +90,29 @@ function ruleRepositoryLabel(repository: string): string {
   return monitor ? repositoryLabel(monitor) : repository;
 }
 
+const sortedRules = computed(() => [...rules.value].sort((left, right) =>
+  ruleRepositoryLabel(left.repository).localeCompare(ruleRepositoryLabel(right.repository), 'ja')
+  || left.name.localeCompare(right.name, 'ja')
+  || left.repository.localeCompare(right.repository, 'ja')
+  || left.id.localeCompare(right.id),
+));
+
+function ruleConditions(rule: GitHubTriggerRule): string {
+  const conditions: string[] = [];
+  function append(prefix: string, value: unknown) {
+    if (value === undefined || value === null) return;
+    if (Array.isArray(value)) {
+      for (const item of value) append(prefix, item);
+    } else if (typeof value === 'object') {
+      for (const [key, item] of Object.entries(value)) append(`${prefix}.${key}`, item);
+    } else {
+      conditions.push(`${prefix}=${String(value)}`);
+    }
+  }
+  for (const [key, value] of Object.entries(rule.filters)) append(key, value);
+  return conditions.join(', ') || 'なし';
+}
+
 async function toggleEnabled(monitor: GitHubRepositoryMonitor) {
   error.value = '';
   try {
@@ -570,20 +593,31 @@ watch(selectedNodeId, () => {
         <button type="button" :disabled="!repositories.length" @click="startCreateRule">新しいルール</button>
       </div>
 
-      <ul v-if="rules.length" class="github-rule-list">
-        <li v-for="rule in rules" :key="rule.id" class="github-rule">
-          <div>
-            <strong>{{ rule.name }}</strong>
-            <span class="github-meta">{{ ruleRepositoryLabel(rule.repository) }} / {{ rule.eventKinds.join(', ') }} / {{ rule.provider }} / {{ rule.concurrencyPolicy }} / 優先度: {{ priorityLabel(rule.priority) }}</span>
-            <span v-if="!rule.enabled" class="github-badge">無効</span>
-          </div>
-          <div class="github-form-actions">
-            <button type="button" @click="startEditRule(rule)">編集</button>
-            <button type="button" @click="startEditRule(rule, true)">コピー</button>
-            <button type="button" class="github-danger" @click="deleteRule(rule)">削除</button>
-          </div>
-        </li>
-      </ul>
+      <div v-if="rules.length" class="github-rule-table-scroll">
+        <table class="github-table github-rule-list" aria-label="監視ルール">
+          <thead><tr>
+            <th scope="col">リポジトリ</th><th scope="col">ルール名</th><th scope="col">状態</th>
+            <th scope="col">対象</th><th scope="col">条件</th><th scope="col">Provider</th>
+            <th scope="col">モデル</th><th scope="col">同時実行</th><th scope="col">優先度</th><th scope="col">操作</th>
+          </tr></thead>
+          <tbody><tr v-for="rule in sortedRules" :key="rule.id" class="github-rule">
+            <td>{{ ruleRepositoryLabel(rule.repository) }}</td>
+            <td><strong>{{ rule.name }}</strong></td>
+            <td>{{ rule.enabled ? '有効' : '無効' }}</td>
+            <td>{{ rule.eventKinds.join(', ') }}</td>
+            <td class="github-rule-conditions">{{ ruleConditions(rule) }}</td>
+            <td>{{ rule.provider }}</td>
+            <td>{{ rule.model || 'デフォルト' }}</td>
+            <td>{{ rule.concurrencyPolicy }}</td>
+            <td>{{ priorityLabel(rule.priority) }}</td>
+            <td><div class="github-form-actions">
+              <button type="button" @click="startEditRule(rule)">編集</button>
+              <button type="button" @click="startEditRule(rule, true)">コピー</button>
+              <button type="button" class="github-danger" @click="deleteRule(rule)">削除</button>
+            </div></td>
+          </tr></tbody>
+        </table>
+      </div>
       <p v-else class="github-hint">ルールはまだありません。</p>
     </section>
 

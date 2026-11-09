@@ -19,8 +19,9 @@ type fixedReviewer struct {
 	approvedCommands [][]string
 }
 
-func TestServiceRemembersPowerShellEnvironmentAssignment(t *testing.T) {
+func TestServiceRemembersPowerShellLiteralAssignment(t *testing.T) {
 	for _, commands := range [][2]string{
+		{`$old='C:/data/dev/github/wintable/.cache/issue12/dist/mit-release-acceptance'`, `$old='C:/data/dev/github/wintable/.cache/issue12/dist/mit-release-acceptance'`},
 		{`$env:GOCACHE='C:\tmp\first'`, `$env:GOCACHE='C:\tmp\second'`},
 		{`$env:GOCACHE="C:\Program Files\first"`, `$env:GOCACHE="C:\Program Files\second"`},
 	} {
@@ -39,7 +40,14 @@ func TestServiceRemembersPowerShellEnvironmentAssignment(t *testing.T) {
 				}()
 				pending := waitForPendingApproval(t, store)
 				rule := []string{"$env:GOCACHE=*"}
-				if _, err := service.Decide(context.Background(), "session-1", pending.ID, protocol.ApprovalDecisionRequest{Decision: scope, RuleArgv: rule}); err != nil {
+				if strings.HasPrefix(commands[0], "$old=") {
+					rule = []string{"$old=C:/data/dev/github/wintable/.cache/issue12/dist/mit-release-acceptance"}
+				}
+				requestRule := rule
+				if strings.HasPrefix(commands[0], "$old=") {
+					requestRule = nil // The default rule is the parsed assignment argv.
+				}
+				if _, err := service.Decide(context.Background(), "session-1", pending.ID, protocol.ApprovalDecisionRequest{Decision: scope, RuleArgv: requestRule}); err != nil {
 					t.Fatal(err)
 				}
 				if err := <-done; err != nil {

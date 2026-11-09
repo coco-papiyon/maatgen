@@ -24,6 +24,34 @@ async function mountSettings(api = new MockAgentApi()) {
 }
 
 describe('GitHubSettingsView', () => {
+  it('sorts the rule table by repository then name and shows all current conditions and models', async () => {
+    const api = new MockAgentApi();
+    for (const rule of await api.listGitHubTriggerRules()) await api.deleteGitHubTriggerRule(rule.id);
+    const other = 'C:/demo/another-repository';
+    await api.createGitHubMonitor({ workspace: other, pollIntervalSeconds: 300 });
+    const source = {
+      enabled: true, eventKinds: ['pull_request'] as const, filters: {}, promptTemplate: 'Review',
+      includeBody: false, provider: 'codex' as const, autoApprove: false, concurrencyPolicy: 'skip' as const, priority: '3' as const,
+    };
+    for (const [workspace, name] of [[DEMO_WORKSPACE, 'Z rule'], [other, 'B rule'], [DEMO_WORKSPACE, 'A rule']]) {
+      await api.createGitHubTriggerRule({ ...source, eventKinds: ['pull_request'], workspace: workspace!, name: name!,
+        ...(name === 'A rule' ? { model: 'custom-model', filters: { labels: ['bug', 'ready'], conflicting: false, draft: false,
+          authors: ['alice'], project: { projectTitle: 'Roadmap', fieldName: 'Status', value: 'Ready' } } } : {}),
+      });
+    }
+    const { wrapper } = await mountSettings(api);
+    const rows = wrapper.findAll('.github-rule-list tbody tr');
+    const repositories = rows.map((row) => row.findAll('td')[0]!.text());
+    expect(repositories).toEqual([...repositories].sort((a, b) => a.localeCompare(b, 'ja')));
+    const currentRows = rows.filter((row) => ['A rule', 'Z rule'].includes(row.findAll('td')[1]!.text()));
+    expect(currentRows.map((row) => row.findAll('td')[1]!.text())).toEqual(['A rule', 'Z rule']);
+    expect(currentRows[0]!.get('.github-rule-conditions').text()).toBe('labels=bug, labels=ready, conflicting=false, draft=false, authors=alice, project.projectTitle=Roadmap, project.fieldName=Status, project.value=Ready');
+    expect(currentRows[0]!.text()).toContain('custom-model');
+    expect(currentRows[1]!.get('.github-rule-conditions').text()).toBe('なし');
+    expect(currentRows[1]!.text()).toContain('デフォルト');
+    expect(wrapper.findAll('.github-rule-list th').map((cell) => cell.text())).toContain('条件');
+  });
+
   it('copies all rule settings into an editable new rule without changing the source, and supports cancellation', async () => {
     const api = new MockAgentApi();
     for (const rule of await api.listGitHubTriggerRules()) await api.deleteGitHubTriggerRule(rule.id);
@@ -106,7 +134,7 @@ describe('GitHubSettingsView', () => {
 
     const monitors = await api.listGitHubMonitors();
     expect(monitors.some((monitor) => monitor.repository === 'C:/demo/another-repository')).toBe(true);
-    expect(wrapper.findAll('.github-table tbody tr')).toHaveLength(2);
+    expect(wrapper.findAll('.github-table:not(.github-rule-list) tbody tr')).toHaveLength(2);
   });
 
   it('applies the common poll interval and coalesce limit to every registered repository', async () => {
@@ -171,7 +199,7 @@ describe('GitHubSettingsView', () => {
     });
     const { wrapper } = await mountSettings(api);
 
-    await wrapper.get('.github-rule-list li button').trigger('click');
+    await wrapper.findAll('.github-rule-list tbody tr').find((row) => row.text().includes('移動可能なルール'))!.get('button').trigger('click');
     const repositorySelect = wrapper.get('.github-rule-form label select');
     expect((repositorySelect.element as HTMLSelectElement).value).toBe(DEMO_WORKSPACE);
     await repositorySelect.setValue('C:/demo/another-repository');
@@ -179,7 +207,7 @@ describe('GitHubSettingsView', () => {
     await flushPromises();
 
     const rules = await api.listGitHubTriggerRules();
-    expect(rules[0]?.repository).toBe('C:/demo/another-repository');
+    expect(rules.find((rule) => rule.name === '移動可能なルール')?.repository).toBe('C:/demo/another-repository');
   });
 
   it("lets the user set a rule's priority", async () => {
@@ -235,7 +263,7 @@ describe('GitHubSettingsView', () => {
     const rule = (await api.listGitHubTriggerRules()).find((candidate) => candidate.name === 'コンフリクトルール');
     expect(rule?.filters.conflicting).toBe(true);
 
-    await wrapper.get('.github-rule-list li:last-child button').trigger('click');
+    await wrapper.get('.github-rule-list tbody tr:last-child button').trigger('click');
     expect((wrapper.get('select[aria-label="コンフリクト"]').element as HTMLSelectElement).value).toBe('true');
   });
 
@@ -270,7 +298,7 @@ describe('GitHubSettingsView', () => {
     expect(created?.provider).toBe('codex');
     expect(created?.model).toBe('gpt-5.6-sol');
 
-    await wrapper.get('.github-rule-list li:last-child button').trigger('click');
+    await wrapper.get('.github-rule-list tbody tr:last-child button').trigger('click');
     expect((wrapper.get('select[aria-label="model"]').element as HTMLSelectElement).value).toBe('gpt-5.6-sol');
 
     await wrapper.get('select[aria-label="Provider"]').setValue('claude');
@@ -296,7 +324,7 @@ describe('GitHubSettingsView', () => {
     });
     const { wrapper } = await mountSettings(api);
 
-    await wrapper.get('.github-rule-list li:last-child button').trigger('click');
+    await wrapper.get('.github-rule-list tbody tr:last-child button').trigger('click');
 
     const modelSelect = wrapper.get('select[aria-label="model"]');
     expect((modelSelect.element as HTMLSelectElement).value).toBe('gpt-4-legacy');
